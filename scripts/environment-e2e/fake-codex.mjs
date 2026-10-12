@@ -103,12 +103,10 @@ async function runTurn(turn, text) {
   notify('turn/started', { threadId: turn.thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
   let reply = `fixture:${fixture.instanceId}:assistant reply`;
   try {
-    // A real provider takes seconds per turn. This marker makes every turn, including the hidden
-    // onboarding turn, take as long as it says, so work that overlaps a running turn can be tested.
+    // A real provider takes seconds per turn. This marker makes every turn take as long as it says,
+    // so work that overlaps a running turn can be tested.
     const delay = join(checkout, '.fixture-turn-delay-ms');
     if (existsSync(delay)) await pause(Number(readFileSync(delay, 'utf8')) || 0);
-    if (turn.done) return;
-    if (text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-slow'))) await pause(1500);
     if (turn.done) return;
     if (text.includes('[fixture:hold]')) { turn.holding = true; return; }
     if (text.includes('[fixture:crash]')) { process.exit(1); }
@@ -199,9 +197,7 @@ async function runTurn(turn, text) {
       }
       return;
     }
-    // A real onboarding turn reads the repository before it says anything.
-    const onboardingWork = text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-activity'));
-    if (text.includes('[fixture:activity') || onboardingWork) await activity(turn, text.includes('[fixture:activity-hold]'));
+    if (text.includes('[fixture:activity')) await activity(turn, text.includes('[fixture:activity-hold]'));
     if (text.includes('[fixture:list]')) {
       // Recorded from Codex 0.162.1 over HTTP: a steer abandons the reply being streamed, which never
       // completes, and the same turn answers the steered message in a new item.

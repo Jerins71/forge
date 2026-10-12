@@ -103,7 +103,7 @@ interface ConversationProjectorDependencies {
   perf?: SidebarPerfRecorder;
   onEntryPersisted?: (agentId: string) => void;
   getPinnedMessageIds?: (agentId: string) => ReadonlySet<string> | undefined;
-  /** True while the agent runs a turn the user is not shown, such as project onboarding. */
+  /** True while the agent runs a turn the user is not shown, such as an internal bootstrap delivery. */
   isHiddenTurn?: (agentId: string) => boolean;
   /** Whether this run is still waiting for its own turn (queued, or a steer held back as a follow-up). */
   isRunQueued?: (agentId: string, runId: string) => boolean;

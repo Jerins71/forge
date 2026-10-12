@@ -65,7 +65,7 @@ async function startServer(): Promise<{
   const port = await getAvailablePort();
   const config = await makeTempConfig(port);
   const manager = new TestSwarmManager(config);
-  await bootWithDefaultManager(manager, config, { clearBootstrapSendCalls: false });
+  await bootWithDefaultManager(manager, config);
 
   const { environment, unreadTracker, paired } = await createTestEnvironment(manager);
   const pairedFetch: typeof fetch = (input, init) => fetch(input, { ...init, headers: { ...paired.headers, ...init?.headers } });

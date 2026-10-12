@@ -152,6 +152,29 @@ it('sends Claude "Switch account" through the same binding replacement, never a 
   } finally { await f.close(); }
 });
 
+it('recycles an idle session that has never run a turn, so its first turn starts on the changed credentials', async () => {
+  // A new project's runtime is created, with the credentials of that moment, before any binding exists.
+  const f = await fixture(codex, new CodexProviderAdapter({} as never).capabilities());
+  try {
+    const recycled: string[] = [];
+    const runtime = { getStatus: () => 'idle', getPendingCount: () => 0, recycle: async () => { recycled.push('recycle'); }, shutdownForReplacement: async () => { recycled.push('shutdown'); } };
+    const detached: string[] = [];
+    const lifecycle = new SwarmAgentLifecycleService({
+      descriptors: new Map([['source', { ...f.descriptor, status: 'idle' } as AgentDescriptor]]), runtimes: new Map([['source', runtime]]),
+      runtimeRecoveryState: { hasPendingManagerRuntimeRecycle: () => false, getPendingManagerRuntimeRecycleReason: () => undefined, setPendingManagerRuntimeRecycle: () => { recycled.push('deferred'); }, clearPendingManagerRuntimeRecycle: () => {} },
+      getRuntimeToken: () => 1, detachRuntime: (agentId: string) => { detached.push(agentId); }, refreshSessionMetaStats: async () => {}, emitStatus: () => {}, logDebug: () => {}, upsertDescriptor: () => {},
+    } as unknown as ConstructorParameters<typeof SwarmAgentLifecycleService>[0]);
+    lifecycle.installCoreProviderRefresh(agentId => f.port.refreshContext(agentId));
+    expect(f.thread().bindingId).toBeUndefined();
+    await lifecycle.notifyNativeAuthChanged('codex-native');
+    await f.settle();
+    // The runtime holding the old credentials is replaced; the core has no binding to close.
+    expect(recycled).toEqual(['recycle']);
+    expect(detached).toEqual(['source']);
+    expect(f.closed).toEqual([]);
+  } finally { await f.close(); }
+});
+
 it('refreshes a worker thread, and reports once then drops a refresh that cannot succeed', async () => {
   const f = await fixture(codex, new CodexProviderAdapter({} as never).capabilities(), 'worker');
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

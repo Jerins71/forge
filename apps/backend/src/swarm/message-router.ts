@@ -3,7 +3,6 @@ import type { MessageSourceContext } from "./types.js";
 export type MessageRouteOrigin = "user" | "internal" | "scheduled" | "worker_result";
 
 export type MessageRouteInternalDeliveryKind =
-  | "bootstrap"
   | "agent_creator_bootstrap"
   | "codex_plugin_bootstrap"
   | "worker_health";
@@ -31,7 +30,6 @@ export type MessageRouteReasonCode =
   | "deny:project_agent_exchange"
   | "deny:project_agent_worker_result"
   | "deny:system_profile"
-  | "deny:bootstrap"
   | "deny:agent_creator_bootstrap"
   | "deny:codex_operational_guidance"
   | "deny:internal_only";
@@ -83,10 +81,6 @@ export class MessageRouter {
 
     if (input.targetProfileSystem) {
       return drop(targetKind, "deny:system_profile");
-    }
-
-    if (input.internalDeliveryKind === "bootstrap") {
-      return drop(targetKind, "deny:bootstrap");
     }
 
     if (input.internalDeliveryKind === "agent_creator_bootstrap") {

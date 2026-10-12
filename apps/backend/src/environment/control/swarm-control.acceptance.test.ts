@@ -52,7 +52,6 @@ async function fixture(auth = true) {
   const { environment, core, paired } = await createFixtureEnvironment(manager);
   if (!manager.getAgent("manager")) await manager.createManager("manager", { name: "Manager", cwd: config.defaultCwd });
   await core.effectWorker.drain();
-  const bootstrap = manager.runtimeByAgentId.get("manager"); if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0; }
   const database = environment.database; const eventSink = core.eventSink;
   const workspace = createWorkspaceService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
   const artifacts = createArtifactService({ database, dataDir: config.paths.dataDir, swarmManager: manager });
@@ -595,47 +594,27 @@ describe("Phase 2 project/policy commands", () => {
   });
 });
 
-it("preserves project onboarding under admission and never bootstraps a duplicate creation", async () => {
+it("starts a created project idle, with the user's first message as its first turn, and never duplicates creation", async () => {
   const f = await fixture(true); const { core } = await makeCore(f);
   cleanup.unshift(() => core.close());
   const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
   const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write"] as const) };
-  const input = { commandId: randomUUID(), title: "Onboarding", cwd: f.config.defaultCwd, model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } };
-  const original = f.manager.sendMessage.bind(f.manager);
-  const send = vi.spyOn(f.manager, "sendMessage").mockImplementation(async (...args) => {
-    if (args[4]?.internalDeliveryKind === "bootstrap") {
-      expect(core.database.prepare("SELECT state FROM effects WHERE command_id=? AND session_id=?").get(input.commandId, "project:project-" + input.commandId)).toEqual({ state: "claimed" });
-      expect((await core.controlService.getReceipt(principal, input.commandId)).state).toBe("running");
-    }
-    return original(...args);
-  });
+  const input = { commandId: randomUUID(), title: "Idle", cwd: f.config.defaultCwd, model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } };
+  const send = vi.spyOn(f.manager, "sendMessage");
   const receipt = await core.controlService.execute(principal, "project.create", input);
   expect(receipt.state).toBe("succeeded");
-  expect(send).toHaveBeenCalledTimes(1);
-  expect(send.mock.calls[0]?.[4]).toMatchObject({ origin: "internal", internalDeliveryKind: "bootstrap" });
-  await core.effectWorker.drain();
-  expect(f.manager.runtimeByAgentId.get(receipt.result!.sessionId!)!.sendCalls).toHaveLength(1);
-  expect(await core.controlService.execute(principal, "project.create", input)).toEqual(receipt);
-  expect(send).toHaveBeenCalledTimes(1);
-});
-
-it("drops the onboarding greeting when the user's message is already queued behind it", async () => {
-  const f = await fixture(true); const { core } = await makeCore(f);
-  cleanup.unshift(() => core.close());
-  const mirror = makeMirror(f); mirror.attach(); await mirror.reconcileBeforeReady(); cleanup.unshift(async () => mirror.dispose());
-  // The new session's onboarding turn stays running, as a real provider's would while it orients.
-  const created = f.manager.onCreateRuntime;
-  f.manager.onCreateRuntime = async input => { await created?.(input); (input.runtime as unknown as { busy: boolean }).busy = true; };
-  const principal = { deviceSessionId: "policy-device", scopes: new Set(["workspace:write"] as const) };
-  const receipt = await core.controlService.execute(principal, "project.create", { commandId: randomUUID(), title: "Greeting", cwd: f.config.defaultCwd, model: { provider: "openai-codex", modelId: "gpt-5.5", thinkingLevel: "high" } });
   await core.effectWorker.drain();
   const sessionId = receipt.result!.sessionId!;
-  // The onboarding turn is still running; alone, its greeting is the user's welcome.
-  expect(loadState(core.database).threads[sessionId]?.activeRunId).toBeDefined();
-  expect(await f.manager.publishToUser(sessionId, "Hi - what would you like to build?", "speak_to_user")).toMatchObject({ published: true });
+  // No hidden turn: nothing is delivered to the new session and its thread has no run.
+  expect(send).not.toHaveBeenCalled();
+  expect(f.manager.runtimeByAgentId.get(sessionId)!.sendCalls).toHaveLength(0);
+  expect(loadState(core.database).threads[sessionId]?.activeRunId).toBeUndefined();
+  expect(await core.controlService.execute(principal, "project.create", input)).toEqual(receipt);
+  expect(f.manager.runtimeByAgentId.get(sessionId)!.sendCalls).toHaveLength(0);
+  // The user's first message starts the session's first turn at once.
   await core.controlService.execute(f.paired.principal, "session.send", { commandId: randomUUID(), sessionId, message: { text: "What is the package name?", artifactIds: [] } });
   await core.effectWorker.drain();
-  expect(await f.manager.publishToUser(sessionId, "Hi - what would you like to build?", "speak_to_user")).toMatchObject({ published: false, reason: "superseded_by_user_input" });
+  expect(f.manager.runtimeByAgentId.get(sessionId)!.sendCalls).toHaveLength(1);
 });
 
 it("marks lost policy claims interrupted on restart and never repeats the callback", async () => {

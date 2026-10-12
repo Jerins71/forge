@@ -77,7 +77,6 @@ export interface ObservabilityToolDefinition {
 export type ObservabilityRootSource =
   | "user_input"
   | "project_agent"
-  | "bootstrap"
   | "agent_creator_bootstrap"
   | "codex_plugin_bootstrap"
   | "internal_self_send"

@@ -315,7 +315,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
         return { configured: true };
       }
       // A synthetic user working epoch exercises persisted attention without a
-      // provider turn; it must not inherit a hidden onboarding turn's origin.
+      // provider turn.
       if (input.operation === 'attention' || input.operation === 'attention-state') {
         if (input.operation === 'attention') {
           const attention = (manager as unknown as { sessionAttention: { coordinator: SessionAttentionCoordinator } }).sessionAttention.coordinator;

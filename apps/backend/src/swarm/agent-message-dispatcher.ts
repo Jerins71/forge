@@ -54,7 +54,6 @@ const WORKER_FOLLOWUP_REMINDER =
 export type AgentMessageOrigin = "user" | "internal";
 export type AgentMessageInternalDeliveryKind =
   | "codex_plugin_bootstrap"
-  | "bootstrap"
   | "agent_creator_bootstrap";
 
 export interface AgentMessageSendOptions {
@@ -820,7 +819,6 @@ function classifyObservabilityRootSource(input: {
 }): ObservabilityRootSource {
   if (input.origin === "user") return "user_input";
   if (input.internalDeliveryKind === "codex_plugin_bootstrap") return "codex_plugin_bootstrap";
-  if (input.internalDeliveryKind === "bootstrap") return "bootstrap";
   if (input.internalDeliveryKind === "agent_creator_bootstrap") return "agent_creator_bootstrap";
   return input.fromAgentId === input.targetAgentId
     ? "internal_self_send"

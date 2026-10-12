@@ -100,7 +100,7 @@ export interface RuntimeCompositionMessaging {
     delivery?: RequestedDeliveryMode,
     options?: {
       origin?: "user" | "internal";
-      internalDeliveryKind?: "bootstrap" | "codex_plugin_bootstrap";
+      internalDeliveryKind?: "codex_plugin_bootstrap";
       attachments?: ConversationAttachment[];
       planStep?: string;
       planAssignmentSource?: "spawn_agent" | "send_message_to_agent";
@@ -120,7 +120,6 @@ export interface RuntimeCompositionMessaging {
     descriptor: AgentDescriptor,
     options: { abort: boolean; emitStatus: boolean },
   ): Promise<void>;
-  sendManagerBootstrapMessage(managerId: string): Promise<void>;
 }
 export interface RuntimeCompositionRuntimeResources {
   getPiModelsJsonPath(): string;
@@ -578,7 +577,6 @@ export class SwarmManagerRuntimeComposition {
         overrides.terminateExternalThreadSidecarTurn ??
         ((agentId) => services.codexDirect.cleanupTurnStateForTermination(agentId)),
       sendMessage: messaging.sendMessage,
-      sendManagerBootstrapMessage: messaging.sendManagerBootstrapMessage,
       materializeSortOrder: sessions.materializeSortOrder,
       getSessionsForProfile: (profileId) =>
         services.directory.getSessionsForProfile(profileId) as Array<

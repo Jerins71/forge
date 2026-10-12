@@ -270,7 +270,6 @@ export interface SwarmAgentLifecycleServiceOptions {
       requiresSecureRuntime?: boolean;
     }
   ) => Promise<SendMessageReceipt>;
-  sendManagerBootstrapMessage: (managerId: string) => Promise<void>;
   materializeSortOrder: () => void;
   getSessionsForProfile: (profileId: string) => Array<AgentDescriptor & { role: "manager"; profileId: string }>;
   getWorkersForManager: (managerId: string) => AgentDescriptor[];
@@ -295,8 +294,8 @@ export class SwarmAgentLifecycleService {
   private core: CoreAgentMessagePort | undefined;
 
   installCoreAgentMessages(core: CoreAgentMessagePort): void { this.core = core; }
-  private refreshProviderContext?: (agentId: string) => Promise<void>;
-  installCoreProviderRefresh(refresh: (agentId: string) => Promise<void>): void { this.refreshProviderContext = refresh; }
+  private refreshProviderContext?: (agentId: string) => Promise<boolean>;
+  installCoreProviderRefresh(refresh: (agentId: string) => Promise<boolean>): void { this.refreshProviderContext = refresh; }
 
   constructor(private readonly options: SwarmAgentLifecycleServiceOptions) {}
 
@@ -1273,8 +1272,6 @@ export class SwarmAgentLifecycleService {
       cwd: descriptor.cwd
     });
 
-    await this.options.sendManagerBootstrapMessage(managerId);
-
     return cloneDescriptor(descriptor);
   }
 
@@ -1897,14 +1894,6 @@ export class SwarmAgentLifecycleService {
       return "none";
     }
 
-    if (reason === "auth_source_change") {
-      // The core owns provider bindings: it replaces this one at the thread's next idle boundary
-      // and resumes the same conversation. Recycling the runtime here would strand that binding.
-      if (!this.refreshProviderContext) return "none";
-      await this.refreshProviderContext(agentId);
-      return "deferred";
-    }
-
     if (reason === "idle_transition" && !this.options.runtimeRecoveryState.hasPendingManagerRuntimeRecycle(agentId)) {
       return "none";
     }
@@ -1913,6 +1902,18 @@ export class SwarmAgentLifecycleService {
       reason === "idle_transition"
         ? this.options.runtimeRecoveryState.getPendingManagerRuntimeRecycleReason(agentId) ?? reason
         : reason;
+
+    if (effectiveReason === "auth_source_change") {
+      // The core owns provider bindings: it replaces a live one at the thread's next idle boundary
+      // and resumes the same conversation. Recycling the runtime then would strand that binding.
+      if (!this.refreshProviderContext) return "none";
+      if (await this.refreshProviderContext(agentId)) {
+        this.clearPendingManagerRuntimeRecycle(agentId);
+        return "deferred";
+      }
+      // No binding yet, as for a new project before its first turn: the runtime still holds the
+      // credentials it was created with, so it is replaced like any other idle runtime.
+    }
 
     const runtime = this.options.runtimes.get(agentId);
     if (!runtime) {

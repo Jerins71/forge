@@ -56,7 +56,7 @@ manifest environment's `installationStateDir`, never the host registry.
 fails explicitly until A/M wire the port. `mintGrant` already uses authenticated
 WS-ticket issuance and V2 `access.grant.create`; it does not put grants in manifest,
 logs or artifacts. Projects are seeded through authenticated, receipt-backed `project.create`.
-Their onboarding uses the fixture provider; duplicate seeds reuse the shell identity.
+They use the fixture provider; duplicate seeds reuse the shell identity.
 A/B use the same repository identity; UI fixture C gets a distinct synthetic origin.
 
 `openUiFleet(path, {integration})` supplies `bootstrap`, `seed`, and `platformScript`.
