@@ -168,3 +168,33 @@ describe("CursorSdkAgentRuntime", () => {
     expect(runtime.getCustomEntries("failing_custom_entry")).toEqual([]);
   });
 });
+
+// Failure modes written before the fix: a run started or settled on a session already in error makes the
+// runtime's own status refuse the report. The dispatch is detached, so the refusal must keep the current
+// status rather than reject into it and surface as a second runtime error.
+describe("Cursor runtime status reports that cannot apply", () => {
+  async function setupFailedSession() {
+    const rootDir = await mkdtemp(join(tmpdir(), "forge-cursor-sdk-runtime-"));
+    return setupRuntime({ rootDir, descriptor: createDescriptor(rootDir, { status: "error" }) });
+  }
+
+  it("keeps error when a run starts and settles", async () => {
+    const { runtime, callbacks, send } = await setupFailedSession();
+
+    await runtime.sendMessage("hello");
+    await waitFor(() => expect(callbacks.onAgentEnd).toHaveBeenCalled());
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(runtime.getStatus()).toBe("error");
+    expect(callbacks.onRuntimeError).not.toHaveBeenCalled();
+    expect(callbacks.onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps error when the run is stopped", async () => {
+    const { runtime, callbacks } = await setupFailedSession();
+
+    await expect(runtime.stopInFlight()).resolves.toBeUndefined();
+    expect(runtime.getStatus()).toBe("error");
+    expect(callbacks.onStatusChange).not.toHaveBeenCalled();
+  });
+});

@@ -82,13 +82,13 @@ class FakeSession {
   }
 }
 
-function makeDescriptor(): AgentDescriptor {
+function makeDescriptor(status: AgentDescriptor["status"] = "idle"): AgentDescriptor {
   return {
     agentId: "manager",
     displayName: "Manager",
     role: "manager",
     managerId: "manager",
-    status: "idle",
+    status,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     cwd: "/tmp/project",
@@ -97,7 +97,7 @@ function makeDescriptor(): AgentDescriptor {
   };
 }
 
-function makeRuntime() {
+function makeRuntime(status?: AgentDescriptor["status"]) {
   const session = new FakeSession();
   const onAgentEnd = vi.fn(async () => undefined);
   const onSessionEvent = vi.fn(async () => undefined);
@@ -107,7 +107,7 @@ function makeRuntime() {
   const release = vi.fn(async () => undefined);
 
   const runtime = new AgentRuntime({
-    descriptor: makeDescriptor(),
+    descriptor: makeDescriptor(status),
     session: session as never,
     callbacks: {
       onStatusChange,
@@ -220,5 +220,45 @@ describe("Pi agent_settled lifecycle adapter (WP-5)", () => {
     expect(session.extensionRunner.emit).toHaveBeenCalledTimes(1);
     expect(release).toHaveBeenCalledTimes(1);
     expect(session.disposeCalls).toBe(2);
+  });
+});
+
+// Failure modes written before the fix: the runtime's own status can refuse a report when a provider
+// event arrives after terminate, or when the runtime was built over a session already in error. Nothing
+// awaits these events, so the refusal must keep the current status instead of rejecting mid-handler.
+describe("Pi runtime status reports that cannot apply", () => {
+  const internals = (runtime: AgentRuntime) => runtime as any;
+
+  it("keeps terminated when a turn starts after terminate", async () => {
+    const { runtime, onStatusChange } = makeRuntime();
+    await runtime.terminate();
+    onStatusChange.mockClear();
+
+    await expect(internals(runtime).handleEvent({ type: "agent_start" })).resolves.toBeUndefined();
+    expect(runtime.getStatus()).toBe("terminated");
+    expect(onStatusChange).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a suppressed turn settles", (r: any) => { r.suppressSessionEventsUntilIdle = { active: true, expiresAt: Date.now() + 60_000 }; return r.handleEvent({ type: "agent_settled" }); }],
+    ["suppression expires on a late event", (r: any) => { r.suppressSessionEventsUntilIdle = { active: true, expiresAt: 0 }; return r.handleEvent({ type: "message_update" }); }],
+    ["an ignored turn starts", (r: any) => { r.ignoreNextAgentStart = true; return r.handleEvent({ type: "agent_start" }); }],
+    ["a turn starts", (r: any) => r.handleEvent({ type: "agent_start" })],
+    ["the run is stopped", (r: any) => r.stopInFlight({ abort: false })],
+  ] as const)("keeps error when %s", async (_path, report) => {
+    const { runtime, onStatusChange } = makeRuntime("error");
+
+    await expect(report(internals(runtime))).resolves.toBeUndefined();
+    expect(runtime.getStatus()).toBe("error");
+    // Stopping re-publishes the pending count under the current status; no other status may be reported.
+    expect(onStatusChange.mock.calls.map((call) => (call as unknown[])[1]).filter((reported) => reported !== "error")).toEqual([]);
+  });
+
+  it("still ends the turn when a prompt dispatch fails on a session in error", async () => {
+    const { runtime, onAgentEnd } = makeRuntime("error");
+
+    await expect(internals(runtime).handlePromptDispatchError(new Error("provider process exited"), { text: "hi" }, { attempt: 99, maxAttempts: 1 })).resolves.toBe("failed");
+    expect(runtime.getStatus()).toBe("error");
+    expect(onAgentEnd).toHaveBeenCalledTimes(1);
   });
 });
