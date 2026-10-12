@@ -229,7 +229,9 @@ test('9.2.4 real manager choice, lost answer ack, conflict and native worker res
     expect((await settled(spawn.commandId)).delivery).toBe('dispatched');
     await until(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'worker.upsert'), Boolean);
     await until(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'item.upsert' && event.item.kind === 'worker_result'), Boolean, 25000);
-    await rpc.call('session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: '[fixture:spawn-choice]', artifactIds: [] } });
+    // The worker result above starts a manager turn that may still be running. A steer into it would be
+    // absorbed by that turn, so the spawn is queued to run as its own turn.
+    await rpc.call('session.send', { commandId: randomUUID(), sessionId: launchedSessionId, message: { text: '[fixture:spawn-choice]', artifactIds: [] }, delivery: 'followUp' });
     const workerChoice = await until<any>(() => rpc.frames.map(frame => frame.item?.event).find(event => event?.type === 'choice.upsert' && event.choice.status === 'pending' && event.choice.agentId !== launchedSessionId)?.choice, Boolean);
     const answeredWorker = await rpc.call('session.choose', { commandId: randomUUID(), sessionId: launchedSessionId, choiceId: workerChoice.choiceId, answers: workerChoice.questions.map((question: any) => ({ questionId: question.id, selectedOptionIds: [question.options[0].id] })) });
     expect((await settled(answeredWorker.commandId)).state).toBe('succeeded');
