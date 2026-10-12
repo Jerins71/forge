@@ -28,6 +28,8 @@ export interface Run {
   input: RpcInput<"session.send">["message"];
   source?: import("../../../swarm/types.js").MessageSourceContext;
   delivery: "queue" | "steer";
+  /** The turn's replies never reach the transcript, as for onboarding. */
+  outputHidden?: boolean;
   sequence: number;
   state: "queued" | "running" | "terminal" | "recovery";
   activeAttemptId: string;
@@ -78,7 +80,7 @@ export type CoreCommand = Envelope & (
   | { type: "thread.create"; threadId: string; role: Thread["role"]; projectId: string; managerId?: string; model?: Thread["model"] }
   | { type: "thread.stop"; threadId: string; writerPending?: boolean; retain?: boolean; terminateChildren?: boolean }
   | { type: "thread.resume"; threadId: string }
-  | { type: "run.submit"; threadId: string; runId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; source?: Run["source"]; delivery: Run["delivery"] }
+  | { type: "run.submit"; threadId: string; runId: string; inputId: string; attemptId: string; bindingId: string; input: Run["input"]; source?: Run["source"]; delivery: Run["delivery"]; outputHidden?: boolean }
   | { type:"run.cancel"; threadId:string; runId:string }
   | { type: "input.recorded"; threadId: string; inputId: string; entryId: string }
   | { type: "binding.acquired"; threadId: string; binding: ProviderBinding }
