@@ -350,7 +350,5 @@ async function bootWithDefaultManager(manager: TestSwarmManager, config: Paramet
   }
   environment.start()
   await vi.waitFor(() => expect(Object.values(loadState(environment.database).runs).every(run => run.state === 'terminal')).toBe(true))
-  const bootstrap = manager.runtimeByAgentId.get(config.managerId ?? 'manager')
-  if (bootstrap) { bootstrap.sendCalls = []; bootstrap.nextDeliveryId = 0 }
   return environment
 }

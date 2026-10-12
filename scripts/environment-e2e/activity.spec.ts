@@ -247,8 +247,8 @@ test('provider retries and the final failure show as one status row, live and af
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
   // Create the project and seed its .forge resources as the create dialog does (seeding no longer restarts
-  // anything), then change the repository's trust. That restarts the manager runtime while the provider is
-  // still inside the hidden onboarding turn, on an endpoint that ignores interrupts (as a real router did).
+  // anything), start the user's first turn, then change the repository's trust. That restarts the manager
+  // runtime while the provider is still inside that turn, on an endpoint that ignores interrupts (as a real router did).
   const environment = manifest.environments[2]!
   const session = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
   const turnDelay = join(environment.checkout, '.fixture-turn-delay-ms')
@@ -267,11 +267,14 @@ test('a session restarted by a trust change mid-turn settles to idle and accepts
     const project = await rpc.call('project.create', { commandId: randomUUID(), title: 'Seeded mid-turn', cwd: environment.checkout,
       model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false }, randomUUID(), 60_000)
     const sessionId = project.result.sessionId as string
+    // A new project starts idle: no turn runs until the user sends one.
+    expect(await status(sessionId)).toBe('idle')
+    await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: 'First message', artifactIds: [] } })
     await expect.poll(() => status(sessionId), { timeout: 15_000 }).toBe('running')
     const seeded = await fetch(`${environment.baseUrl}/api/settings/project-resources/seed`, { method: 'POST',
       headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: project.result.projectId, sessionAgentId: sessionId }) })
     expect(seeded.status).toBe(200)
-    // Creation alone leaves the session working.
+    // Seeding alone leaves the turn working.
     expect(await status(sessionId)).toBe('running')
     const blocked = await fetch(`${environment.baseUrl}/api/settings/project-resources/trust`, { method: 'PUT',
       headers: { Authorization: `Bearer ${session.bearer}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ profileId: project.result.projectId, sessionAgentId: sessionId, action: 'block' }) })
@@ -285,11 +288,11 @@ test('a session restarted by a trust change mid-turn settles to idle and accepts
     expect((await transcriptText()).join('\n')).not.toContain('Session stopped.')
     await rm(ignoreInterrupt, { force: true })
     const commandId = randomUUID()
-    await rpc.call('session.send', { commandId, sessionId, message: { text: 'First message', artifactIds: [] } })
+    await rpc.call('session.send', { commandId, sessionId, message: { text: 'Message after the restart', artifactIds: [] } })
     const receipt = await until<any>(() => rpc.call('command.get', { commandId }), value => !['accepted', 'running'].includes(value.state), 30_000)
     expect(receipt.state, JSON.stringify(receipt.error)).toBe('succeeded')
     await expect.poll(() => status(sessionId), { timeout: 30_000 }).toBe('idle')
-    assertions.seededMidTurn = { firstMessage: receipt.state, finalStatus: await status(sessionId) }
+    assertions.seededMidTurn = { messageAfterRestart: receipt.state, finalStatus: await status(sessionId) }
   } finally { rpc.close(); await rm(turnDelay, { force: true }); await rm(ignoreInterrupt, { force: true }) }
 })
 

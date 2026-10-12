@@ -442,7 +442,7 @@ test('a change made while a launch settles is refused retryably in plain words, 
   } finally { rpc.close() }
 })
 
-test('a turn the user did not send raises no attention; a turn they sent still does', async () => {
+test('a new project runs no turn and raises no attention; a turn the user sent still does', async () => {
   const { a } = fleet
   const session = await bootstrap(a)
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-unviewed-'))
@@ -458,9 +458,9 @@ test('a turn the user did not send raises no attention; a turn they sent still d
     try { return (database.prepare("SELECT json_extract(state_json,'$.state') AS state FROM orchestration_runs WHERE thread_id=?").all(sessionId) as { state: string }[]).map(row => row.state) } finally { database.close() }
   }
   const attention = async () => (await shellSession(a, sessionId))?.attentionOccurrence ?? null
-  // The hidden onboarding turn runs to completion on the provider.
-  await expect.poll(runs, { timeout: 30_000 }).toEqual(['terminal'])
-  await expect.poll(async () => (await shellSession(a, sessionId))?.status, { timeout: 15_000 }).toBe('idle')
+  // A new project starts idle: no hidden turn runs on the provider before the user sends one.
+  expect(await runs()).toEqual([])
+  expect((await shellSession(a, sessionId))?.status).toBe('idle')
   // Attention is raised once the session is quiet; give it the time a real one takes, then require none.
   await new Promise(resolve => setTimeout(resolve, 3_000))
   expect(await attention()).toBeNull()
@@ -469,46 +469,14 @@ test('a turn the user did not send raises no attention; a turn they sent still d
   const sendId = randomUUID()
   await fixtureRpcOnce(a.baseUrl, session, 'session.send', { commandId: sendId, sessionId, message: { text: 'A turn the user sent', artifactIds: [] } })
   await expect.poll(async () => (await attention())?.reason ?? null, { timeout: 30_000 }).toBe('work_settled')
-  assertions.internalTurnAttention = { sessionId, afterOnboarding: null, afterUserTurn: (await attention())?.reason }
-})
-
-test('a decision asked by a turn the user did not send still reaches Needs you, and its completion does not', async () => {
-  const { a } = fleet
-  const session = await bootstrap(a)
-  const directory = await mkdtemp(join(tmpdir(), 'forge-ux-decision-'))
-  await copyFile(join(fixture(a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
-  const commandId = randomUUID()
-  const projectId = `project-${commandId}`
-  // A project-level override of the onboarding prompt makes that hidden turn ask the user to choose.
-  const prompts = join(fixture(a).dataDir, 'profiles', projectId, 'prompts', 'operational')
-  await mkdir(prompts, { recursive: true })
-  await writeFile(join(prompts, 'bootstrap.md'), '[fixture:choice] Ask before starting.\n')
-  const created = await fixtureRpcOnce(a.baseUrl, session, 'project.create', { commandId, title: 'UX Decision', cwd: directory, model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false })
-  expect(created.state).toBe('succeeded')
-  const sessionId = created.result.sessionId as string
-  const attention = async () => (await shellSession(a, sessionId))?.attentionOccurrence?.reason ?? null
-  const rpc = await openFixtureRpc(a.baseUrl, session)
-  try {
-    await rpc.call('session.subscribe', { sessionId })
-    const pending = () => [...rpc.frames].reverse().flatMap(frame => frame.item?.kind === 'snapshot' ? frame.item.snapshot.choices : frame.item?.event?.type === 'choice.upsert' ? [frame.item.event.choice] : []).find((choice: { status: string }) => choice.status === 'pending')
-    const choice = await until<any>(pending, Boolean, 30_000)
-    await expect.poll(attention, { timeout: 15_000 }).toBe('decision_waiting')
-    const answer = await rpc.call('session.choose', { commandId: randomUUID(), sessionId, choiceId: choice.choiceId, answers: choice.questions.map((question: any) => ({ questionId: question.id, selectedOptionIds: [question.options[0].id] })) })
-    await until(() => fixtureRpcOnce(a.baseUrl, session, 'command.get', { commandId: answer.commandId }), receipt => !['accepted', 'running'].includes(receipt.state))
-    // Answered and finished: the decision is gone and nothing reports the internal work as finished.
-    await expect.poll(async () => (await shellSession(a, sessionId))?.status, { timeout: 30_000 }).toBe('idle')
-    await new Promise(resolve => setTimeout(resolve, 3_000))
-    expect(await attention()).toBeNull()
-    assertions.internalTurnDecision = { sessionId, whilePending: 'decision_waiting', afterAnswer: null }
-  } finally { rpc.close() }
+  expect(await runs()).toEqual(['terminal'])
+  assertions.newProjectAttention = { sessionId, runsBeforeSend: 0, afterCreate: null, afterUserTurn: (await attention())?.reason }
 })
 
 test('a new project opens clean: no settling error and nothing in Needs you', async ({ page }) => {
   // The scripted Codex peer only runs in a directory that carries its environment's marker.
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))
   await copyFile(join(fixture(fleet.a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
-  // The hidden onboarding turn inspects the repository: commands, reasoning and a file change.
-  await writeFile(join(directory, '.fixture-onboarding-activity'), '')
   await page.goto(fleet.uiUrl)
   await page.getByRole('complementary').getByTitle('Create project').filter({ visible: true }).first().click()
   const dialog = page.getByRole('dialog', { name: 'Create project' })
@@ -523,26 +491,31 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   await expect(page).toHaveURL(/agent=project-/, { timeout: 30_000 })
   const sessionId = new URL(page.url()).searchParams.get('agent')!
   await expect(composer(page)).toBeEnabled()
-  // The hidden onboarding turn finishes; the project in view is neither in error nor asking for attention.
-  await expect.poll(async () => (await shellSession(fleet.a, sessionId))?.status, { timeout: 30_000 }).toBe('idle')
+  // The project starts idle; it is neither in error nor asking for attention.
+  expect((await shellSession(fleet.a, sessionId))?.status).toBe('idle')
   await expect.poll(async () => { const summary = await shellSession(fleet.a, sessionId); return { unread: summary?.unread, attention: summary?.attentionOccurrence ?? null } }, { timeout: 15_000 }).toEqual({ unread: 0, attention: null })
   await expect(page.getByRole('alert')).toHaveCount(0)
-  // The work of a turn the user never sees is not listed in their transcript, live or after reload.
-  expect(await readFile(join(directory, 'fixture-provider-marker.txt'), 'utf8')).toContain('turns=')
+  // No hidden turn ran: the provider never started one and the transcript is empty, live and after reload.
+  await expect(readFile(join(directory, 'fixture-provider-marker.txt'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
   await expect(page.getByTestId('activity-row')).toHaveCount(0)
-  await expect(transcript(page)).not.toContainText(/Ran \d+ commands?/)
+  await expect(transcript(page)).not.toContainText('assistant reply')
   await page.reload()
   await expect(composer(page)).toBeEnabled()
   await expect(page.getByTestId('activity-row')).toHaveCount(0)
-  await expect(transcript(page)).not.toContainText(/Ran \d+ commands?/)
-  // Control: the same work in a turn the user sent is listed.
+  await expect(transcript(page)).not.toContainText('assistant reply')
+  // The first message is the session's first turn and is answered at once, live and after reload.
   await composer(page).fill('[fixture:activity] Show the work of a turn I sent')
   await page.keyboard.press('Enter')
   await expect(page.getByTestId('activity-row').filter({ hasText: 'ls -la' })).toBeVisible({ timeout: 30_000 })
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  expect(await readFile(join(directory, 'fixture-provider-marker.txt'), 'utf8')).toContain('turns=1')
+  await page.reload()
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await expect(transcript(page)).toContainText(/Ran \d+ commands?/)
   await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(page.locator(`[data-testid="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(0)
   await shot(page, 'new-project-clean')
-  assertions.newProject = { sessionId, alerts: 0, needsYou: 0, onboardingActivityRows: 0, userTurnActivityRows: true }
+  assertions.newProject = { sessionId, alerts: 0, needsYou: 0, providerTurnsBeforeSend: 0, firstReplyLiveAndReload: true, userTurnActivityRows: true }
 })
 
 test('a running turn is stopped from the composer button and with Escape', async ({ page }) => {

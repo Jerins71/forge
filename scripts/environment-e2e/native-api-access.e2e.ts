@@ -218,9 +218,6 @@ async function main() {
       const sessionId = project.result.sessionId as string;
       await rpc.call('session.subscribe', { sessionId });
       const send = async (text: string) => (await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text, artifactIds: [] } })).commandId as string;
-      // The project's hidden onboarding turn runs first; this check is about access, not about sending across it.
-      await until(() => requests(kind).some(entry => entry.finished), Boolean, 120_000);
-      await idle(sessionId);
       await succeeded(await send('First message, with an API key.'));
       await until(() => requests(kind).some(entry => entry.finished), Boolean, 120_000);
       await idle(sessionId);

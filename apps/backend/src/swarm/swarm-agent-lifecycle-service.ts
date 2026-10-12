@@ -270,7 +270,6 @@ export interface SwarmAgentLifecycleServiceOptions {
       requiresSecureRuntime?: boolean;
     }
   ) => Promise<SendMessageReceipt>;
-  sendManagerBootstrapMessage: (managerId: string) => Promise<void>;
   materializeSortOrder: () => void;
   getSessionsForProfile: (profileId: string) => Array<AgentDescriptor & { role: "manager"; profileId: string }>;
   getWorkersForManager: (managerId: string) => AgentDescriptor[];
@@ -1272,8 +1271,6 @@ export class SwarmAgentLifecycleService {
       managerId,
       cwd: descriptor.cwd
     });
-
-    await this.options.sendManagerBootstrapMessage(managerId);
 
     return cloneDescriptor(descriptor);
   }

@@ -373,7 +373,7 @@ export class TestSwarmManager extends SwarmManager {
 export async function bootWithDefaultManager(
   manager: SwarmManager & { runtimeByAgentId?: Map<string, FakeRuntime> },
   config: SwarmConfig,
-  options: { clearBootstrapSendCalls?: boolean; callerAgentId?: string } = {},
+  options: { callerAgentId?: string } = {},
 ): Promise<AgentDescriptor> {
   await manager.boot()
   const managerId = config.managerId ?? 'manager'
@@ -394,18 +394,8 @@ export async function bootWithDefaultManager(
       ?.agentId ??
     managerId
 
-  const createdManager = await manager.createManager(callerAgentId, {
+  return manager.createManager(callerAgentId, {
     name: managerName,
     cwd: config.defaultCwd,
   })
-
-  if (options.clearBootstrapSendCalls !== false) {
-    const createdRuntime = manager.runtimeByAgentId?.get(createdManager.agentId)
-    if (createdRuntime) {
-      createdRuntime.sendCalls = []
-      createdRuntime.nextDeliveryId = 0
-    }
-  }
-
-  return createdManager
 }

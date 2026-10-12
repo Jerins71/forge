@@ -93,7 +93,6 @@ export function createSwarmManagerCoreServices(
     dataDir: state.config.paths.dataDir,
     descriptors: state.descriptors,
     promptRegistry: foundation.promptRegistry,
-    hasRuntime: (agentId) => state.runtimes.has(agentId),
     logDebug: options.logDebug,
   });
   const descriptorStoreAdapter = createDescriptorStoreAdapter({

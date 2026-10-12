@@ -13,7 +13,7 @@ Treat those items as separate follow-up changes, not reasons to broaden unrelate
 - `agent-directory.ts` - read-only live registry projections, deterministic ordering, manager/worker visibility, session lookups, archive guards, and collision-free agent identity allocation.
 - `agents/descriptor-store/live-map-adapter.ts` - transactional and live-map-only descriptor/profile mutations bound to the durable descriptor store, including rollback and best-effort save policy.
 - `profile-session-bookkeeping-coordinator.ts` - profile naming/order persistence and append-only session rename history.
-- `manager-bootstrap-coordinator.ts` - manager project onboarding, Agent Architect seed-context injection, and operational prompt fallback policy.
+- `manager-bootstrap-coordinator.ts` - Agent Architect seed-context injection and operational prompt fallback policy.
 - `swarm-configuration-coordinator.ts` - application-level model, skill, secret, directory, prompt-resource, and prompt-preview configuration; composes the focused settings and prompt owners and retains generated model-projection/cache state.
 - `swarm-settings-service.ts` - manager model and CWD updates, plus related runtime recycle policy.
 - `swarm-choice-service.ts` - pending choice requests, resolution, cancellation, and user-choice events.

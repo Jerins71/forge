@@ -152,9 +152,7 @@ export async function bootWsServerTestManager(
   manager: WsServerTestSwarmManager,
   config: SwarmConfig,
 ): Promise<AgentDescriptor> {
-  return bootWithDefaultManager(manager as unknown as Parameters<typeof bootWithDefaultManager>[0], config, {
-    clearBootstrapSendCalls: false,
-  })
+  return bootWithDefaultManager(manager as unknown as Parameters<typeof bootWithDefaultManager>[0], config)
 }
 
 // --- HTTP P0 route integration tests (SwarmWebSocketServer full stack) ---

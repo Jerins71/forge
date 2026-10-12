@@ -68,13 +68,6 @@ export const PROMPT_METADATA: PromptMetadataEntry[] = [
   // ── Operational ─────────────────────────────────────────────
   {
     category: 'operational',
-    promptId: 'bootstrap',
-    displayName: 'Manager Bootstrap Message',
-    description: 'First message sent to newly created managers to drive project bootstrap, not person-level onboarding.',
-    variables: [],
-  },
-  {
-    category: 'operational',
     promptId: 'memory-merge',
     displayName: 'Memory Merge System Prompt',
     description:

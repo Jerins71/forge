@@ -28,7 +28,7 @@ export interface Run {
   input: RpcInput<"session.send">["message"];
   source?: import("../../../swarm/types.js").MessageSourceContext;
   delivery: "queue" | "steer";
-  /** The turn's replies never reach the transcript, as for onboarding. */
+  /** The turn's replies never reach the transcript, as for an internal bootstrap delivery. */
   outputHidden?: boolean;
   sequence: number;
   state: "queued" | "running" | "terminal" | "recovery";

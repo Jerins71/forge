@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { get as httpGet } from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, readdir, cp, rm } from 'node:fs/promises';
+import { readFile, writeFile, readdir, cp } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { readManifest, verifyFleetHealth, controlEnvironment, type BootstrapSession, type FleetManifest } from './launch.js';
@@ -966,17 +966,16 @@ test('a hung turn that ignores interrupt and SIGTERM is stopped, settled, and th
 
 
 // QA F7/F4: exercise real RPC admission, native provider dispatch and durable live/replay projections.
-async function busySendFixture(index = 0, waitForOnboarding = true) {
+async function busySendFixture(index = 0) {
   const environment = manifest.environments[index]!;
   const rpc = await openFixtureRpc(environment.baseUrl, sessions[index]!);
   const created = await rpc.call('project.create', { commandId: randomUUID(), title: 'Busy send QA', cwd: environment.checkout,
     model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }, secureSessionsEnabled: false });
   const sessionId = created.result.sessionId as string;
   const state = () => readDb(db => loadState(db), index);
-  if (waitForOnboarding) await until(async () => (await state()).threads[sessionId]?.activeRunId, value => !value);
   const run = (commandId: string) => until(async () => (await state()).runs[`run-${commandId}`], value => value?.state === 'terminal');
   const counters = async () => {
-    const files = await readdir(join(environment.checkout, '.fixture-codex'));
+    const files = await readdir(join(environment.checkout, '.fixture-codex')).catch(() => [] as string[]);
     const counts = await Promise.all(files.filter(file => /^process-\d+\.json$/.test(file)).map(async file =>
       JSON.parse(await readFile(join(environment.checkout, '.fixture-codex', file), 'utf8')) as { threadId: string; turnStarts: number; steers: number; interrupts: number }));
     const nativeIds = new Set(Object.values((await state()).bindings).filter(binding => binding.scope.threadId === sessionId).map(binding => binding.conversation.nativeId));
@@ -1001,30 +1000,33 @@ async function busySendFixture(index = 0, waitForOnboarding = true) {
   return { environment, rpc, sessionId, state, run, counters, detail, send, slow };
 }
 const silentNotice = 'The manager completed this turn without a visible response.';
-test('F7: an immediate first send after project.create waits for onboarding and gets a visible reply', async () => {
-  const hold = join(manifest.environments[0]!.checkout, '.fixture-onboarding-slow');
-  await writeFile(hold, 'hold the hidden onboarding turn');
-  const f = await busySendFixture(0, false);
+test('F7: a new project starts idle and its first send is its first turn, answered live and after reload', async () => {
+  const f = await busySendFixture(0);
   try {
+    // No hidden turn: the new session has no run and its provider has started no turn.
+    const idle = await f.state();
+    expect(idle.threads[f.sessionId]?.activeRunId).toBeUndefined();
+    expect(Object.values(idle.runs).filter(run => run.threadId === f.sessionId)).toHaveLength(0);
+    expect((await f.counters()).starts).toBe(0);
+    const { subscriptionId } = await f.rpc.call('session.subscribe', { sessionId: f.sessionId });
+    await until(() => f.rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean);
     // No readiness, settlement or provider poll between project.create and session.send.
     const sent = await f.send('The immediate first user task');
     expect(await f.run(sent.commandId)).toMatchObject({ outcome: 'completed' });
     expect(await settled(sent.commandId, 0)).toMatchObject({ state: 'succeeded', delivery: 'dispatched' });
-    const state = await until(f.state, state => !state.threads[f.sessionId]?.activeRunId);
-    const onboarding = Object.values(state.runs).filter(run => run.threadId === f.sessionId && run.runId !== `run-${sent.commandId}`);
-    expect(onboarding).toHaveLength(1);
-    expect(onboarding[0]).toMatchObject({ state: 'terminal', outcome: 'completed' });
-    expect((await f.counters()).interrupts).toBe(0);
+    const state = await f.state();
+    expect(Object.values(state.runs).filter(run => run.threadId === f.sessionId).map(run => run.runId)).toEqual([`run-${sent.commandId}`]);
+    expect(await f.counters()).toEqual({ starts: 1, steers: 0, interrupts: 0 });
+    // Live: the reply streams to the open session.
+    await until(() => f.rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.event?.type === 'item.upsert'
+      && frame.item.event.item.kind === 'assistant' && frame.item.event.item.text === 'fixture:env-a:assistant reply'), Boolean);
+    // After reload: a fresh snapshot holds exactly the user's message and its reply.
     const detail = await f.detail();
-    expect(detail.items.some((item: any) => item.text?.includes('no active turn to interrupt'))).toBe(false);
     expect(detail.items.some((item: any) => item.text === silentNotice)).toBe(false);
-    expect(detail.items.filter((item: any) => item.kind === 'user' && item.text === 'The immediate first user task')).toHaveLength(1);
-    // Onboarding's own reply stays hidden; steered into that turn, this message's answer would be hidden with it.
-    expect(detail.items.filter((item: any) => item.kind === 'assistant' && item.text === 'fixture:env-a:assistant reply')).toHaveLength(1);
-    expect(state.runs[`run-${sent.commandId}`]).toMatchObject({ delivery: 'queue' });
-    expect((await f.counters()).steers).toBe(0);
-    evidence.immediateProjectSend = { onboardingOutcome: onboarding[0]!.outcome, inputOutcome: 'completed', counters: await f.counters(), delivery: state.runs[`run-${sent.commandId}`].delivery };
-  } finally { f.rpc.close(); await rm(hold, { force: true }); }
+    expect(detail.items.filter((item: any) => item.kind === 'user').map((item: any) => item.text)).toEqual(['The immediate first user task']);
+    expect(detail.items.filter((item: any) => item.kind === 'assistant').map((item: any) => item.text)).toEqual(['fixture:env-a:assistant reply']);
+    evidence.immediateProjectSend = { idleBeforeSend: true, providerStartsBeforeSend: 0, inputOutcome: 'completed', counters: await f.counters(), liveReply: true, replayReply: true };
+  } finally { f.rpc.close(); }
 });
 
 for (const delivery of ['followUp'] as const) {

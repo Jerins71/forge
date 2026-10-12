@@ -51,8 +51,8 @@ export interface SessionAttentionStatusObservation extends SessionAttentionSessi
   agentId: string;
   source: "manager" | "owned_worker";
   /**
-   * Who started the manager turn behind this transition. Work the user did not ask for (project
-   * onboarding, a peer's message, a late worker result) never reports itself as finished; a decision
+   * Who started the manager turn behind this transition. Work the user did not ask for (an
+   * internal bootstrap, a peer's message, a late worker result) never reports itself as finished; a decision
    * it needs from the user, or its failure, still does.
    */
   turnInitiator?: "user" | "internal";

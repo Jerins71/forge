@@ -630,8 +630,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         publishToUser: (agentId, text, source) => this.publishToUser(agentId, text, source),
         terminateDescriptor: (descriptor, terminateOptions) =>
           this.terminateDescriptor(descriptor, terminateOptions),
-        sendManagerBootstrapMessage: (managerId) =>
-          this.managerBootstrapCoordinator.sendManagerBootstrapMessage(managerId),
       },
       runtimeResources: {
         getPiModelsJsonPath: () => this.configurationCoordinator.getPiModelsJsonPathOrThrow(),
