@@ -1,21 +1,16 @@
 import {
   MANAGER_MODEL_PRESETS,
-  type EffortTier,
   type AgentCreatorResult,
   type CliSessionMetadata,
   type ConversationMessageSource,
   type ConversationTimelineEntryMetadata,
   type ConversationLogEvent as ProtocolConversationLogEvent,
   type AgentToolCallEvent as ProtocolAgentToolCallEvent,
-  type DelegationBehaviorMode,
-  type DelegationRosterOrigin,
   type AgentModelOrigin,
   type ChoiceRequestEvent,
   type ConversationReplyTarget,
   type PersistedMessageChannel as ProtocolPersistedMessageChannel,
   type ContextMode,
-  type ManagerPosture,
-  type ManagerPostureOrigin,
   type ExternalThreadInfo,
   type ExternalThreadMessageContext,
   type ProjectAgentInfo,
@@ -33,11 +28,7 @@ export type { AgentStatus };
 export type {
   AgentModelOrigin,
   CliSessionMetadata,
-  DelegationBehaviorMode,
   ContextMode,
-  DelegationRosterOrigin,
-  ManagerPosture,
-  ManagerPostureOrigin,
 };
 export type { ExternalThreadInfo, ExternalThreadMessageContext, ProjectAgentMessageContext };
 export type { PlanSummaryEvent } from "@forge/protocol";
@@ -84,8 +75,6 @@ export interface ManagerProfile {
   displayName: string;
   defaultSessionAgentId: string;
   defaultModel: AgentModelDescriptor;
-  defaultManagerPosture?: ManagerPosture;
-  defaultDelegationRosterId?: string;
   /** Absent means inherit the product summary default. */
   /** Absent preserves Secure Sessions for projects created before this setting. */
   secureSessionsEnabled?: boolean;
@@ -112,10 +101,6 @@ export interface AgentDescriptor {
   cwd: string;
   model: AgentModelDescriptor;
   modelOrigin?: AgentModelOrigin;
-  managerPosture?: ManagerPosture;
-  managerPostureOrigin?: ManagerPostureOrigin;
-  delegationRosterId?: string;
-  delegationRosterOrigin?: DelegationRosterOrigin;
   /** Manager-session override. Absent means inherit the project default. */
   contextModeOverride?: ContextMode;
   sessionFile: string;
@@ -139,17 +124,8 @@ export interface AgentDescriptor {
   specialistId?: string;
   /** Internal provenance fact captured for durable worker analytics records. */
   specialistAttributionKnown?: boolean;
-  specialistTier?: EffortTier;
-  specialistLens?: string;
   specialistDisplayName?: string;
   specialistColor?: string;
-  delegationRouteId?: string;
-  delegationRouteLabel?: string;
-  delegationRosterRevision?: number;
-  /** Captured availability fallback for this worker attempt. Not exposed publicly. */
-  delegationFallbackModel?: AgentModelDescriptor;
-  /** Captured capability-escalation target for graph retry routing. */
-  delegationCapabilityEscalationRouteId?: string;
   internalWorkerKind?: InternalWorkerKind;
   /**
    * Private persisted ownership for the worker's current assignment. This is
@@ -228,13 +204,10 @@ export interface SendMessageReceipt {
 export interface SpawnAgentInput {
   agentId: string;
   planStep?: string;
+  /** Worker preset name. Omitted means the manager's own provider, model and reasoning. */
+  preset?: string;
+  /** Internal only: Forge-owned builtin instructions (the Codex plugin worker). */
   specialist?: string;
-  tier?: EffortTier;
-  lens?: string;
-  behaviorMode?: DelegationBehaviorMode;
-  route?: string;
-  /** Internal marker set by the manager-facing mode/policy adapter. */
-  policyControlledModel?: boolean;
   /**
    * Fail closed unless this worker is provisioned with a Secure Sessions
    * runtime before its initial assignment is dispatched.

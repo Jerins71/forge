@@ -37,3 +37,29 @@ it("preserves legacy absence and explicit Secure Sessions choices; malformed per
     expect(decoded.store.profiles?.[0]?.secureSessionsEnabled).toBe(expected);
   }
 });
+
+it("drops legacy work-mode, roster and route fields from persisted profiles and descriptors", () => {
+  const descriptor = {
+    agentId: "forge", managerId: "forge", displayName: "forge", role: "manager", status: "idle",
+    createdAt: NOW, updatedAt: NOW, cwd: "/tmp", model: { ...DEFAULT_MODEL }, sessionFile: "/tmp/forge-data/x.jsonl", profileId: "forge",
+    managerPosture: "delegation_first", managerPostureOrigin: "session_override",
+    delegationRosterId: "balanced", delegationRosterOrigin: "global_default",
+  };
+  const worker = {
+    ...descriptor, agentId: "w1", role: "worker",
+    managerPosture: undefined, specialistId: "route:builder", specialistDisplayName: "Builder", specialistTier: "deep", specialistLens: "planner",
+    delegationRouteId: "builder", delegationRouteLabel: "Builder", delegationRosterRevision: 0,
+    delegationFallbackModel: "broken", delegationCapabilityEscalationRouteId: "",
+  };
+  const decoded = decodeAgentsStoreFile(JSON.stringify({
+    agents: [descriptor, worker],
+    profiles: [{ ...profile("forge"), defaultManagerPosture: "from_the_future", defaultDelegationRosterId: "balanced" }],
+  }), storeOptions());
+
+  expect(decoded.skippedDescriptorCount).toBe(0);
+  const legacyKeys = /Posture|delegation|specialistTier|specialistLens/;
+  for (const record of [...decoded.store.agents, ...(decoded.store.profiles ?? [])]) {
+    expect(Object.keys(record).filter((key) => legacyKeys.test(key))).toEqual([]);
+  }
+  expect(decoded.store.agents[1]).toMatchObject({ specialistId: "route:builder", specialistDisplayName: "Builder" });
+});

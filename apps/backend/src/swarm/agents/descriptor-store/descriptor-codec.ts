@@ -4,7 +4,7 @@ import {
   isRecord,
   validateAgentDescriptor
 } from "../../swarm-manager-utils.js";
-import { isContextMode, isManagerPosture } from "@forge/protocol";
+import { isContextMode } from "@forge/protocol";
 import { cloneProfile } from "./descriptor-clone.js";
 import { normalizeDescriptorPaths } from "./descriptor-path-resolver.js";
 
@@ -104,7 +104,7 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   }
 
   for (const [index, candidate] of agentRecords.active.entries()) {
-    const validated = validateAgentDescriptor(candidate);
+    const validated = validateAgentDescriptor(stripLegacyDelegationFields(candidate));
     if (typeof validated === "string") {
       skippedDescriptorCount += 1;
       const maybeAgentId = extractDescriptorAgentId(candidate);
@@ -143,6 +143,28 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   };
 }
 
+/** Fields from the removed work modes, rosters, tiers and lenses. Dropped when old data is read. */
+const LEGACY_DELEGATION_DESCRIPTOR_FIELDS = [
+  "managerPosture",
+  "managerPostureOrigin",
+  "delegationRosterId",
+  "delegationRosterOrigin",
+  "delegationRouteId",
+  "delegationRouteLabel",
+  "delegationRosterRevision",
+  "delegationFallbackModel",
+  "delegationCapabilityEscalationRouteId",
+  "specialistTier",
+  "specialistLens",
+] as const;
+
+function stripLegacyDelegationFields(candidate: unknown): unknown {
+  if (!isRecord(candidate)) return candidate;
+  const stripped = { ...candidate };
+  for (const field of LEGACY_DELEGATION_DESCRIPTOR_FIELDS) delete stripped[field];
+  return stripped;
+}
+
 function decodePersistedProfiles(
   candidates: unknown,
   storeFilePath: string,
@@ -158,7 +180,8 @@ function decodePersistedProfiles(
       continue;
     }
     const {
-      defaultManagerPosture,
+      defaultManagerPosture: _legacyPosture,
+      defaultDelegationRosterId: _legacyRosterId,
       defaultContextMode,
       secureSessionsEnabled,
       ...rest
@@ -166,14 +189,6 @@ function decodePersistedProfiles(
     const profileHint = typeof rest.profileId === "string" ? `profileId=${rest.profileId}` : "profileId=<unknown>";
     const normalized: ManagerProfile & Record<string, unknown> = { ...rest };
     let droppedUnknown = false;
-    if (defaultManagerPosture !== undefined && !isManagerPosture(defaultManagerPosture)) {
-      droppedUnknown = true;
-      warn(
-        `[swarm] Dropping unknown defaultManagerPosture (${profileHint}) in ${storeFilePath}; keeping the profile without a persisted default.`
-      );
-    } else if (defaultManagerPosture !== undefined) {
-      normalized.defaultManagerPosture = defaultManagerPosture;
-    }
     if (defaultContextMode !== undefined && !isContextMode(defaultContextMode)) {
       droppedUnknown = true;
       warn(

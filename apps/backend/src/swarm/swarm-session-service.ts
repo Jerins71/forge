@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { readSessionMeta } from "./session/session-manifest.js";
 import { getSessionDir } from "./data-paths.js";
 import { writeFile } from "node:fs/promises";
-import { DEFAULT_MANAGER_POSTURE } from "@forge/protocol";
 import { cloneDescriptor } from "./swarm-manager-utils.js";
 import { SessionProvisioner, type ProvisionedSessionDescriptor } from "./session-provisioner.js";
 import type { SwarmAgentRuntime } from "./runtime-contracts.js";
@@ -27,8 +26,6 @@ interface SessionCreationOptions {
   reconcileOwnedDirectory?: boolean;
   sessionPurpose?: AgentDescriptor["sessionPurpose"];
   cli?: AgentDescriptor["cli"];
-  managerPosture?: AgentDescriptor["managerPosture"];
-  delegationRosterId?: string;
 }
 
 interface SessionCreationOverrides {
@@ -54,7 +51,6 @@ export interface SwarmSessionServiceOptions {
     profileId: string,
     options?: SessionCreationOptions
   ) => PreparedSessionCreation;
-  resolveGlobalDelegationRosterId: () => Promise<string>;
   getRequiredSessionDescriptor: (agentId: string) => ProvisionedSessionDescriptor;
   getOrCreateRuntimeForDescriptor: (descriptor: AgentDescriptor) => Promise<SwarmAgentRuntime>;
   stopSessionInternal: (
@@ -100,11 +96,10 @@ export interface SwarmSessionServiceOptions {
   now: () => string;
 }
 
-/** A session reserved by a control launch. Posture and roster are session overrides; omitted ones inherit the project default. */
+/** A session reserved by a control launch. */
 export interface ControlledSessionInput {
   commandId: string; sessionId: string; projectId: string; title: string; cwd: string;
   cli?: import("@forge/protocol").CliSessionMetadata; model?: AgentModelDescriptor;
-  managerPosture?: SessionCreationOptions["managerPosture"]; delegationRosterId?: string;
 }
 
 export class SwarmSessionService {
@@ -150,7 +145,7 @@ export class SwarmSessionService {
       }
       reconcileOwnedDirectory = true;
     }
-    return this.createSessionWithOverrides(input.projectId, { sessionAgentId: input.sessionId, label: input.title, cli: input.cli, controlCommandId: input.commandId, reconcileOwnedDirectory, managerPosture: input.managerPosture, delegationRosterId: input.delegationRosterId }, { cwd: input.cwd, model: input.model });
+    return this.createSessionWithOverrides(input.projectId, { sessionAgentId: input.sessionId, label: input.title, cli: input.cli, controlCommandId: input.commandId, reconcileOwnedDirectory }, { cwd: input.cwd, model: input.model });
   }
 
   async createSession(
@@ -188,7 +183,6 @@ export class SwarmSessionService {
     prepared: PreparedSessionCreation,
     sessionDescriptor: ProvisionedSessionDescriptor
   ): Promise<{ profile: ManagerProfile; sessionAgent: AgentDescriptor }> {
-    await this.ensureEffectiveDelegationRoster(sessionDescriptor);
 
     await this.options.provisioner.provisionSession({
       descriptor: sessionDescriptor,
@@ -377,18 +371,12 @@ export class SwarmSessionService {
     }
     forkedDescriptor.model = { ...(options?.model ?? sourceDescriptor.model) };
     forkedDescriptor.modelOrigin = sourceDescriptor.modelOrigin;
-    forkedDescriptor.managerPosture = sourceDescriptor.managerPosture ?? DEFAULT_MANAGER_POSTURE;
-    forkedDescriptor.managerPostureOrigin =
-      sourceDescriptor.managerPostureOrigin ?? "product_default";
-    forkedDescriptor.delegationRosterId = sourceDescriptor.delegationRosterId;
-    forkedDescriptor.delegationRosterOrigin = sourceDescriptor.delegationRosterOrigin;
     if (sourceDescriptor.contextModeOverride !== undefined) {
       forkedDescriptor.contextModeOverride = sourceDescriptor.contextModeOverride;
     } else {
       delete forkedDescriptor.contextModeOverride;
     }
     forkedDescriptor.cli = sourceDescriptor.cli ? { ...sourceDescriptor.cli } : undefined;
-    await this.ensureEffectiveDelegationRoster(forkedDescriptor);
 
     // Capture before copying canonical history. A source still running after this
     // point cannot leak later note edits into the fork. Historical forks omit
@@ -457,11 +445,4 @@ export class SwarmSessionService {
     await this.forkSession(input.sourceThreadId,{sessionAgentId:input.targetThreadId,label:input.title,sourcePoint:input.sourcePoint,historical:input.historical,fromMessageId:input.historical ? input.sourcePoint.entryId : undefined,model:input.model,controlCommandId:input.commandId,sessionPurpose:input.purpose,continueWorker:input.kind==="continued_worker"});
   }
 
-  private async ensureEffectiveDelegationRoster(
-    descriptor: ProvisionedSessionDescriptor,
-  ): Promise<void> {
-    if (descriptor.delegationRosterId) return;
-    descriptor.delegationRosterId = await this.options.resolveGlobalDelegationRosterId();
-    descriptor.delegationRosterOrigin = "global_default";
-  }
 }

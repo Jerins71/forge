@@ -97,9 +97,6 @@ export function cloneDescriptorForPersistence(descriptor: AgentDescriptor): Agen
       modelId: descriptor.model.modelId,
       thinkingLevel: descriptor.model.thinkingLevel
     },
-    delegationFallbackModel: descriptor.delegationFallbackModel
-      ? cloneModelDescriptor(descriptor.delegationFallbackModel)
-      : undefined,
     contextUsage: cloneContextUsage(descriptor),
     projectAgent: cloneProjectAgent(descriptor.projectAgent, {
       includeSystemPrompt: true,
@@ -139,8 +136,6 @@ export function cloneDescriptorForPublic(descriptor: AgentDescriptor): AgentDesc
     internalWorkerKind: _internalWorkerKind,
     workerParentContext: _workerParentContext,
     sessionReferenceAgentIds: _sessionReferenceAgentIds,
-    delegationFallbackModel: _delegationFallbackModel,
-    delegationCapabilityEscalationRouteId: _delegationCapabilityEscalationRouteId,
     ...publicDescriptor
   } = cloneDescriptorForPersistence(descriptor);
 

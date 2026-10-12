@@ -1,7 +1,6 @@
 import { normalizePersistedSwarmModelDescriptor } from "../../catalog/model-presets.js";
 import { normalizeOptionalAgentId } from "../../swarm-manager-utils.js";
-import { DEFAULT_MANAGER_POSTURE } from "../../prompts/manager-posture.js";
-import { isContextMode, isManagerPosture } from "@forge/protocol";
+import { isContextMode } from "@forge/protocol";
 import type {
   AgentDescriptor,
   AgentModelDescriptor,
@@ -40,15 +39,6 @@ export class ProfileBootReconciler {
         descriptor.model = normalizedDescriptorModel;
         this.options.mutations.upsertDescriptor(descriptor);
         changed = true;
-      }
-
-      if (descriptor.delegationFallbackModel) {
-        const normalizedFallbackModel = cloneModelDescriptor(descriptor.delegationFallbackModel);
-        if (!sameModelDescriptor(descriptor.delegationFallbackModel, normalizedFallbackModel)) {
-          descriptor.delegationFallbackModel = normalizedFallbackModel;
-          this.options.mutations.upsertDescriptor(descriptor);
-          changed = true;
-        }
       }
 
       if (descriptor.role !== "manager") {
@@ -138,56 +128,6 @@ export class ProfileBootReconciler {
       this.options.mutations.upsertProfile(profile);
     }
 
-    return changed;
-  }
-
-  reconcileDelegationStateOnBoot(defaultDelegationRosterId: string): boolean {
-    let changed = false;
-    for (const profile of this.options.profiles.values()) {
-      // Defense in depth: decode already omits unknown persisted postures, but
-      // never propagate a future/unknown value into booted sessions here either.
-      const persistedPosture = isManagerPosture(profile.defaultManagerPosture)
-        ? profile.defaultManagerPosture
-        : undefined;
-      const inheritedPosture = persistedPosture ?? DEFAULT_MANAGER_POSTURE;
-      const inheritedPostureOrigin = persistedPosture
-        ? "project_default" as const
-        : "product_default" as const;
-      const inheritedRosterId = profile.defaultDelegationRosterId ?? defaultDelegationRosterId;
-      const inheritedRosterOrigin = profile.defaultDelegationRosterId
-        ? "project_default" as const
-        : "global_default" as const;
-
-      for (const session of this.getSessionsForProfile(profile.profileId)) {
-        let sessionChanged = false;
-        if (session.managerPosture === undefined) {
-          session.managerPosture = inheritedPosture;
-          session.managerPostureOrigin = inheritedPostureOrigin;
-          sessionChanged = true;
-        } else if (session.managerPostureOrigin === undefined) {
-          session.managerPostureOrigin = session.managerPosture === inheritedPosture
-            ? inheritedPostureOrigin
-            : "session_override";
-          sessionChanged = true;
-        }
-
-        if (session.delegationRosterId === undefined) {
-          session.delegationRosterId = inheritedRosterId;
-          session.delegationRosterOrigin = inheritedRosterOrigin;
-          sessionChanged = true;
-        } else if (session.delegationRosterOrigin === undefined) {
-          session.delegationRosterOrigin = session.delegationRosterId === inheritedRosterId
-            ? inheritedRosterOrigin
-            : "session_override";
-          sessionChanged = true;
-        }
-
-        if (sessionChanged) {
-          this.options.mutations.upsertDescriptor(session);
-          changed = true;
-        }
-      }
-    }
     return changed;
   }
 

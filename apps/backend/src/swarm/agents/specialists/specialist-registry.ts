@@ -3,11 +3,7 @@ import { join } from "node:path";
 import type { Dirent } from "node:fs";
 import { isEnoentError, isNotDirLikeMissingError } from "../../../utils/fs-errors.js";
 import { writeFileAtomic } from "../../../utils/atomic-files.js";
-import {
-  type EffortTier,
-  type ResolvedSpecialistDefinition,
-  type TierConfig,
-} from "@forge/protocol";
+import type { ResolvedSpecialistDefinition } from "@forge/protocol";
 import {
   inferProviderFromModelId,
   isSwarmReasoningLevel,
@@ -22,15 +18,11 @@ import {
   getProfileSpecialistsDir,
   getSharedSpecialistsDir,
 } from "./specialist-paths.js";
-import {
-  assertClaudeSdkProviderNotSelected,
-  CLAUDE_SDK_RETIRED_PROVIDER_MESSAGE,
-} from "../../catalog/legacy-claude-sdk-model.js";
+import { CLAUDE_SDK_RETIRED_PROVIDER_MESSAGE } from "../../catalog/legacy-claude-sdk-model.js";
 
 const FRONTMATTER_BLOCK_PATTERN = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*(?:\r?\n|$)/;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 const CACHE_KEY_SEPARATOR = "\u0000";
-const TIER_CONFIGS_FILENAME = "tier-configs.json";
 const REMOVED_BUILTIN_SPECIALIST_FILES = new Set([
   "app-runtime.md",
   "backend.md",
@@ -44,142 +36,16 @@ const REMOVED_BUILTIN_SPECIALIST_FILES = new Set([
   "collab-doc-writer.md",
   "collab-scout.md",
   "collab-researcher.md",
+  "planner.md",
+  "code-reviewer.md",
+  "code-reviewer-2.md",
+  "researcher.md",
+  "architect.md",
 ]);
-
-export const EFFORT_TIER_ORDER = ["light", "fast", "standard", "deep", "max"] as const satisfies readonly EffortTier[];
-
-export const DEFAULT_TIER_CONFIGS: Record<EffortTier, TierConfig> = {
-  light: {
-    tier: "light",
-    displayName: "Light",
-    description: "Cheap lookups, quick reads, simple edits, and lightweight checks.",
-    color: "#6b7280",
-    provider: "openai-codex",
-    modelId: "gpt-6-luna",
-    reasoningLevel: "low",
-    fallbackProvider: "openai-codex",
-    fallbackModelId: "gpt-5.5",
-    fallbackReasoningLevel: "low",
-  },
-  fast: {
-    tier: "fast",
-    displayName: "Fast",
-    description: "Capable low-latency executor for well-specified implementation tasks.",
-    color: "#2563eb",
-    provider: "cursor-sdk",
-    modelId: "composer-2.5",
-    reasoningLevel: "none",
-    fallbackProvider: "openai-codex",
-    fallbackModelId: "gpt-5.5",
-    fallbackReasoningLevel: "high",
-  },
-  standard: {
-    tier: "standard",
-    displayName: "Standard",
-    description: "Default balanced tier for ordinary implementation, research, and review.",
-    color: "#7c3aed",
-    provider: "openai-codex",
-    modelId: "gpt-5.5",
-    reasoningLevel: "medium",
-    fallbackProvider: "openai-codex",
-    fallbackModelId: "gpt-5.5",
-    fallbackReasoningLevel: "medium",
-  },
-  deep: {
-    tier: "deep",
-    displayName: "Deep",
-    description: "Thorough planning, non-trivial design, and careful review/debugging.",
-    color: "#10b981",
-    provider: "openai-codex",
-    modelId: "gpt-5.5",
-    reasoningLevel: "high",
-    fallbackProvider: "openai-codex",
-    fallbackModelId: "gpt-5.5",
-    fallbackReasoningLevel: "medium",
-  },
-  max: {
-    tier: "max",
-    displayName: "Max",
-    description: "Architecture, high-risk refactors, and the hardest debugging tasks.",
-    color: "#f59e0b",
-    provider: "openai-codex",
-    modelId: "gpt-5.5",
-    reasoningLevel: "xhigh",
-    fallbackProvider: "openai-codex",
-    fallbackModelId: "gpt-5.5",
-    fallbackReasoningLevel: "medium",
-  },
-};
-const BEHAVIOR_MODE_CONFIGS = [
-  { mode: "plan", lens: "planner", description: "task breakdown, sequencing, and risk analysis" },
-  { mode: "correctness-review", lens: "code-reviewer", description: "bugs, edge cases, and contract validation" },
-  { mode: "design-review", lens: "code-reviewer-2", description: "maintainability, API design, and consistency" },
-  { mode: "research", lens: "researcher", description: "fact-checking, docs, and source-backed investigation" },
-] as const;
-
-export interface LegacySpecialistRewrite {
-  tier: EffortTier;
-  lens?: string;
-}
-
-export const LEGACY_SPECIALIST_REWRITE_TABLE: Record<string, LegacySpecialistRewrite> = {
-  architect: { tier: "max", lens: "architect" },
-  planner: { tier: "deep", lens: "planner" },
-  "code-reviewer": { tier: "deep", lens: "code-reviewer" },
-  "code-reviewer-2": { tier: "deep", lens: "code-reviewer-2" },
-  researcher: { tier: "standard", lens: "researcher" },
-  "web-researcher": { tier: "standard", lens: "researcher" },
-  "codex-plugin": { tier: "standard", lens: "codex-plugin" },
-  backend: { tier: "fast" },
-  frontend: { tier: "fast" },
-  "doc-writer": { tier: "standard" },
-  scout: { tier: "light" },
-  "cursor-builder": { tier: "fast" },
-  "collab-planner": { tier: "deep" },
-  "collab-reviewer": { tier: "deep" },
-  "collab-doc-writer": { tier: "standard" },
-  "collab-scout": { tier: "light" },
-  "collab-researcher": { tier: "standard" },
-};
 
 type InternalResolvedSpecialistDefinition = ResolvedSpecialistDefinition & { forgePrecedence?: "override" };
 
 const rosterCache = new Map<string, ResolvedSpecialistDefinition[]>();
-
-export interface SpecialistFrontmatter {
-  displayName: string;
-  color: string;
-  enabled: boolean;
-  whenToUse: string;
-  modelId?: string;
-  provider?: string;
-  reasoningLevel?: string;
-  fallbackModelId?: string;
-  fallbackProvider?: string;
-  fallbackReasoningLevel?: string;
-  builtin: boolean;
-  pinned: boolean;
-  webSearch: boolean;
-  defaultTier?: EffortTier;
-  forgePrecedence?: "override";
-}
-
-export interface SaveSpecialistRequest {
-  displayName: string;
-  color: string;
-  enabled: boolean;
-  whenToUse: string;
-  modelId?: string;
-  provider?: string;
-  reasoningLevel?: string;
-  fallbackModelId?: string;
-  fallbackProvider?: string;
-  fallbackReasoningLevel?: string;
-  pinned?: boolean;
-  webSearch?: boolean;
-  defaultTier?: EffortTier;
-  promptBody: string;
-}
 
 interface ParsedSpecialistFile {
   frontmatter: SpecialistFrontmatter;
@@ -357,81 +223,6 @@ function getRosterCacheKey(options: { dataDir: string; profileId: string }): str
   return [options.dataDir, options.profileId].join(CACHE_KEY_SEPARATOR);
 }
 
-export function generateRosterBlock(
-  roster: ResolvedSpecialistDefinition[],
-  tierConfigs: readonly TierConfig[] = Object.values(DEFAULT_TIER_CONFIGS),
-): string {
-  return generateTierLensRosterBlock(roster, tierConfigs);
-}
-
-export function generateTierLensRosterBlock(
-  roster: ResolvedSpecialistDefinition[],
-  _tierConfigs: readonly TierConfig[] = Object.values(DEFAULT_TIER_CONFIGS),
-): string {
-  const enabled = roster.filter((entry) => entry.enabled);
-  const available = enabled.filter((entry) => entry.available);
-  const lines = [
-    "After the selected work mode calls for delegation, use the active roster of specialists. Roster availability is not a reason to delegate.",
-    "",
-    "Forge appends `[delegationRoster]` to manager turns. A named `route` selects a complete specialist: task instructions, model, and recovery. Otherwise choose a task `mode` and omit `route` for that task's default specialist.",
-  ];
-
-  // Shipped mode handles contribute prompts only; their persisted model fields
-  // do not control policy routing and therefore must not hide a mode when a
-  // stale legacy model is unavailable.
-  const enabledById = new Map(enabled.map((entry) => [entry.specialistId, entry]));
-  lines.push("", "Task types:", "- `general` (Build & execute; default): implementation, debugging, and other outcome-focused work");
-  for (const modeConfig of BEHAVIOR_MODE_CONFIGS) {
-    const lens = enabledById.get(modeConfig.lens);
-    if (lens) {
-      lines.push(`- \`${modeConfig.mode}\`: ${modeConfig.description}`);
-    }
-  }
-
-  const customSpecialists = available.filter(
-    (entry) => !entry.builtin && !LEGACY_SPECIALIST_REWRITE_TABLE[entry.specialistId],
-  );
-  if (customSpecialists.length > 0) {
-    lines.push("", "Custom specialists (use `customSpecialist` instead of mode/route):");
-    for (const s of customSpecialists) {
-      const fallback = s.fallbackModelId
-        ? ` -> fb ${compactProvider(s.fallbackProvider ?? "unknown")}/${s.fallbackModelId}${
-            s.fallbackReasoningLevel ? ` ${s.fallbackReasoningLevel}` : ""
-          }`
-        : "";
-      const model = s.modelId && s.provider
-        ? ` [${compactProvider(s.provider)}/${s.modelId}${s.reasoningLevel ? ` ${s.reasoningLevel}` : ""}${fallback}]`
-        : "";
-      const webSearchTag = s.webSearch ? " [web search]" : "";
-      lines.push(`- \`${s.specialistId}\`: ${compactRosterText(s.whenToUse, 120)}${model}${webSearchTag}`);
-    }
-  }
-
-  lines.push(
-    "",
-    "Routing guidance:",
-    "- Availability fallback is automatic, not capability escalation. For granted secrets, set `requiresSecureRuntime=true`; Forge fails closed without a compatible runtime.",
-    "- Name a non-default specialist only when its guidance clearly fits. Escalate only after evidence that the first specialist was inadequate.",
-    "- Outside a work graph, escalation requires a fresh delegation on the stronger specialist; messaging the same worker does not change its pinned executor.",
-    "- Do not choose a stronger specialist merely because work is large, planned, reviewed, or graph-shaped.",
-  );
-
-  return lines.join("\n");
-}
-
-function compactProvider(provider: string): string {
-  if (provider === "openai-codex") return "codex";
-  if (provider === "cursor-sdk") return "cursor";
-  return provider;
-}
-
-function compactRosterText(text: string, maxLength = 96): string {
-  const firstSentence = text.split(/(?<=\.)\s+/u)[0]?.trim() || text.trim();
-  if (firstSentence.length <= maxLength) return firstSentence;
-  const clipped = firstSentence.slice(0, maxLength - 3).trimEnd();
-  return `${clipped}...`;
-}
-
 export async function seedBuiltins(dataDir: string): Promise<void> {
   const builtinDir = getBuiltinSpecialistsDir();
   const sharedDir = getSharedSpecialistsDir(dataDir);
@@ -466,216 +257,15 @@ export async function seedBuiltins(dataDir: string): Promise<void> {
       continue;
     }
 
+    // Only Forge's own unpinned copy is refreshed; a user-edited file is never rewritten.
     const existing = await parseSpecialistFile(destinationPath);
-    if (!existing) {
-      await writeSpecialistFile(destinationPath, serializeSpecialistFile(source.frontmatter, source.body));
+    if (existing && (existing.frontmatter.builtin !== true || existing.frontmatter.pinned === true)) {
       continue;
     }
-
-    if (existing.frontmatter.builtin !== true) {
-      continue;
-    }
-
-    if (existing.frontmatter.pinned === true) {
-      continue;
-    }
-
-    const mergedFrontmatter: SpecialistFrontmatter = {
-      ...source.frontmatter,
-      enabled: existing.frontmatter.enabled,
-      pinned: existing.frontmatter.pinned,
-    };
-
-    await writeSpecialistFile(destinationPath, serializeSpecialistFile(mergedFrontmatter, source.body));
+    await copyFile(sourcePath, destinationPath);
   }
 
   invalidateSpecialistCache();
-}
-
-export function normalizeEffortTier(value: string | undefined): EffortTier | undefined {
-  return parseEffortTier(value);
-}
-
-export function getTierAttributionId(tier: EffortTier, lens?: string): string {
-  return lens ? `${tier}:${normalizeSpecialistHandle(lens)}` : tier;
-}
-
-export function resolveLegacySpecialistRewrite(handle: string): LegacySpecialistRewrite | undefined {
-  const specialistId = normalizeSpecialistHandle(handle);
-  const rewrite = specialistId ? LEGACY_SPECIALIST_REWRITE_TABLE[specialistId] : undefined;
-  return rewrite ? { ...rewrite } : undefined;
-}
-
-export async function resolveTierConfigs(dataDir: string): Promise<TierConfig[]> {
-  const filePath = join(getSharedSpecialistsDir(dataDir), TIER_CONFIGS_FILENAME);
-  let overrides: unknown;
-  try {
-    overrides = JSON.parse(await readFile(filePath, "utf8"));
-  } catch (error) {
-    if (isEnoentError(error)) {
-      return cloneTierConfigs(Object.values(DEFAULT_TIER_CONFIGS));
-    }
-    throw error;
-  }
-
-  const byTier = new Map<EffortTier, TierConfig>();
-  for (const tier of EFFORT_TIER_ORDER) {
-    byTier.set(tier, { ...DEFAULT_TIER_CONFIGS[tier] });
-  }
-
-  const rawConfigs = Array.isArray(overrides)
-    ? overrides
-    : overrides && typeof overrides === "object" && Array.isArray((overrides as { tiers?: unknown }).tiers)
-      ? (overrides as { tiers: unknown[] }).tiers
-      : overrides && typeof overrides === "object"
-        ? Object.values(overrides as Record<string, unknown>)
-        : [];
-
-  for (const raw of rawConfigs) {
-    const config = parseTierConfig(raw);
-    if (config) {
-      byTier.set(config.tier, config);
-    }
-  }
-
-  return EFFORT_TIER_ORDER.map((tier) => ({ ...byTier.get(tier)! }));
-}
-
-export async function resolveTierConfig(dataDir: string, tier: EffortTier): Promise<TierConfig> {
-  const configs = await resolveTierConfigs(dataDir);
-  const config = configs.find((entry) => entry.tier === tier);
-  if (!config) {
-    throw new Error(`Unknown tier: ${tier}`);
-  }
-  return { ...config };
-}
-
-export async function saveProfileSpecialist(
-  dataDir: string,
-  profileId: string,
-  handle: string,
-  data: SaveSpecialistRequest,
-): Promise<void> {
-  const normalizedProfileId = sanitizePathSegment(profileId);
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const frontmatter = validateSaveRequest(data);
-  const profileDir = getProfileSpecialistsDir(dataDir, normalizedProfileId);
-  const filePath = join(profileDir, `${sanitizePathSegment(specialistId)}.md`);
-
-  const shared = await parseSpecialistFile(
-    join(getSharedSpecialistsDir(dataDir), `${sanitizePathSegment(specialistId)}.md`),
-  );
-  if (shared?.frontmatter.builtin) {
-    frontmatter.builtin = true;
-  }
-
-  await mkdir(profileDir, { recursive: true });
-  await writeSpecialistFile(filePath, serializeSpecialistFile(frontmatter, data.promptBody));
-
-  invalidateSpecialistCache(normalizedProfileId);
-}
-
-export async function deleteProfileSpecialist(dataDir: string, profileId: string, handle: string): Promise<void> {
-  const normalizedProfileId = sanitizePathSegment(profileId);
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const filePath = join(
-    getProfileSpecialistsDir(dataDir, normalizedProfileId),
-    `${sanitizePathSegment(specialistId)}.md`,
-  );
-
-  try {
-    await unlink(filePath);
-  } catch (error) {
-    if (isEnoentError(error)) {
-      throw new Error(`Unknown specialist: ${specialistId}`);
-    }
-
-    throw error;
-  }
-
-  invalidateSpecialistCache(normalizedProfileId);
-}
-
-export async function resolveSharedRoster(dataDir: string): Promise<ResolvedSpecialistDefinition[]> {
-  const byHandle = await resolveDirectorySpecialists(getSharedSpecialistsDir(dataDir), "shared");
-  return [...byHandle.values()].sort((a, b) => a.specialistId.localeCompare(b.specialistId));
-}
-
-export async function saveSharedSpecialist(
-  dataDir: string,
-  handle: string,
-  data: SaveSpecialistRequest,
-): Promise<void> {
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const frontmatter = validateSaveRequest(data);
-  const sharedDir = getSharedSpecialistsDir(dataDir);
-  const filePath = join(sharedDir, `${sanitizePathSegment(specialistId)}.md`);
-
-  // Preserve builtin flag if the file already exists as a builtin
-  const existing = await parseSpecialistFile(filePath);
-  if (existing && existing.frontmatter.builtin) {
-    frontmatter.builtin = true;
-  }
-
-  await mkdir(sharedDir, { recursive: true });
-  await writeSpecialistFile(filePath, serializeSpecialistFile(frontmatter, data.promptBody));
-
-  invalidateSpecialistCache();
-}
-
-export async function deleteSharedSpecialist(dataDir: string, handle: string): Promise<void> {
-  const specialistId = normalizeSpecialistHandle(handle);
-
-  if (!specialistId) {
-    throw new Error(`Invalid specialist handle: ${handle}`);
-  }
-
-  const sharedDir = getSharedSpecialistsDir(dataDir);
-  const filePath = join(sharedDir, `${sanitizePathSegment(specialistId)}.md`);
-
-  const existing = await parseSpecialistFile(filePath);
-  if (!existing) {
-    throw new Error(`Unknown specialist: ${specialistId}`);
-  }
-
-  if (existing.frontmatter.builtin) {
-    throw new Error(`Cannot delete builtin specialist: ${specialistId}`);
-  }
-
-  await unlink(filePath);
-  invalidateSpecialistCache();
-}
-
-export async function getWorkerTemplate(): Promise<string> {
-  const builtinDir = getBuiltinSpecialistsDir();
-  // Go up from builtins to archetypes/builtins/worker.md
-  const workerMdPath = join(builtinDir, "..", "..", "archetypes", "builtins", "worker.md");
-  try {
-    return await readFile(workerMdPath, "utf8");
-  } catch {
-    // Fallback minimal template
-    return [
-      "You are a worker agent in a swarm.",
-      "- Use coding tools (read/bash/edit/write) to execute implementation tasks.",
-      "- Your final assistant response is returned to the manager automatically.",
-      "- You are not user-facing.",
-    ].join("\n");
-  }
 }
 
 export function invalidateSpecialistCache(profileId?: string): void {
@@ -690,211 +280,6 @@ export function invalidateSpecialistCache(profileId?: string): void {
       rosterCache.delete(key);
     }
   }
-}
-
-function parseSpecialistMarkdown(markdown: string): ParsedSpecialistFile | null {
-  const normalizedMarkdown = markdown.replace(/^\uFEFF/, "");
-  const match = FRONTMATTER_BLOCK_PATTERN.exec(normalizedMarkdown);
-  if (!match) {
-    return null;
-  }
-
-  const frontmatterValues = parseFrontmatterValues(match[1]);
-
-  // Backward compatibility: migrate legacy preset-based frontmatter (`model`) to `modelId`.
-  const legacyModelPreset = parseOptionalString(frontmatterValues.model);
-  if (legacyModelPreset && !frontmatterValues.modelId) {
-    const legacyProvider = parseOptionalString(frontmatterValues.provider);
-    const effectiveDescriptor =
-      modelCatalogService.resolveModelDescriptorFromFamily(legacyModelPreset) ??
-      resolvePersistedModelDescriptorFromPreset(legacyModelPreset);
-    if (effectiveDescriptor) {
-      frontmatterValues.modelId = effectiveDescriptor.modelId;
-      if (legacyModelPreset.trim().toLowerCase() === "pi-5.6" && !frontmatterValues.reasoningLevel) {
-        frontmatterValues.reasoningLevel = effectiveDescriptor.thinkingLevel;
-      }
-      if (!frontmatterValues.provider) {
-        frontmatterValues.provider = effectiveDescriptor.provider;
-      }
-    } else if (isLegacyModelFieldModelId(legacyModelPreset, legacyProvider)) {
-      frontmatterValues.modelId = legacyModelPreset;
-      if (!frontmatterValues.provider) {
-        const inferredProvider = inferProviderFromModelId(legacyModelPreset);
-        if (inferredProvider) {
-          frontmatterValues.provider = inferredProvider;
-        }
-      }
-    } else {
-      return null;
-    }
-  }
-
-  const displayName = parseRequiredString(frontmatterValues, "displayName");
-  const color = parseRequiredString(frontmatterValues, "color");
-  const whenToUse = parseRequiredString(frontmatterValues, "whenToUse");
-  const modelId = parseOptionalString(frontmatterValues.modelId);
-
-  if (!displayName || !color || !whenToUse) {
-    return null;
-  }
-
-  if (!HEX_COLOR_PATTERN.test(color)) {
-    return null;
-  }
-
-  const enabled = parseOptionalBoolean(frontmatterValues.enabled);
-  const builtin = parseOptionalBoolean(frontmatterValues.builtin);
-  const pinned = parseOptionalBoolean(frontmatterValues.pinned);
-  const webSearch = parseOptionalBoolean(frontmatterValues.webSearch);
-  const forgePrecedence = parseOptionalString(frontmatterValues.forgePrecedence) === "override" ? "override" : undefined;
-  const defaultTier = parseEffortTier(frontmatterValues.defaultTier);
-
-  if (frontmatterValues.enabled !== undefined && enabled === undefined) {
-    return null;
-  }
-
-  if (frontmatterValues.builtin !== undefined && builtin === undefined) {
-    return null;
-  }
-
-  if (frontmatterValues.pinned !== undefined && pinned === undefined) {
-    return null;
-  }
-
-  if (frontmatterValues.webSearch !== undefined && webSearch === undefined) {
-    return null;
-  }
-
-  if (frontmatterValues.defaultTier !== undefined && !defaultTier) {
-    return null;
-  }
-
-  const normalizedModel = modelId
-    ? normalizeLegacyCursorAcpSpecialistModel({
-        provider: parseOptionalString(frontmatterValues.provider),
-        modelId,
-        reasoningLevel: parseOptionalString(frontmatterValues.reasoningLevel),
-      })
-    : {
-        provider: parseOptionalString(frontmatterValues.provider),
-        modelId: undefined,
-        reasoningLevel: normalizeLegacyReasoningLevel(parseOptionalString(frontmatterValues.reasoningLevel)),
-      };
-  if (normalizedModel.reasoningLevel && !isSwarmReasoningLevel(normalizedModel.reasoningLevel)) {
-    return null;
-  }
-
-  const normalizedFallbackModel = normalizeLegacyCursorAcpSpecialistModel({
-    provider: parseOptionalString(frontmatterValues.fallbackProvider),
-    modelId: parseOptionalString(frontmatterValues.fallbackModelId),
-    reasoningLevel: parseOptionalString(frontmatterValues.fallbackReasoningLevel),
-  });
-  if (normalizedFallbackModel.reasoningLevel && !isSwarmReasoningLevel(normalizedFallbackModel.reasoningLevel)) {
-    return null;
-  }
-
-  const body = normalizedMarkdown.slice(match[0].length).trim();
-  if (!body) {
-    return null;
-  }
-
-  return {
-    frontmatter: {
-      displayName,
-      color,
-      enabled: enabled ?? true,
-      whenToUse,
-      modelId: normalizedModel.modelId ?? modelId,
-      provider: normalizedModel.provider,
-      reasoningLevel: normalizedModel.reasoningLevel,
-      fallbackModelId: normalizedFallbackModel.modelId,
-      fallbackProvider: normalizedFallbackModel.provider,
-      fallbackReasoningLevel: normalizedFallbackModel.reasoningLevel,
-      builtin: builtin ?? false,
-      pinned: pinned ?? false,
-      webSearch: webSearch ?? false,
-      defaultTier,
-      forgePrecedence,
-    },
-    body,
-  };
-}
-
-function validateSaveRequest(data: SaveSpecialistRequest): SpecialistFrontmatter {
-  const displayName = data.displayName.trim();
-  const color = data.color.trim();
-  const whenToUse = data.whenToUse.trim();
-  const modelId = data.modelId?.trim();
-  const fallbackModelId = data.fallbackModelId?.trim();
-  const promptBody = data.promptBody.trim();
-
-  if (!displayName) {
-    throw new Error("displayName is required");
-  }
-
-  if (!HEX_COLOR_PATTERN.test(color)) {
-    throw new Error("color must be a hex color in #RRGGBB format");
-  }
-
-  if (!whenToUse) {
-    throw new Error("whenToUse is required");
-  }
-
-  if (!modelId && !data.defaultTier) {
-    throw new Error("modelId is required unless defaultTier is provided");
-  }
-
-  if (!promptBody) {
-    throw new Error("promptBody is required");
-  }
-
-  const provider = data.provider?.trim();
-  if (provider) {
-    assertClaudeSdkProviderNotSelected(provider, "provider");
-  }
-  const reasoningLevel = data.reasoningLevel?.trim();
-  if (reasoningLevel !== undefined && reasoningLevel.length > 0 && !isSwarmReasoningLevel(reasoningLevel)) {
-    throw new Error("reasoningLevel must be one of none|low|medium|high|xhigh|max|ultra");
-  }
-
-  const normalizedFallbackModelId = fallbackModelId && fallbackModelId.length > 0 ? fallbackModelId : undefined;
-  const fallbackProvider = data.fallbackProvider?.trim();
-  if (fallbackProvider) {
-    assertClaudeSdkProviderNotSelected(fallbackProvider, "fallbackProvider");
-  }
-
-  const fallbackReasoningLevel = data.fallbackReasoningLevel?.trim();
-  if (
-    fallbackReasoningLevel !== undefined &&
-    fallbackReasoningLevel.length > 0 &&
-    !isSwarmReasoningLevel(fallbackReasoningLevel)
-  ) {
-    throw new Error("fallbackReasoningLevel must be one of none|low|medium|high|xhigh|max|ultra");
-  }
-
-  // Strip fallback reasoning level when there's no fallback model — it has no effect without one.
-  const normalizedFallbackReasoningLevel =
-    normalizedFallbackModelId && fallbackReasoningLevel && fallbackReasoningLevel.length > 0
-      ? fallbackReasoningLevel
-      : undefined;
-
-  return {
-    displayName,
-    color,
-    enabled: data.enabled,
-    whenToUse,
-    modelId: modelId && modelId.length > 0 ? modelId : undefined,
-    provider: provider && provider.length > 0 ? provider : undefined,
-    reasoningLevel: reasoningLevel && reasoningLevel.length > 0 ? reasoningLevel : undefined,
-    fallbackModelId: normalizedFallbackModelId,
-    fallbackProvider:
-      normalizedFallbackModelId && fallbackProvider && fallbackProvider.length > 0 ? fallbackProvider : undefined,
-    fallbackReasoningLevel: normalizedFallbackReasoningLevel,
-    builtin: false,
-    pinned: data.pinned ?? false,
-    webSearch: modelId ? normalizeWebSearchForModelId(provider, modelId, data.webSearch === true) : false,
-    defaultTier: data.defaultTier,
-  };
 }
 
 function parseFrontmatterValues(rawFrontmatter: string): Record<string, string> {
@@ -920,16 +305,6 @@ function parseFrontmatterValues(rawFrontmatter: string): Record<string, string> 
   return values;
 }
 
-function parseRequiredString(values: Record<string, string>, key: string): string | undefined {
-  const value = values[key];
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
-}
-
 function parseOptionalString(value: string | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -943,91 +318,6 @@ function isLegacyModelFieldModelId(modelId: string, provider: string | undefined
   const inferredProvider = provider ?? inferProviderFromModelId(modelId) ?? undefined;
   const normalized = inferredProvider ? normalizePersistedSwarmModelDescriptor({ provider: inferredProvider, modelId }) : undefined;
   return modelCatalogService.isKnownModelId(normalized?.modelId ?? modelId, normalized?.provider ?? inferredProvider);
-}
-
-function parseEffortTier(value: string | undefined): EffortTier | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return EFFORT_TIER_ORDER.includes(normalized as EffortTier) ? normalized as EffortTier : undefined;
-}
-
-function cloneTierConfigs(configs: readonly TierConfig[]): TierConfig[] {
-  return configs.map((config) => ({ ...config }));
-}
-
-function parseTierConfig(value: unknown): TierConfig | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-
-  const raw = value as Record<string, unknown>;
-  const tier = typeof raw.tier === "string" ? parseEffortTier(raw.tier) : undefined;
-  const fallback = tier ? DEFAULT_TIER_CONFIGS[tier] : undefined;
-  let modelId = typeof raw.modelId === "string" ? raw.modelId.trim() : "";
-  let provider = typeof raw.provider === "string" ? raw.provider.trim() : "";
-  if (!tier || !fallback || !modelId || !provider) {
-    return undefined;
-  }
-
-  let reasoningLevel = typeof raw.reasoningLevel === "string"
-    ? normalizeLegacyReasoningLevel(raw.reasoningLevel)
-    : undefined;
-  if (reasoningLevel && !isSwarmReasoningLevel(reasoningLevel)) {
-    return undefined;
-  }
-
-  const normalizedModel = normalizePersistedSwarmModelDescriptor({ provider, modelId, thinkingLevel: reasoningLevel });
-  if (normalizedModel) {
-    if (reasoningLevel || normalizedModel.modelId !== modelId) reasoningLevel = normalizedModel.thinkingLevel;
-    provider = normalizedModel.provider;
-    modelId = normalizedModel.modelId;
-  }
-
-  let fallbackModelId = typeof raw.fallbackModelId === "string" && raw.fallbackModelId.trim().length > 0
-    ? raw.fallbackModelId.trim()
-    : undefined;
-  let fallbackProvider = typeof raw.fallbackProvider === "string" && raw.fallbackProvider.trim().length > 0
-    ? raw.fallbackProvider.trim()
-    : fallbackModelId
-      ? inferProviderFromModelId(fallbackModelId) ?? undefined
-      : undefined;
-  let fallbackReasoningLevel = typeof raw.fallbackReasoningLevel === "string"
-    ? normalizeLegacyReasoningLevel(raw.fallbackReasoningLevel)
-    : undefined;
-  if (fallbackReasoningLevel && !isSwarmReasoningLevel(fallbackReasoningLevel)) {
-    return undefined;
-  }
-
-  if (fallbackModelId && fallbackProvider) {
-    const normalizedFallback = normalizePersistedSwarmModelDescriptor({
-      provider: fallbackProvider,
-      modelId: fallbackModelId,
-      thinkingLevel: fallbackReasoningLevel,
-    });
-    if (normalizedFallback) {
-      if (fallbackReasoningLevel || normalizedFallback.modelId !== fallbackModelId) fallbackReasoningLevel = normalizedFallback.thinkingLevel;
-      fallbackProvider = normalizedFallback.provider;
-      fallbackModelId = normalizedFallback.modelId;
-    }
-  }
-
-  return {
-    tier,
-    displayName: typeof raw.displayName === "string" && raw.displayName.trim()
-      ? raw.displayName.trim()
-      : fallback.displayName,
-    description: typeof raw.description === "string" && raw.description.trim()
-      ? raw.description.trim()
-      : fallback.description,
-    color: typeof raw.color === "string" && HEX_COLOR_PATTERN.test(raw.color.trim())
-      ? raw.color.trim()
-      : fallback.color,
-    provider,
-    modelId,
-    ...(reasoningLevel ? { reasoningLevel } : {}),
-    ...(fallbackModelId ? { fallbackModelId } : {}),
-    ...(fallbackProvider ? { fallbackProvider } : {}),
-    ...(fallbackModelId && fallbackReasoningLevel ? { fallbackReasoningLevel } : {}),
-  };
 }
 
 function parseOptionalBoolean(value: string | undefined): boolean | undefined {
@@ -1129,138 +419,7 @@ function normalizeLegacyReasoningLevel(level: string | undefined): string | unde
   return normalized === "x-high" ? "xhigh" : normalized;
 }
 
-function toResolvedSpecialistDefinition(options: {
-  specialistId: string;
-  frontmatter: SpecialistFrontmatter;
-  body: string;
-  sourceKind: "builtin" | "global" | "profile" | "channel" | "workspace";
-  sourcePath: string;
-  shadowsGlobal: boolean;
-}): InternalResolvedSpecialistDefinition {
-  const provider = options.frontmatter.modelId
-    ? options.frontmatter.provider ?? inferProviderFromModelId(options.frontmatter.modelId) ?? "unknown"
-    : options.frontmatter.provider;
-  const fallbackProvider = options.frontmatter.fallbackProvider
-    ?? (options.frontmatter.fallbackModelId
-      ? (inferProviderFromModelId(options.frontmatter.fallbackModelId) ?? undefined)
-      : undefined);
 
-  const knownPrimaryModel =
-    !options.frontmatter.modelId || modelCatalogService.isKnownModelId(options.frontmatter.modelId, provider);
-  const knownFallbackModel =
-    !options.frontmatter.fallbackModelId ||
-    modelCatalogService.isKnownModelId(options.frontmatter.fallbackModelId, fallbackProvider);
-
-  let availabilityCode: "ok" | "invalid_model" = "ok";
-  let availabilityMessage: string | undefined;
-
-  if (provider?.trim().toLowerCase() === "claude-sdk") {
-    availabilityCode = "invalid_model";
-    availabilityMessage = CLAUDE_SDK_RETIRED_PROVIDER_MESSAGE;
-  } else if (fallbackProvider?.trim().toLowerCase() === "claude-sdk") {
-    availabilityCode = "invalid_model";
-    availabilityMessage = `Fallback unavailable: ${CLAUDE_SDK_RETIRED_PROVIDER_MESSAGE}`;
-  } else if (!knownPrimaryModel) {
-    availabilityCode = "invalid_model";
-    availabilityMessage = `Unknown modelId: ${options.frontmatter.modelId}`;
-  } else if (!knownFallbackModel && options.frontmatter.fallbackModelId) {
-    availabilityCode = "invalid_model";
-    availabilityMessage = `Unknown fallbackModelId: ${options.frontmatter.fallbackModelId}`;
-  }
-
-  const webSearch = options.frontmatter.modelId
-    ? normalizeWebSearchForModelId(provider, options.frontmatter.modelId, options.frontmatter.webSearch)
-    : false;
-
-  return {
-    specialistId: options.specialistId,
-    displayName: options.frontmatter.displayName,
-    color: options.frontmatter.color,
-    enabled: options.frontmatter.enabled,
-    whenToUse: options.frontmatter.whenToUse,
-    ...(options.frontmatter.modelId ? { modelId: options.frontmatter.modelId } : {}),
-    ...(provider ? { provider } : {}),
-    reasoningLevel: options.frontmatter.reasoningLevel,
-    fallbackModelId: options.frontmatter.fallbackModelId,
-    fallbackProvider,
-    fallbackReasoningLevel: options.frontmatter.fallbackReasoningLevel,
-    builtin: options.frontmatter.builtin,
-    pinned: options.frontmatter.pinned,
-    webSearch,
-    targetSpace: ["builder"],
-    promptBody: options.body,
-    sourceKind: options.sourceKind,
-    sourcePath: options.sourcePath,
-    available: availabilityCode === "ok",
-    availabilityCode,
-    availabilityMessage,
-    shadowsGlobal: options.shadowsGlobal,
-    ...(options.frontmatter.defaultTier ? { defaultTier: options.frontmatter.defaultTier } : {}),
-    ...(options.frontmatter.forgePrecedence ? { forgePrecedence: options.frontmatter.forgePrecedence } : {}),
-  };
-}
-
-function serializeSpecialistFile(frontmatter: SpecialistFrontmatter, body: string): string {
-  const lines = [
-    "---",
-    `displayName: ${quoteYamlString(frontmatter.displayName)}`,
-    `color: ${quoteYamlString(frontmatter.color)}`,
-    `enabled: ${frontmatter.enabled ? "true" : "false"}`,
-    `whenToUse: ${quoteYamlString(frontmatter.whenToUse)}`,
-  ];
-
-  if (frontmatter.defaultTier) {
-    lines.push(`defaultTier: ${quoteYamlString(frontmatter.defaultTier)}`);
-  }
-
-  if (frontmatter.modelId) {
-    lines.push(`modelId: ${quoteYamlString(frontmatter.modelId)}`);
-  }
-
-  if (frontmatter.provider) {
-    lines.push(`provider: ${quoteYamlString(frontmatter.provider)}`);
-  }
-
-  if (frontmatter.reasoningLevel) {
-    lines.push(`reasoningLevel: ${quoteYamlString(frontmatter.reasoningLevel)}`);
-  }
-
-  if (frontmatter.fallbackModelId) {
-    lines.push(`fallbackModelId: ${quoteYamlString(frontmatter.fallbackModelId)}`);
-
-    if (frontmatter.fallbackProvider) {
-      lines.push(`fallbackProvider: ${quoteYamlString(frontmatter.fallbackProvider)}`);
-    }
-
-    if (frontmatter.fallbackReasoningLevel) {
-      lines.push(`fallbackReasoningLevel: ${quoteYamlString(frontmatter.fallbackReasoningLevel)}`);
-    }
-  }
-
-  if (frontmatter.builtin) {
-    lines.push("builtin: true");
-  }
-
-  if (frontmatter.pinned) {
-    lines.push("pinned: true");
-  }
-
-  if (frontmatter.webSearch) {
-    lines.push("webSearch: true");
-  }
-
-  lines.push("---", "", body.trim(), "");
-
-  return lines.join("\n");
-}
-
-function quoteYamlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-async function writeSpecialistFile(filePath: string, content: string): Promise<void> {
-  await writeFileAtomic(filePath, content);
-}
 
 async function listMarkdownFiles(directoryPath: string): Promise<Dirent[]> {
   let entries: Dirent[];
@@ -1298,4 +457,127 @@ async function pathExists(path: string): Promise<boolean> {
 
     throw error;
   }
+}
+
+const DEFAULT_SPECIALIST_COLOR = "#7c3aed";
+
+export interface SpecialistFrontmatter {
+  displayName?: string;
+  color: string;
+  enabled: boolean;
+  whenToUse: string;
+  modelId?: string;
+  provider?: string;
+  reasoningLevel?: string;
+  builtin: boolean;
+  pinned: boolean;
+  webSearch: boolean;
+  forgePrecedence?: "override";
+}
+
+/**
+ * Tolerant by design: these are user-authored files. Unknown keys (defaultTier, fallback*,
+ * avoidWhen, ...) and unusable optional values are ignored rather than dropping the file.
+ */
+function parseSpecialistMarkdown(markdown: string): ParsedSpecialistFile | null {
+  const normalizedMarkdown = markdown.replace(/^\uFEFF/, "");
+  const match = FRONTMATTER_BLOCK_PATTERN.exec(normalizedMarkdown);
+  if (!match) {
+    return null;
+  }
+  const body = normalizedMarkdown.slice(match[0].length).trim();
+  if (!body) {
+    return null;
+  }
+
+  const values = parseFrontmatterValues(match[1]);
+  let provider = parseOptionalString(values.provider);
+  let modelId = parseOptionalString(values.modelId);
+  let reasoningLevel = parseOptionalString(values.reasoningLevel);
+
+  // Legacy preset-based frontmatter (`model`) names a family or a model id.
+  const legacyModel = parseOptionalString(values.model);
+  if (legacyModel && !modelId) {
+    const descriptor =
+      modelCatalogService.resolveModelDescriptorFromFamily(legacyModel) ??
+      resolvePersistedModelDescriptorFromPreset(legacyModel);
+    if (descriptor) {
+      modelId = descriptor.modelId;
+      provider ??= descriptor.provider;
+    } else if (isLegacyModelFieldModelId(legacyModel, provider)) {
+      modelId = legacyModel;
+    }
+  }
+
+  const normalizedModel = modelId
+    ? normalizeLegacyCursorAcpSpecialistModel({ provider, modelId, reasoningLevel })
+    : { provider, modelId: undefined, reasoningLevel: normalizeLegacyReasoningLevel(reasoningLevel) };
+  provider = normalizedModel.provider ?? (normalizedModel.modelId ? inferProviderFromModelId(normalizedModel.modelId) ?? undefined : undefined);
+  modelId = normalizedModel.modelId;
+  reasoningLevel = normalizedModel.reasoningLevel && isSwarmReasoningLevel(normalizedModel.reasoningLevel)
+    ? normalizedModel.reasoningLevel
+    : undefined;
+
+  const color = parseOptionalString(values.color);
+  return {
+    frontmatter: {
+      displayName: parseOptionalString(values.displayName),
+      color: color && HEX_COLOR_PATTERN.test(color) ? color : DEFAULT_SPECIALIST_COLOR,
+      enabled: parseOptionalBoolean(values.enabled) ?? true,
+      whenToUse: parseOptionalString(values.whenToUse) ?? "",
+      modelId,
+      provider,
+      reasoningLevel,
+      builtin: parseOptionalBoolean(values.builtin) ?? false,
+      pinned: parseOptionalBoolean(values.pinned) ?? false,
+      webSearch: parseOptionalBoolean(values.webSearch) ?? false,
+      forgePrecedence: parseOptionalString(values.forgePrecedence) === "override" ? "override" : undefined,
+    },
+    body,
+  };
+}
+
+function toResolvedSpecialistDefinition(options: {
+  specialistId: string;
+  frontmatter: SpecialistFrontmatter;
+  body: string;
+  sourceKind: "builtin" | "global" | "profile" | "channel" | "workspace";
+  sourcePath: string;
+  shadowsGlobal: boolean;
+}): InternalResolvedSpecialistDefinition {
+  const { frontmatter } = options;
+  let availabilityCode: "ok" | "invalid_model" = "ok";
+  let availabilityMessage: string | undefined;
+  if (frontmatter.provider?.trim().toLowerCase() === "claude-sdk") {
+    availabilityCode = "invalid_model";
+    availabilityMessage = CLAUDE_SDK_RETIRED_PROVIDER_MESSAGE;
+  } else if (frontmatter.modelId && !modelCatalogService.isKnownModelId(frontmatter.modelId, frontmatter.provider)) {
+    availabilityCode = "invalid_model";
+    availabilityMessage = `Unknown modelId: ${frontmatter.modelId}`;
+  }
+
+  return {
+    specialistId: options.specialistId,
+    displayName: frontmatter.displayName ?? options.specialistId,
+    color: frontmatter.color,
+    enabled: frontmatter.enabled,
+    whenToUse: frontmatter.whenToUse,
+    ...(frontmatter.modelId ? { modelId: frontmatter.modelId } : {}),
+    ...(frontmatter.provider ? { provider: frontmatter.provider } : {}),
+    reasoningLevel: frontmatter.reasoningLevel,
+    builtin: frontmatter.builtin,
+    pinned: frontmatter.pinned,
+    webSearch: frontmatter.modelId
+      ? normalizeWebSearchForModelId(frontmatter.provider, frontmatter.modelId, frontmatter.webSearch)
+      : false,
+    targetSpace: ["builder"],
+    promptBody: options.body,
+    sourceKind: options.sourceKind,
+    sourcePath: options.sourcePath,
+    available: availabilityCode === "ok",
+    availabilityCode,
+    availabilityMessage,
+    shadowsGlobal: options.shadowsGlobal,
+    ...(frontmatter.forgePrecedence ? { forgePrecedence: frontmatter.forgePrecedence } : {}),
+  };
 }

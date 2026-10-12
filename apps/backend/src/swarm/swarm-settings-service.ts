@@ -5,18 +5,12 @@ import {
   type OpenAIBrokerTestResponse,
   type RedeemOpenAIBrokerInviteRequest,
   type UpdateOpenAIBrokerSettingsRequest,
-  DEFAULT_MANAGER_POSTURE,
-  createDefaultDelegationRoster,
   isSystemProfile,
-  RECOMMENDED_MANAGER_DEFAULTS,
-  type ApplyRecommendedManagerDefaultsResponse,
   getCatalogModelKey,
   type ContextMode,
   type CredentialPoolState,
-  type DelegationRoster,
-  type DelegationRosterSettings,
   type ManagerExactModelSelection,
-  type ManagerPosture,
+  type WorkerPresetSettings,
   type CredentialPoolStrategy,
   type PooledCredentialInfo,
   type SkillBundleManifestV1,
@@ -59,11 +53,7 @@ import {
 import { requireContextMode } from "./context-mode.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
-import {
-  normalizeDelegationRosterSettings,
-  resolveDelegationRosterSettings,
-  saveDelegationRosterSettings as persistDelegationRosterSettings,
-} from "./specialists/delegation-roster-store.js";
+import { readWorkerPresetSettings, saveWorkerPresetSettings } from "./specialists/worker-presets.js";
 import type {
   AgentDescriptor,
   ManagerProfile,
@@ -85,7 +75,7 @@ interface SettingsDescriptorTransactionStore {
   ) => ManagerProfile;
 }
 
-export type ManagerRuntimeRecycleReason = "model_change" | "cwd_change" | "prompt_mode_change" | "auth_source_change";
+export type ManagerRuntimeRecycleReason = "model_change" | "cwd_change" | "prompt_mode_change" | "auth_source_change" | "specialist_roster_change";
 
 type ManagerRuntimeRecycleDisposition = "recycled" | "deferred" | "none";
 type SessionDescriptor = AgentDescriptor & { role: "manager"; profileId: string };
@@ -233,342 +223,22 @@ export class SwarmSettingsService {
     });
   }
 
-  async getDelegationRosterSettings(): Promise<DelegationRosterSettings> {
-    return resolveDelegationRosterSettings(this.options.config.paths.dataDir);
+  getWorkerPresetSettings(): Promise<WorkerPresetSettings> {
+    return readWorkerPresetSettings(this.options.config.paths.dataDir);
   }
 
-  async saveDelegationRosterSettings(input: unknown): Promise<DelegationRosterSettings> {
-    const settings = normalizeDelegationRosterSettings(input);
-    assertDelegationRosterModelsAvailable(settings);
-    assertDelegationRosterReferencesRemainValid(
-      settings,
-      this.options.profiles.values(),
-      this.options.getAllManagerSessions(),
-    );
-    const saved = await persistDelegationRosterSettings(
+  /** The preset list is part of every manager's instructions, so a change recycles them. */
+  async saveWorkerPresetSettings(input: unknown): Promise<WorkerPresetSettings> {
+    const saved = await saveWorkerPresetSettings(
       this.options.config.paths.dataDir,
-      settings,
+      input,
+      (modelId, provider) => modelCatalogService.isKnownModelId(modelId, provider),
     );
-    await this.applyGlobalDelegationRosterDefault(saved.defaultRosterId);
+    await Promise.allSettled(
+      this.options.getAllManagerSessions().map((session) =>
+        this.options.applyManagerRuntimeRecyclePolicy(session.agentId, "specialist_roster_change")),
+    );
     return saved;
-  }
-
-  async applyRecommendedManagerDefaults(): Promise<ApplyRecommendedManagerDefaultsResponse> {
-    await this.resolveExactManagerModel(
-      {
-        provider: RECOMMENDED_MANAGER_DEFAULTS.model.provider,
-        modelId: RECOMMENDED_MANAGER_DEFAULTS.model.modelId,
-      },
-      "change",
-      RECOMMENDED_MANAGER_DEFAULTS.model.reasoningId,
-    );
-    const currentSettings = await resolveDelegationRosterSettings(this.options.config.paths.dataDir);
-    const recommendedRoster = createDefaultDelegationRoster();
-    const savedSettings = await this.saveDelegationRosterSettings({
-      ...currentSettings,
-      defaultRosterId: recommendedRoster.rosterId,
-      rosters: [
-        ...currentSettings.rosters.filter((roster) =>
-          roster.rosterId !== recommendedRoster.rosterId
-          && !isLegacyHandsOnSupportRoster(roster)
-        ),
-        recommendedRoster,
-      ],
-    });
-    const savedRoster = savedSettings.rosters.find(
-      (roster) => roster.rosterId === recommendedRoster.rosterId,
-    );
-    if (!savedRoster) throw new Error("Recommended roster was not saved.");
-
-    const profileIds = [...this.options.profiles.values()]
-      .filter((profile) => !isSystemProfile(profile))
-      .map((profile) => profile.profileId);
-    for (const profileId of profileIds) {
-      await this.updateProfileDefaultExactModel(
-        profileId,
-        {
-          provider: RECOMMENDED_MANAGER_DEFAULTS.model.provider,
-          modelId: RECOMMENDED_MANAGER_DEFAULTS.model.modelId,
-        },
-        RECOMMENDED_MANAGER_DEFAULTS.model.reasoningId,
-      );
-      await this.updateProjectDelegationDefaults(profileId, {
-        managerPosture: RECOMMENDED_MANAGER_DEFAULTS.workModeId,
-        delegationRosterId: RECOMMENDED_MANAGER_DEFAULTS.rosterId,
-      });
-    }
-
-    return {
-      profileIds,
-      rosterId: savedRoster.rosterId,
-      rosterRevision: savedRoster.revision,
-    };
-  }
-
-  async updateProjectDelegationDefaults(
-    profileId: string,
-    updates: {
-      managerPosture?: ManagerPosture | null;
-      delegationRosterId?: string | null;
-    },
-  ): Promise<void> {
-    const profile = this.options.profiles.get(profileId);
-    if (!profile) throw new Error(`Unknown manager profile: ${profileId}`);
-    const touchesPosture = Object.prototype.hasOwnProperty.call(updates, "managerPosture");
-    const touchesRoster = Object.prototype.hasOwnProperty.call(updates, "delegationRosterId");
-    if (!touchesPosture && !touchesRoster) {
-      throw new Error("Project delegation defaults update requires posture or roster.");
-    }
-
-    const rosterSettings = touchesRoster
-      ? await resolveDelegationRosterSettings(this.options.config.paths.dataDir)
-      : undefined;
-    const requestedRosterId = updates.delegationRosterId?.trim() || undefined;
-    if (
-      requestedRosterId
-      && !rosterSettings?.rosters.some((roster) => roster.rosterId === requestedRosterId)
-    ) {
-      throw new Error(`Unknown roster: ${requestedRosterId}`);
-    }
-    const effectiveRosterId = requestedRosterId ?? rosterSettings?.defaultRosterId;
-    const sessions = this.options.getSessionsForProfile(profileId);
-    const sessionMutations = sessions
-      .map((session) => ({
-        session,
-        updatePosture:
-          touchesPosture && session.managerPostureOrigin !== "session_override",
-        updateRoster:
-          touchesRoster && session.delegationRosterOrigin !== "session_override",
-      }))
-      .filter((mutation) => mutation.updatePosture || mutation.updateRoster);
-    const now = getNow(this.options.now)();
-    const previousProfile = {
-      defaultManagerPosture: profile.defaultManagerPosture,
-      defaultDelegationRosterId: profile.defaultDelegationRosterId,
-      updatedAt: profile.updatedAt,
-    };
-    const previousSessions = sessionMutations.map(({ session }) => ({
-      session,
-      managerPosture: session.managerPosture,
-      managerPostureOrigin: session.managerPostureOrigin,
-      delegationRosterId: session.delegationRosterId,
-      delegationRosterOrigin: session.delegationRosterOrigin,
-    }));
-    const changedPostureSessions = touchesPosture
-      ? sessionMutations
-        .filter((mutation) => mutation.updatePosture)
-        .map((mutation) => mutation.session)
-        .filter(
-          (session) =>
-            session.managerPosture !== (updates.managerPosture ?? DEFAULT_MANAGER_POSTURE),
-        )
-      : [];
-
-    await this.runDescriptorTransaction(async (store) => {
-      store.patchProfile(profileId, {
-        ...(touchesPosture
-          ? { defaultManagerPosture: updates.managerPosture ?? undefined }
-          : {}),
-        ...(touchesRoster
-          ? { defaultDelegationRosterId: requestedRosterId }
-          : {}),
-        updatedAt: now,
-      });
-      for (const mutation of sessionMutations) {
-        const { session } = mutation;
-        store.patchDescriptor(session.agentId, {
-          ...(mutation.updatePosture
-            ? {
-                managerPosture: updates.managerPosture ?? DEFAULT_MANAGER_POSTURE,
-                managerPostureOrigin: updates.managerPosture
-                  ? "project_default"
-                  : "product_default",
-              }
-            : {}),
-          ...(mutation.updateRoster && effectiveRosterId
-            ? {
-                delegationRosterId: effectiveRosterId,
-                delegationRosterOrigin: requestedRosterId
-                  ? "project_default"
-                  : "global_default",
-              }
-            : {}),
-        });
-      }
-    }, async () => {
-      try {
-        if (touchesPosture) profile.defaultManagerPosture = updates.managerPosture ?? undefined;
-        if (touchesRoster) profile.defaultDelegationRosterId = requestedRosterId;
-        profile.updatedAt = now;
-        for (const mutation of sessionMutations) {
-          const { session } = mutation;
-          if (mutation.updatePosture) {
-            session.managerPosture = updates.managerPosture ?? DEFAULT_MANAGER_POSTURE;
-            session.managerPostureOrigin = updates.managerPosture
-              ? "project_default"
-              : "product_default";
-          }
-          if (mutation.updateRoster && effectiveRosterId) {
-            session.delegationRosterId = effectiveRosterId;
-            session.delegationRosterOrigin = requestedRosterId
-              ? "project_default"
-              : "global_default";
-          }
-        }
-        await this.options.saveStore();
-      } catch (error) {
-        profile.defaultManagerPosture = previousProfile.defaultManagerPosture;
-        profile.defaultDelegationRosterId = previousProfile.defaultDelegationRosterId;
-        profile.updatedAt = previousProfile.updatedAt;
-        for (const previous of previousSessions) {
-          previous.session.managerPosture = previous.managerPosture;
-          previous.session.managerPostureOrigin = previous.managerPostureOrigin;
-          previous.session.delegationRosterId = previous.delegationRosterId;
-          previous.session.delegationRosterOrigin = previous.delegationRosterOrigin;
-        }
-        throw error;
-      }
-    });
-
-    const recycleResults = await Promise.allSettled(
-      changedPostureSessions.map((session) =>
-        this.options.applyManagerRuntimeRecyclePolicy(session.agentId, "prompt_mode_change")),
-    );
-    recycleResults.forEach((result, index) => {
-      if (result.status === "rejected") {
-        this.options.logDebug("manager:posture_change:runtime_recycle:error", {
-          agentId: changedPostureSessions[index]?.agentId,
-          message: errorToMessage(result.reason),
-        });
-      }
-    });
-    this.options.emitProfilesSnapshot();
-    this.options.emitAgentsSnapshot();
-  }
-
-  async updateSessionDelegation(
-    sessionAgentId: string,
-    updates: {
-      managerPosture?: { mode: "inherit" } | { mode: "override"; value: ManagerPosture };
-      delegationRoster?: { mode: "inherit" } | { mode: "override"; rosterId: string };
-    },
-  ): Promise<void> {
-    const session = this.options.getSessionById(sessionAgentId);
-    if (!session) throw new Error(`Unknown session: ${sessionAgentId}`);
-    const profile = this.options.profiles.get(session.profileId);
-    if (!profile) throw new Error(`Unknown manager profile: ${session.profileId}`);
-    if (!updates.managerPosture && !updates.delegationRoster) {
-      throw new Error("Session delegation update requires posture or roster.");
-    }
-
-    const hasCompletePosture = (
-      session.managerPosture !== undefined
-      && session.managerPostureOrigin !== undefined
-    );
-    const hasCompleteRoster = (
-      session.delegationRosterId !== undefined
-      && session.delegationRosterOrigin !== undefined
-    );
-    const rosterSettings = updates.delegationRoster || !hasCompleteRoster
-      ? await resolveDelegationRosterSettings(this.options.config.paths.dataDir)
-      : undefined;
-    const requestedRosterId = updates.delegationRoster?.mode === "override"
-      ? updates.delegationRoster.rosterId.trim()
-      : undefined;
-    if (
-      requestedRosterId
-      && !rosterSettings?.rosters.some((roster) => roster.rosterId === requestedRosterId)
-    ) {
-      throw new Error(`Unknown roster: ${requestedRosterId}`);
-    }
-
-    const inheritedPosture = profile.defaultManagerPosture ?? DEFAULT_MANAGER_POSTURE;
-    const inheritedPostureOrigin = profile.defaultManagerPosture
-      ? "project_default" as const
-      : "product_default" as const;
-    const inheritedRosterId = profile.defaultDelegationRosterId ?? rosterSettings?.defaultRosterId;
-    const inheritedRosterOrigin = profile.defaultDelegationRosterId
-      ? "project_default" as const
-      : "global_default" as const;
-    const targetPosture = updates.managerPosture?.mode === "override"
-      ? updates.managerPosture.value
-      : updates.managerPosture
-        ? inheritedPosture
-        : session.managerPosture ?? inheritedPosture;
-    const targetPostureOrigin = updates.managerPosture?.mode === "override"
-      ? "session_override" as const
-      : updates.managerPosture || session.managerPosture === undefined
-        ? inheritedPostureOrigin
-        : session.managerPostureOrigin ?? (
-          targetPosture === inheritedPosture
-            ? inheritedPostureOrigin
-            : "session_override" as const
-        );
-    const targetRosterId = updates.delegationRoster?.mode === "override"
-      ? requestedRosterId
-      : updates.delegationRoster
-        ? inheritedRosterId
-        : session.delegationRosterId ?? inheritedRosterId;
-    if (!targetRosterId) {
-      throw new Error("No default roster is configured.");
-    }
-    const targetRosterOrigin = updates.delegationRoster?.mode === "override"
-      ? "session_override" as const
-      : updates.delegationRoster || session.delegationRosterId === undefined
-        ? inheritedRosterOrigin
-        : session.delegationRosterOrigin ?? (
-          targetRosterId === inheritedRosterId
-            ? inheritedRosterOrigin
-            : "session_override" as const
-        );
-    const postureChanged = Boolean(
-      updates.managerPosture
-      && (session.managerPosture ?? inheritedPosture) !== targetPosture,
-    );
-    const previous = {
-      managerPosture: session.managerPosture,
-      managerPostureOrigin: session.managerPostureOrigin,
-      delegationRosterId: session.delegationRosterId,
-      delegationRosterOrigin: session.delegationRosterOrigin,
-    };
-    const patch: Partial<AgentDescriptor> = {
-      ...(updates.managerPosture || !hasCompletePosture
-        ? {
-            managerPosture: targetPosture,
-            managerPostureOrigin: targetPostureOrigin,
-          }
-        : {}),
-      ...(updates.delegationRoster || !hasCompleteRoster
-        ? {
-            delegationRosterId: targetRosterId,
-            delegationRosterOrigin: targetRosterOrigin,
-          }
-        : {}),
-    };
-    await this.runDescriptorTransaction(
-      async (store) => {
-        await store.patchDescriptor(session.agentId, patch);
-      },
-      async () => {
-        try {
-          Object.assign(session, patch);
-          await this.options.saveStore();
-        } catch (error) {
-          session.managerPosture = previous.managerPosture;
-          session.managerPostureOrigin = previous.managerPostureOrigin;
-          session.delegationRosterId = previous.delegationRosterId;
-          session.delegationRosterOrigin = previous.delegationRosterOrigin;
-          throw error;
-        }
-      },
-    );
-    if (postureChanged) {
-      await this.options.applyManagerRuntimeRecyclePolicy(
-        session.agentId,
-        "prompt_mode_change",
-      );
-    }
-    this.options.emitAgentsSnapshot();
   }
 
   async updateProjectSecureSessionsEnabled(profileId: string, enabled: boolean): Promise<void> {
@@ -667,52 +337,6 @@ export class SwarmSettingsService {
     );
     this.options.emitAgentsSnapshot();
     return { ...session };
-  }
-
-  async applyGlobalDelegationRosterDefault(rosterId: string): Promise<void> {
-    const normalizedRosterId = rosterId.trim();
-    if (!normalizedRosterId) throw new Error("Global roster id is required.");
-    const settings = await resolveDelegationRosterSettings(this.options.config.paths.dataDir);
-    if (!settings.rosters.some((roster) => roster.rosterId === normalizedRosterId)) {
-      throw new Error(`Unknown roster: ${normalizedRosterId}`);
-    }
-    const sessions = this.options.getAllManagerSessions().filter((session) => (
-      session.delegationRosterOrigin === "global_default"
-      || session.delegationRosterOrigin === undefined
-    ));
-    const changed = sessions.filter((session) => (
-      session.delegationRosterId !== normalizedRosterId
-      || session.delegationRosterOrigin !== "global_default"
-    ));
-    if (changed.length === 0) return;
-    await this.runDescriptorTransaction(async (store) => {
-      for (const session of changed) {
-        store.patchDescriptor(session.agentId, {
-          delegationRosterId: normalizedRosterId,
-          delegationRosterOrigin: "global_default",
-        });
-      }
-    }, async () => {
-      const previous = changed.map((session) => ({
-        session,
-        delegationRosterId: session.delegationRosterId,
-        delegationRosterOrigin: session.delegationRosterOrigin,
-      }));
-      try {
-        for (const session of changed) {
-          session.delegationRosterId = normalizedRosterId;
-          session.delegationRosterOrigin = "global_default";
-        }
-        await this.options.saveStore();
-      } catch (error) {
-        for (const item of previous) {
-          item.session.delegationRosterId = item.delegationRosterId;
-          item.session.delegationRosterOrigin = item.delegationRosterOrigin;
-        }
-        throw error;
-      }
-    });
-    this.options.emitAgentsSnapshot();
   }
 
   async updateManagerCwd(managerId: string, newCwd: string): Promise<string> {
@@ -1603,59 +1227,7 @@ export class SwarmSettingsService {
   }
 }
 
-function assertDelegationRosterModelsAvailable(settings: DelegationRosterSettings): void {
-  for (const roster of settings.rosters) {
-    for (const route of roster.routes) {
-      if (!modelCatalogService.isModelEnabled(route.modelId, route.provider)) {
-        throw new Error(
-          `Delegation route "${route.routeId}" references unavailable model `
-          + `"${route.provider}/${route.modelId}".`,
-        );
-      }
-      const fallback = route.availabilityFallback;
-      if (
-        fallback
-        && !modelCatalogService.isModelEnabled(fallback.modelId, fallback.provider)
-      ) {
-        throw new Error(
-          `Delegation route "${route.routeId}" references unavailable fallback model `
-          + `"${fallback.provider}/${fallback.modelId}".`,
-        );
-      }
-    }
-  }
-}
 
-function assertDelegationRosterReferencesRemainValid(
-  settings: DelegationRosterSettings,
-  profiles: Iterable<ManagerProfile>,
-  sessions: readonly SessionDescriptor[],
-): void {
-  const available = new Set(settings.rosters.map((roster) => roster.rosterId));
-  for (const profile of profiles) {
-    if (
-      profile.defaultDelegationRosterId
-      && !available.has(profile.defaultDelegationRosterId)
-    ) {
-      throw new Error(
-        `Cannot remove roster "${profile.defaultDelegationRosterId}" while project `
-        + `"${profile.displayName}" uses it as its default.`,
-      );
-    }
-  }
-  for (const session of sessions) {
-    if (
-      session.delegationRosterOrigin === "session_override"
-      && session.delegationRosterId
-      && !available.has(session.delegationRosterId)
-    ) {
-      throw new Error(
-        `Cannot remove roster "${session.delegationRosterId}" while session `
-        + `"${session.sessionLabel ?? session.displayName}" uses it.`,
-      );
-    }
-  }
-}
 
 function hasOpenAIAuthBrokerRuntimeBoundaryChanged(
   before: OpenAIBrokerSettingsResponse,
@@ -1701,14 +1273,6 @@ function errorToMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function isLegacyHandsOnSupportRoster(roster: DelegationRoster): boolean {
-  if (roster.name !== "Hands-on support") return false;
-  const routeIds = new Set(roster.routes.map((route) => route.routeId));
-  return routeIds.size === 3
-    && routeIds.has("plan-consultant")
-    && routeIds.has("independent-reviewer")
-    && routeIds.has("researcher");
-}
 
 function cloneModelDescriptor(model: AgentDescriptor["model"]): AgentDescriptor["model"] {
   return {
