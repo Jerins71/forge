@@ -19,7 +19,7 @@ export class CodexRuntimeEvents {
     if (!id || this.completed.has(id)) return [];
     // Input steered into the turn abandons the reply being streamed: Codex never completes that item.
     // End it here, before the answer, so the turn's last message is the answer.
-    if (item?.type === "userMessage") return this.finishMessages();
+    if (item?.type === "userMessage") return this.abandonedReplies().map(open => this.messageEvent("message_end", open));
     if (item?.type === "fileChange" && Array.isArray(item.changes)) {
       const changes = JSON.stringify(item.changes, null, 2);
       // Never offer approval for a truncated or unavailable diff.
@@ -78,7 +78,7 @@ export class CodexRuntimeEvents {
     const item = params.item;
     const id = String(item?.id ?? params.itemId ?? "");
     if (!id || this.completed.has(id)) return [];
-    if (item?.type === "userMessage") return this.finishProvider(origin, turn);
+    if (item?.type === "userMessage") return this.abandonedReplies().flatMap(open => this.providerEvents([this.messageEvent("message_end", open)], open, origin, turn));
     if (method === "item/reasoning/textDelta" || method === "item/reasoning/summaryTextDelta") {
       const previous = this.messages.get(id);
       const delta = String(params.delta ?? "");
@@ -131,7 +131,14 @@ export class CodexRuntimeEvents {
     return facts;
   }
 
-  private finishMessages(): RuntimeSessionEvent[] {
+  /** Reply items still streaming, marked complete: only a steer finds any. */
+  private abandonedReplies(): string[] {
+    const open = [...this.messages].filter(([id, value]) => !this.completed.has(id) && value.phase !== "reasoning").map(([id]) => id);
+    for (const id of open) this.completed.add(id);
+    return open;
+  }
+
+  finish(): RuntimeSessionEvent[] {
     const events: RuntimeSessionEvent[] = [];
     for (const id of this.messages.keys()) {
       if (!this.completed.has(id)) {
@@ -139,11 +146,6 @@ export class CodexRuntimeEvents {
         this.completed.add(id);
       }
     }
-    return events;
-  }
-
-  finish(): RuntimeSessionEvent[] {
-    const events = this.finishMessages();
     for (const [id, toolName] of this.tools) {
       if (!this.completed.has(id)) {
         events.push({ type: "tool_execution_end", toolName, toolCallId: id,
