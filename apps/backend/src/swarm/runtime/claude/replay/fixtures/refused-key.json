@@ -1,0 +1,130 @@
+{
+  "provider": "claude",
+  "protocol": "agent-sdk/stdio-control",
+  "version": "0.3.280",
+  "scenario": "refused-key",
+  "provenance": "api_retry frame as captured from the real CLI against a local stub answering 401; the other frames are synthetic from the installed SDK wire contract.",
+  "entries": [
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "initialize",
+          "sdkMcpServers": [
+            "forge"
+          ],
+          "appendSystemPrompt": "$prompt"
+        }
+      },
+      "capture": {
+        "$initId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$initId",
+          "response": {
+            "commands": [],
+            "models": [],
+            "agents": []
+          }
+        }
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "frame": {
+        "type": "user",
+        "uuid": "$any",
+        "parent_tool_use_id": null,
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "work"
+            }
+          ]
+        }
+      },
+      "capture": {
+        "$inputId": [
+          "uuid"
+        ]
+      },
+      "label": "input"
+    },
+    {
+      "type": "emit_inbound",
+      "label": "refused",
+      "frame": {
+        "type": "system",
+        "subtype": "api_retry",
+        "attempt": 1,
+        "max_retries": 10,
+        "retry_delay_ms": 552,
+        "error_status": 401,
+        "error": "authentication_failed",
+        "uuid": "retry-1",
+        "session_id": "$sessionId"
+      }
+    },
+    {
+      "type": "expect_outbound",
+      "label": "interrupt",
+      "frame": {
+        "type": "control_request",
+        "request": {
+          "subtype": "interrupt"
+        }
+      },
+      "capture": {
+        "$interruptId": [
+          "request_id"
+        ]
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "control_response",
+        "response": {
+          "subtype": "success",
+          "request_id": "$interruptId",
+          "response": {}
+        }
+      }
+    },
+    {
+      "type": "emit_inbound",
+      "frame": {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "result": "Done",
+        "duration_ms": 3,
+        "duration_api_ms": 2,
+        "num_turns": 1,
+        "total_cost_usd": 0.001,
+        "usage": {
+          "input_tokens": 11,
+          "output_tokens": 2,
+          "cache_read_input_tokens": 0,
+          "cache_creation_input_tokens": 0
+        },
+        "modelUsage": {},
+        "permission_denials": [],
+        "uuid": "result-1",
+        "session_id": "$sessionId"
+      },
+      "label": "terminal"
+    }
+  ]
+}

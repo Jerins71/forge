@@ -96,8 +96,8 @@
         "attempt": 2,
         "max_retries": 10,
         "retry_delay_ms": 500,
-        "error_status": 401,
-        "error": "authentication_failed",
+        "error_status": 429,
+        "error": "rate_limit",
         "uuid": "retry-envelope-0",
         "session_id": "$sessionId"
       }

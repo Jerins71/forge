@@ -362,6 +362,7 @@ export function readableProviderError(raw: string): string {
   const text = oneLine(message).replace(/[.\s]+$/, "");
   const code = status ?? /\b([45]\d\d)\b/.exec(text)?.[1];
   if (code === "401" || /unauthori[sz]ed|(invalid|incorrect) api key|authentication/i.test(text)) return "The provider rejected the API key (401). Check the key in Settings → Authentication.";
+  if (code === "403") return "The provider refused this API key (403). Check the key and what it is allowed to use in Settings → Authentication.";
   if (code === "429" || /rate.?limit|too many requests/i.test(text)) return "The provider is rate limiting requests (429). Wait a moment, then send again.";
   if (code === "404" || /\bnot found\b/i.test(text)) return "The provider endpoint was not found (404). Check the base URL in Settings → Authentication.";
   if (/exited \(code=|process exited|app-server exited/i.test(text)) return "The provider process stopped unexpectedly.";

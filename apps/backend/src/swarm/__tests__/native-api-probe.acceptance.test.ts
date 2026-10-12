@@ -131,7 +131,7 @@ describe("Test connection", () => {
   it.each(["claude", "codex"] as const)("%s: a rate-limited endpoint is not reported as connected", async runtime => {
     const status = await save<CodexAuthStatus>(runtime, runtime === "claude" ? `${origin}/limited` : `${origin}/limited/v1`);
     expect(status.access!.probe).toMatchObject({ outcome: "rate_limited", status: 429 });
-    expect(status.access!.probe!.message).toContain("rate limit");
+    expect(status.access!.probe!.message).toContain("Rate limited (429)");
     expect(status.access!.probe!.message).not.toContain("Connected");
   });
 

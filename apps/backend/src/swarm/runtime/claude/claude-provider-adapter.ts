@@ -66,6 +66,7 @@ export class ClaudeProviderAdapter implements ProviderAdapter {
         onNativePrepared: (runtime, binding) => { this.runtime = runtime; this.binding = binding; },
         nativeConversation: resumeId ? { resumeId } : forkFrom ? { forkFrom, sessionId: forkSessionId ?? randomUUID() } : undefined });
       this.runtime = native.runtime; this.binding = native.binding;
+      this.session!.onRefused = () => { void native.runtime.interruptProvider().catch(() => undefined); };
       return native.binding;
     })();
     try { return await this.opening; } finally { this.opening = undefined; }

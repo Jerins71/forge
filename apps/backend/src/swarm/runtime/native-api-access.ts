@@ -157,7 +157,7 @@ export async function probeNativeApiAccess(provider: NativeRuntimeProvider, acce
       : { ...base, outcome: "ok", status, message: `The endpoint answered and asks for a sign-in (${status}), so the path is right. Your ${name} subscription sign-in is not part of this test.` };
   }
   // A 429 is sent before the key's standing is known to be good: an account that is out of quota answers the same way.
-  if (status === 429) return { ...base, outcome: "rate_limited", status, message: `The endpoint answered with a rate limit (429), so the path is right, but this test cannot tell whether work will run. Check the quota${apiKey ? " for the saved key" : ""} on the router, or test again later.` };
+  if (status === 429) return { ...base, outcome: "rate_limited", status, message: `Rate limited (429): the endpoint answered, so the path is right, but it is throttling requests and this test cannot tell whether work will run. Check the quota${apiKey ? " for the saved key" : ""} on the router, or test again later.` };
   if (status >= 500) return { ...base, outcome: "error", status, message: `The endpoint answered with a server error (${status}). The address is reachable; check the router itself.` };
   return { ...base, outcome: "ok", status, message: apiKey ? `Connected: the endpoint answered and accepted the saved key.` : `Connected: the endpoint answered. Your ${name} subscription sign-in is not part of this test.` };
 }

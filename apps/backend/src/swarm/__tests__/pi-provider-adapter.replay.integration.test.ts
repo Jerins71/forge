@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readableProviderError } from "../session/activity-timeline.js";
 import { createServer, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -413,6 +414,47 @@ pi.on('tool_result', async () => { await fetch(${JSON.stringify(gateUrl)}); });`
       await new Promise<void>(resolve => gate.close(() => resolve()));
     }
   });
+
+  // Ways this can fail: a refused key or a rate limit is retried out of sight; the failure is reported more
+  // than once, without its status, or in words the status row cannot turn into a plain sentence.
+  it("fails a rate-limited turn once, with the status the row needs", async () => {
+    // Through Forge, Pi does not retry this itself: one request, one failure.
+    const peer = await createPiModelPeer(transcript([request("start"),
+      { type: "emit_inbound", frame: { status: 429, body: { error: { message: "Rate limit reached for requests. Please try again in 20s.", type: "requests", code: "rate_limit_exceeded" } } } }]));
+    const fixture = await createNativePiFixture(peer.baseUrl);
+    try {
+      const { adapter, binding } = await open(fixture);
+      const collected = collectPiObservations(adapter.observations(binding));
+      await start(adapter, binding, "limited", "Meet a rate limit.");
+      expect(await collected.wait("limited:terminal")).toMatchObject({ type: "terminal", outcome: "failed" });
+      const errors = collected.observations.filter(value => value.type === "error");
+      expect(errors).toHaveLength(1);
+      expect(readableProviderError(errors[0]!.type === "error" ? errors[0]!.message : "")).toBe("The provider is rate limiting requests (429). Wait a moment, then send again.");
+      expect(peer.requests).toHaveLength(1);
+      await adapter.close(binding); await collected.done;
+      expect(peer.failures).toEqual([]);
+    } finally { await fixture.cleanup(); await peer.close(); }
+  }, 30_000);
+
+  it.each([401, 403])("ends the turn at once when the endpoint refuses the key (%i)", async status => {
+    const peer = await createPiModelPeer(transcript([request("start"),
+      { type: "emit_inbound", frame: { status, body: { error: { message: status === 401 ? "Incorrect API key provided." : "This key may not use the requested model.", type: "invalid_request_error" } } } }]));
+    const fixture = await createNativePiFixture(peer.baseUrl);
+    try {
+      const { adapter, binding } = await open(fixture);
+      const collected = collectPiObservations(adapter.observations(binding));
+      await start(adapter, binding, "refused", "Use a refused key.");
+      expect(await collected.wait("refused:terminal")).toMatchObject({ type: "terminal", outcome: "failed" });
+      expect(collected.observations.filter(value => value.type === "retry")).toEqual([]);
+      const errors = collected.observations.filter(value => value.type === "error");
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.type === "error" && errors[0]!.message).toContain(String(status));
+      expect(readableProviderError(errors[0]!.type === "error" ? errors[0]!.message : "")).toMatch(status === 401 ? /rejected the API key \(401\)/ : /refused this API key \(403\)/);
+      expect(peer.requests).toHaveLength(1);
+      await adapter.close(binding); await collected.done;
+      expect(peer.failures).toEqual([]);
+    } finally { await fixture.cleanup(); await peer.close(); }
+  }, 30_000);
 
   it("reports model transport failure honestly and rejects stale provider requests", async () => {
     const peer = await createPiModelPeer(transcript([request("start"), { type: "runtime_exit", label: "disconnect", status: "error" }]));

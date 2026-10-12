@@ -676,6 +676,18 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       expect(f.observations.some(value => value.type === "accepted")).toBe(false);
     } finally { await f.close(); await f.cleanup(); }
   });
+  // Ways this can fail: the CLI's ten backed-off retries of a refused key run to the end; the failure is
+  // reported as a retry, as an interrupt, or more than once.
+  it("ends the turn at once when the endpoint refuses the key", async () => {
+    const f = await fixture("refused-key");
+    try {
+      const binding = await f.open(); void start(f, binding).catch(() => undefined);
+      await f.release("refused"); await f.release("terminal");
+      expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "failed", error: { message: "401 authentication failed" } });
+      expect(f.observations.filter(value => value.type === "retry")).toEqual([]);
+      expect(f.observations.filter(value => value.type === "error")).toMatchObject([{ message: "401 authentication failed" }]);
+    } finally { await f.close(); await f.cleanup(); }
+  });
   it("preserves native text and reasoning deltas with stable item refs", async () => {
     const f = await fixture("streaming");
     try {
@@ -688,7 +700,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       expect(f.observations.filter(value => value.type === "message" && value.channel === "reasoning" && value.item.nativeId === "stream-message:0").map(value => value.type === "message" && [value.phase, value.text]))
         .toEqual([["start", ""], ["delta", "Reasoning"], ["complete", "Reasoning"]]);
       // The SDK's own request retry is a display fact; it is neither an error nor a terminal.
-      expect(f.observations.filter(value => value.type === "retry")).toMatchObject([{ attempt: 2, maxAttempts: 10, delayMs: 500, message: "401 authentication failed", origin: { kind: "root" } }]);
+      expect(f.observations.filter(value => value.type === "retry")).toMatchObject([{ attempt: 2, maxAttempts: 10, delayMs: 500, message: "429 rate limit", origin: { kind: "root" } }]);
       expect(f.observations.some(value => value.type === "error")).toBe(false);
       // Encrypted reasoning is a reasoning item that starts and completes with no readable text.
       expect(f.observations.filter(value => value.type === "message" && value.item.nativeId === "stream-message:2").map(value => value.type === "message" && [value.channel, value.phase, value.text]))
