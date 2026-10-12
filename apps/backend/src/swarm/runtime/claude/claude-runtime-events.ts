@@ -112,14 +112,14 @@ export class ClaudeRuntimeEvents {
     return events;
   }
 
-  finish(success: boolean, fallback?: string, stopping = false): RuntimeSessionEvent[] {
+  finish(fallback?: string, stopping = false): RuntimeSessionEvent[] {
     const events: RuntimeSessionEvent[] = [];
     if (this.text === undefined && fallback?.trim()) {
       this.text = fallback;
       events.push(this.textEvent("message_start", false));
     }
-    // Text already streamed when the host stops the turn is the reply the user saw, not discarded progress.
-    events.push(...this.flush(success || stopping));
+    // Text already streamed when the turn ends, stops or fails is the reply the user saw, not discarded progress.
+    events.push(...this.flush(true));
     for (const [toolCallId, toolName] of this.tools) {
       if (!stopping && this.background.has(toolCallId)) continue;
       events.push({ type: "tool_execution_end", toolName, toolCallId,
