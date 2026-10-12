@@ -10,7 +10,7 @@ import {
 import type { AgentDescriptor } from "../../types.js";
 import { saveWorkerPresetSettings } from "../worker-presets.js";
 import { buildModelCapacityBlockKey } from "../../swarm-manager-utils.js";
-import { pooledAvailabilityKey } from "../../secrets-env-service.js";
+import { pooledAvailabilityKey, resolveModelCredentialProvider } from "../../secrets-env-service.js";
 
 const NOW = "2026-10-11T00:00:00.000Z";
 const catalogModels = Object.values(FORGE_MODEL_CATALOG.models);
@@ -166,4 +166,55 @@ it("judges presets for Settings by the rule spawn uses: a capacity block or an e
   // A recorded failure alone warns; it never refuses.
   const warned = await harness([], [], { workerRunFailures: new Map([[presetModel.provider, failure]]) });
   expect(await warned.service.describeWorkerModels([presetModel])).toEqual([{ available: true, lastRunFailure: failure }]);
+});
+
+// The user asked for a specific model ("spawn a Haiku worker"): the manager names it exactly.
+const haiku = { provider: "claude-native", modelId: "claude-haiku-5-5" };
+
+it("starts a worker on an explicitly requested model with that model's default reasoning, or the reasoning asked for", async () => {
+  const { service, systemPrompts } = await harness();
+
+  const worker = await service.spawnAgent("manager", { agentId: "w1", model: "claude-native/claude-haiku-5-5", initialMessage: "x" });
+  expect(worker.model).toEqual({ ...haiku, thinkingLevel: "medium" });
+  expect(worker.specialistId).toBeUndefined();
+  expect(systemPrompts).toEqual(["default worker prompt"]);
+
+  const high = await service.spawnAgent("manager", { agentId: "w2", model: "claude-native/claude-haiku-5-5", reasoningLevel: "high", initialMessage: "x" });
+  expect(high.model).toEqual({ ...haiku, thinkingLevel: "high" });
+});
+
+it("rejects a model combined with a preset", async () => {
+  const { service, descriptors } = await harness();
+
+  await expect(service.spawnAgent("manager", { agentId: "w1", preset: "builder", model: "claude-native/claude-haiku-5-5", initialMessage: "x" }))
+    .rejects.toThrow("Cannot combine a preset with model");
+  expect([...descriptors.keys()]).toEqual(["manager"]);
+});
+
+it("rejects an unknown model and lists the models available on this machine", async () => {
+  const { service, descriptors } = await harness([], ["openai-codex", "codex-native"]);
+
+  const error = await service.spawnAgent("manager", { agentId: "w1", model: "claude-native/claude-haiku-9", initialMessage: "x" }).catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toMatch(/^Unknown model "claude-native\/claude-haiku-9"\. Available models: .*claude-native\/claude-haiku-5-5/);
+  expect((error as Error).message).not.toContain("codex-native/");
+  await expect(service.spawnAgent("manager", { agentId: "w1", model: "claude-haiku-5-5", initialMessage: "x" }))
+    .rejects.toThrow('Unknown model "claude-haiku-5-5". Available models:');
+  expect([...descriptors.keys()]).toEqual(["manager"]);
+});
+
+it("rejects a known model that is not available, by the same rule presets use", async () => {
+  const { service, descriptors } = await harness([], [resolveModelCredentialProvider(haiku)]);
+
+  await expect(service.spawnAgent("manager", { agentId: "w1", model: "claude-native/claude-haiku-5-5", initialMessage: "x" }))
+    .rejects.toThrow(/^Model "claude-native\/claude-haiku-5-5" is not available on this machine\. Available models: /);
+  expect([...descriptors.keys()]).toEqual(["manager"]);
+});
+
+it("rejects a reasoning level the requested model does not support and lists the valid ones", async () => {
+  const { service, descriptors } = await harness();
+
+  await expect(service.spawnAgent("manager", { agentId: "w1", model: "claude-native/claude-haiku-5-5", reasoningLevel: "ultra", initialMessage: "x" }))
+    .rejects.toThrow('Reasoning level "ultra" is not valid for claude-native/claude-haiku-5-5. Valid levels: low, medium, high, xhigh, max.');
+  expect([...descriptors.keys()]).toEqual(["manager"]);
 });

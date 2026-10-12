@@ -13,7 +13,8 @@ import {
 import {
   type AgentDescriptor,
   type RequestedDeliveryMode,
-  type SpawnAgentInput
+  type SpawnAgentInput,
+  type SwarmReasoningLevel
 } from "./types.js";
 import { MAX_PLAN_STEP_ID_LENGTH } from "./planning/session-plan-state.js";
 import { buildAcceptWorkGraphNodeTool } from "./planning/accept-work-graph-node-tool.js";
@@ -404,7 +405,7 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
       name: "spawn_agent",
       label: "Spawn Agent",
       description:
-        "Start a worker on one bounded outcome. The worker knows nothing of this conversation: put the goal, the context it needs, constraints, the files it owns, and what done looks like in initialMessage. preset picks the model and reasoning from the preset list in your instructions; omit it to use your own model. Returns once the worker has started; its result arrives later as a [workerResult] message, so do not wait or poll. Set requiresSecureRuntime when the task needs granted Secure Sessions material; the spawn fails rather than run without it.",
+        "Start a worker on one bounded outcome. The worker knows nothing of this conversation: put the goal, the context it needs, constraints, the files it owns, and what done looks like in initialMessage. preset picks the model and reasoning from the preset list in your instructions; omit it to use your own model. Set model only when the user explicitly asks for a specific model; otherwise omit it. Returns once the worker has started; its result arrives later as a [workerResult] message, so do not wait or poll. Set requiresSecureRuntime when the task needs granted Secure Sessions material; the spawn fails rather than run without it.",
       parameters: Type.Object({
         agentId: Type.String({
           description:
@@ -416,6 +417,16 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           maxLength: 64,
           pattern: "^[a-z0-9][a-z0-9-]*$",
           description: "Worker preset name from the preset list in your instructions. Omit to use your own model.",
+        })),
+        model: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: 160,
+          description: "Exact provider/modelId, for example claude-native/claude-haiku-5-5. Only when the user explicitly asks for a specific model; omit it by default. Cannot be combined with preset. An unavailable model fails and lists the available ones.",
+        })),
+        reasoningLevel: Type.Optional(Type.String({
+          minLength: 1,
+          maxLength: 16,
+          description: "Reasoning level for model, only when the user asked for one. Omit to use the model's default.",
         })),
         cwd: Type.Optional(Type.String({ description: "Optional working directory override." })),
         planStepId: Type.Optional(planStepIdSchema(
@@ -432,6 +443,8 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           agentId: string;
           initialMessage: string;
           preset?: string;
+          model?: string;
+          reasoningLevel?: string;
           cwd?: string;
           planStepId?: string;
           requiresSecureRuntime?: boolean;
@@ -441,6 +454,8 @@ export function buildSwarmTools(host: SwarmToolHost, descriptor: AgentDescriptor
           agentId: parsed.agentId,
           initialMessage: parsed.initialMessage,
           ...(parsed.preset ? { preset: parsed.preset } : {}),
+          ...(parsed.model ? { model: parsed.model } : {}),
+          ...(parsed.reasoningLevel ? { reasoningLevel: parsed.reasoningLevel as SwarmReasoningLevel } : {}),
           ...(parsed.cwd ? { cwd: parsed.cwd } : {}),
           ...(parsed.planStepId ? { planStep: parsed.planStepId } : {}),
           ...(parsed.requiresSecureRuntime ? { requiresSecureRuntime: true } : {}),

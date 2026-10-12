@@ -19,10 +19,11 @@ Forge ships one worker preset: `plan-consultant` (`codex-native/gpt-6-astra`, `x
 
 ## Spawning workers
 
-`spawn_agent` takes a required `initialMessage`, plus optional `preset`, `cwd`, `planStepId`, and `requiresSecureRuntime`.
+`spawn_agent` takes a required `initialMessage`, plus optional `preset`, `model`, `reasoningLevel`, `cwd`, `planStepId`, and `requiresSecureRuntime`.
 
 - With a `preset`, the worker uses that worker preset's model and reasoning.
 - With no `preset`, the worker uses the manager's own model.
+- With a `model` (an exact `provider/modelId`, such as `claude-native/claude-haiku-5-5`), the worker runs on that model, at `reasoningLevel` or the model's default. The manager sets it only when the user asks for a specific model, and it cannot be combined with `preset`. A model that is unknown or not available fails the spawn and lists the models available on this machine.
 
 Workers receive the assignment in `initialMessage`, not a copy of the manager conversation. Each worker's final response returns to the manager automatically; the manager verifies and integrates it.
 
