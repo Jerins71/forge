@@ -63,7 +63,7 @@ export const STREAM_DECK_ACTION_TYPES = [
   'toggle_session',
   'stop_session',
   'resume_session',
-  'smart_compact',
+  'compact',
   'create_session',
   'mark_read',
 ] as const
@@ -154,7 +154,7 @@ export type StreamDeckActionRequest =
       delivery?: 'auto' | 'followUp' | 'steer'
     })
   | (StreamDeckActionBase & {
-      type: 'toggle_session' | 'stop_session' | 'resume_session' | 'smart_compact' | 'mark_read'
+      type: 'toggle_session' | 'stop_session' | 'resume_session' | 'compact' | 'mark_read'
       sessionAgentId: string
     })
   | (StreamDeckActionBase & {

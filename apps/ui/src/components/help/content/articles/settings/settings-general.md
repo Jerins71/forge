@@ -20,9 +20,9 @@ Working plans and explicit session goals are always available to Builder manager
 
 ## Compaction
 
-Use **Settings > General > Compaction** to choose the model, reasoning level, and timeout Forge uses for automatic compaction and manual Smart compact runs. These controls apply only to supported Pi-backed manager compaction runtimes: OpenAI/Codex and Anthropic. Cursor SDK, xAI/Grok, and user-added OpenRouter manager models are not eligible here; OpenRouter manager eligibility is a separate policy. The default is **GPT-5.5**, **Low** reasoning, and a **5 minute** timeout. If the configured provider or model is unavailable, Forge shows a warning here so you can fix auth or pick a different model before automatic compaction needs it.
+Use **Settings > General > Compaction** to choose the model, reasoning level, and timeout Forge uses for automatic compaction and manual Compact context runs. These controls apply only to supported Pi-backed manager compaction runtimes: OpenAI/Codex and Anthropic. Cursor SDK, xAI/Grok, and user-added OpenRouter manager models are not eligible here; OpenRouter manager eligibility is a separate policy. The default is **GPT-5.5**, **Low** reasoning, and a **5 minute** timeout. If the configured provider or model is unavailable, Forge shows a warning here so you can fix auth or pick a different model before automatic compaction needs it.
 
-This pane does not choose Summary vs Context v2. That project default lives in **Project Settings → Context management**, with an optional session inherit/override beside Send. Compact and Smart compact still follow the effective policy: Summary keeps the current handoff/resume path, while Context v2 continues from task notes and recoverable earlier history without a Smart LLM handoff.
+This pane does not choose Summary vs Context v2. That project default lives in **Project Settings → Context management**, with an optional session inherit/override beside Send. Compact context still follows the effective policy: Summary compacts older context, while Context v2 continues from task notes and recoverable earlier history without an AI summarizing pass.
 
 ## Conversation Response Throughput
 

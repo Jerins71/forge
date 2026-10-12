@@ -84,9 +84,6 @@ interface ChatHeaderProps {
   showCompact: boolean
   compactInProgress: boolean
   onCompact: () => void
-  showSmartCompact: boolean
-  smartCompactInProgress: boolean
-  onSmartCompact: () => void
   autoCompactionInProgress?: boolean
   pinnedCount?: number
   pinnedMessageIds?: string[]
@@ -190,9 +187,6 @@ export function ChatHeader({
   showCompact,
   compactInProgress,
   onCompact,
-  showSmartCompact,
-  smartCompactInProgress,
-  onSmartCompact,
   autoCompactionInProgress = false,
   pinnedCount = 0,
   pinnedMessageIds,
@@ -234,7 +228,7 @@ export function ChatHeader({
       : null
   const isAgentCreator = activeAgentSessionPurpose === 'agent_creator'
   const archetypeLabel = isAgentCreator ? null : activeAgentArchetypeId?.trim()
-  const anyCompactionInProgress = compactInProgress || smartCompactInProgress || autoCompactionInProgress
+  const anyCompactionInProgress = compactInProgress || autoCompactionInProgress
   const electronPlatform = typeof window !== 'undefined' ? (window.electronBridge?.platform ?? '') : ''
   const platform = electronPlatform || (typeof window !== 'undefined' ? (window.navigator.platform ?? '') : '')
   const normalizedPlatform = platform.toLowerCase()
@@ -472,7 +466,7 @@ export function ChatHeader({
         ) : null}
 
         {/* ── Three-dots dropdown: secondary actions ── */}
-        {(compact || showCompact || showSmartCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (
+        {(compact || showCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (
           <>
             <Separator orientation="vertical" className="hidden sm:block mx-0.5 h-[18px] bg-hairline" />
             <DropdownMenu>
@@ -524,27 +518,12 @@ export function ChatHeader({
                     disabled={anyCompactionInProgress}
                     className="gap-2 text-xs"
                   >
-                    {compactInProgress || (autoCompactionInProgress && !smartCompactInProgress) ? (
+                    {compactInProgress || autoCompactionInProgress ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
                       <Minimize2 className="size-3.5" />
                     )}
-                    {compactInProgress ? 'Compacting…' : autoCompactionInProgress && !smartCompactInProgress ? 'Auto-compacting…' : 'Compact context'}
-                  </DropdownMenuItem>
-                ) : null}
-
-                {showSmartCompact ? (
-                  <DropdownMenuItem
-                    onClick={onSmartCompact}
-                    disabled={anyCompactionInProgress}
-                    className="gap-2 text-xs"
-                  >
-                    {smartCompactInProgress ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <Sparkles className="size-3.5" />
-                    )}
-                    {smartCompactInProgress ? 'Smart compacting…' : 'Smart compact'}
+                    {compactInProgress ? 'Compacting…' : autoCompactionInProgress ? 'Auto-compacting…' : 'Compact context'}
                   </DropdownMenuItem>
                 ) : null}
 

@@ -138,7 +138,7 @@ export class ForgeDeckController {
       if (!session) throw new Error('No target session')
       await this.perform({
         requestId: requestId(),
-        type: 'smart_compact',
+        type: 'compact',
         sessionAgentId: session.agentId,
       })
       return
@@ -148,7 +148,7 @@ export class ForgeDeckController {
       const control = visible.settings.control ?? 'toggle'
       await this.perform({
         requestId: requestId(),
-        type: control === 'compact' ? 'smart_compact' : control === 'mark_read' ? 'mark_read' : 'toggle_session',
+        type: control === 'compact' ? 'compact' : control === 'mark_read' ? 'mark_read' : 'toggle_session',
         sessionAgentId: session.agentId,
       })
       return

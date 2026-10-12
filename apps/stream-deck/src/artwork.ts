@@ -243,7 +243,7 @@ function missionKey(settings: ForgeActionSettings, session: StreamDeckSessionSum
 function controlKey(settings: ForgeActionSettings, session: StreamDeckSessionSummary | null, frame: number): string {
   const control = settings.control ?? 'toggle'
   const stopped = session?.status === 'stopped' || session?.status === 'terminated'
-  const label = control === 'compact' ? 'SMART COMPACT' : control === 'mark_read' ? 'MARK READ' : stopped ? 'RESUME' : 'STOP'
+  const label = control === 'compact' ? 'COMPACT' : control === 'mark_read' ? 'MARK READ' : stopped ? 'RESUME' : 'STOP'
   const glyph = control === 'compact' ? '◇' : control === 'mark_read' ? '✓' : stopped ? '▶' : '■'
   const accent = control === 'compact' ? COLORS.violet : control === 'mark_read' ? COLORS.cyan : stopped ? COLORS.green : COLORS.red
   return shell(`

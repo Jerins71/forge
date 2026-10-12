@@ -187,7 +187,7 @@ Settings → General → **Repositories** (Builder/local only) stores clone defa
 
 ### Compaction
 
-Settings → General → Compaction controls the model, reasoning level, and timeout used for automatic compaction and manual Smart compact on supported Pi-backed manager compaction runtimes. Eligible providers are OpenAI/Codex and Anthropic. Cursor SDK, xAI/Grok, and user-added OpenRouter manager models are not controlled by these settings; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. These controls do not choose Summary vs Context v2; that policy lives in Project Settings, not Settings → General.
+Settings → General → Compaction controls the model, reasoning level, and timeout used for automatic and manual compaction on supported Pi-backed manager compaction runtimes. Eligible providers are OpenAI/Codex and Anthropic. Cursor SDK, xAI/Grok, and user-added OpenRouter manager models are not controlled by these settings; OpenRouter manager eligibility is a separate policy and OpenRouter models are not compaction choices. These controls do not choose Summary vs Context v2; that policy lives in Project Settings, not Settings → General.
 
 ### Context management
 
@@ -206,7 +206,7 @@ Builder-only HTTP routes:
 
 These routes are registered only on Builder. Context v2 is experimental and requires an ordinary Pi Builder manager using an existing compaction-eligible provider (OpenAI/Codex or Anthropic), with a recognized catalog model that supports tools and has at least 32,000 context tokens. System profiles, Cursor SDK, plugin/external threads, and workers cannot execute Context v2. Workers retain the owning manager's preference but apply Summary. The persisted/API value for Context v2 remains `fresh`. A session PUT of `fresh` on an unsupported runtime is rejected; a project can still save Context v2 as a preference.
 
-Compact and Smart compact use the policy frozen for that attempt. Summary keeps its handoff/resume path. Context v2 saves a continuation checkpoint with task-note and canonical-history entry points, without an AI summarizing pass. Busy manual Context v2 attempts are rejected until idle; an idle manager stays idle. Agent-requested transitions settle the tool batch before resetting the window. Pins and unresolved tool references are budgeted as complete pieces rather than silently cut from the end of the checkpoint.
+Compact context uses the policy frozen for that attempt. Summary compacts older context. Context v2 saves a continuation checkpoint with task-note and canonical-history entry points, without an AI summarizing pass. Busy manual Context v2 attempts are rejected until idle; an idle manager stays idle. Agent-requested transitions settle the tool batch before resetting the window. Pins and unresolved tool references are budgeted as complete pieces rather than silently cut from the end of the checkpoint.
 
 #### Task notes and continuation
 

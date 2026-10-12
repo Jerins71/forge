@@ -24,7 +24,6 @@ import type {
   SessionMemoryMergeAttemptMetaUpdate,
   SwarmSessionMetaService,
 } from "./swarm-session-meta-service.js";
-import type { SmartCompactResult } from "./runtime-contracts.js";
 import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "./types.js";
 
@@ -60,7 +59,7 @@ type SessionMetaPort = Pick<
   | "writeSessionMemoryMergeAttemptMeta"
 >;
 
-type CompactionPort = Pick<SwarmCompactionCoordinator, "compact" | "smartCompact">;
+type CompactionPort = Pick<SwarmCompactionCoordinator, "compact">;
 
 export interface MemoryCoordinatorOptions {
   config: Pick<SwarmConfig, "paths">;
@@ -132,13 +131,6 @@ export class MemoryCoordinator {
 
   async compact(agentId: string, options?: CompactAgentContextOptions): Promise<unknown> {
     return this.options.services.compaction.compact(agentId, options);
-  }
-
-  async smartCompact(
-    agentId: string,
-    options?: CompactAgentContextOptions,
-  ): Promise<SmartCompactResult> {
-    return this.options.services.compaction.smartCompact(agentId, options);
   }
 
   async mergeSessionMemory(agentId: string): Promise<SessionMemoryMergeResult> {

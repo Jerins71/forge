@@ -5,10 +5,7 @@ import {
 } from "./session/message-pins.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import type { SessionPlanCoordinator } from "./planning/session-plan-coordinator.js";
-import type {
-  SmartCompactResult,
-  SwarmAgentRuntime,
-} from "./runtime-contracts.js";
+import type { SwarmAgentRuntime } from "./runtime-contracts.js";
 import {
   normalizeMessageSourceContext,
   previewForLog,
@@ -46,7 +43,7 @@ export interface SwarmCompactionCoordinatorOptions {
   logDebug: (message: string, details?: unknown) => void;
 }
 
-/** Owns explicit and smart manager-context compaction from validation through count bookkeeping. */
+/** Owns explicit manager-context compaction from validation through count bookkeeping. */
 export class SwarmCompactionCoordinator {
   constructor(private readonly options: SwarmCompactionCoordinatorOptions) {}
 
@@ -54,7 +51,7 @@ export class SwarmCompactionCoordinator {
     agentId: string,
     options?: CompactAgentContextOptions,
   ): Promise<unknown> {
-    const descriptor = this.requireRunningManager(agentId, "Compaction");
+    const descriptor = this.requireRunningManager(agentId);
     const runtime = await this.options.getOrCreateRuntime(descriptor);
     const sourceContext = normalizeMessageSourceContext(
       options?.sourceContext ?? { channel: "web" },
@@ -96,82 +93,8 @@ export class SwarmCompactionCoordinator {
     }
   }
 
-  async smartCompact(
-    agentId: string,
-    options?: CompactAgentContextOptions,
-  ): Promise<SmartCompactResult> {
-    const descriptor = this.requireRunningManager(agentId, "Smart compaction");
-    const runtime = await this.options.getOrCreateRuntime(descriptor);
-    const sourceContext = normalizeMessageSourceContext(
-      options?.sourceContext ?? { channel: "web" },
-    );
-    const customInstructions = await this.resolveInstructions(
-      descriptor,
-      options?.customInstructions,
-    );
-
-    this.options.logDebug("manager:smart_compact:start", {
-      agentId,
-      trigger: options?.trigger ?? "api",
-      sourceContext,
-      customInstructionsPreview: previewForLog(customInstructions ?? ""),
-    });
-    this.emitSystemMessage(agentId, "Running smart compaction…", sourceContext);
-
-    try {
-      const result = await runtime.smartCompact(customInstructions, {
-        skipResumeIfIdle: true,
-      });
-      if (result.compacted) {
-        await this.recordSuccessfulCompaction(
-          descriptor,
-          "manager:smart_compact:count-increment-failed",
-        );
-        const usage = runtime.getContextUsage();
-        const usageSuffix = usage
-          ? ` Context now at ${Math.round(usage.percent)}%.`
-          : "";
-        this.emitSystemMessage(
-          agentId,
-          `Smart compaction complete.${usageSuffix}`,
-          sourceContext,
-        );
-      } else {
-        this.emitSystemMessage(
-          agentId,
-          "Smart compaction finished, but context was not reduced.",
-          sourceContext,
-        );
-      }
-
-      this.options.logDebug("manager:smart_compact:complete", {
-        agentId,
-        trigger: options?.trigger ?? "api",
-        compacted: result.compacted,
-        reason: result.compacted ? undefined : result.reason,
-      });
-      return result;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.emitSystemMessage(
-        agentId,
-        /\btimeout\b|\btimed out\b/i.test(message)
-          ? "Smart compaction timed out."
-          : `Smart compaction failed: ${message}`,
-        sourceContext,
-      );
-      this.options.logDebug("manager:smart_compact:error", {
-        agentId,
-        trigger: options?.trigger ?? "api",
-        message,
-      });
-      throw error;
-    }
-  }
-
   private requireRunningManager(
     agentId: string,
-    operation: "Compaction" | "Smart compaction",
   ): ManagerDescriptor {
     const descriptor = this.options.descriptors.get(agentId);
     if (!descriptor) {
@@ -181,7 +104,7 @@ export class SwarmCompactionCoordinator {
       throw new Error(`Target agent is not running: ${agentId}`);
     }
     if (descriptor.role !== "manager") {
-      throw new Error(`${operation} is only supported for manager agents: ${agentId}`);
+      throw new Error(`Compaction is only supported for manager agents: ${agentId}`);
     }
     return descriptor as ManagerDescriptor;
   }

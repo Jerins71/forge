@@ -214,7 +214,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     if (active.failed || this.status === "error" || active.abort.signal.aborted) throw new Error("Native Codex compaction did not complete.");
     return {};
   }
-  async smartCompact(customInstructions?: string): Promise<{ compacted: true }> { await this.compact(customInstructions); return { compacted: true }; }
 
   async stopInFlight(options?: RuntimeShutdownOptions): Promise<void> {
     if (this.closed) return;

@@ -233,7 +233,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     });
     return result;
   }
-  async smartCompact(instructions?: string): Promise<{ compacted: true }> { await this.compact(instructions); return { compacted: true }; }
 
   async stopInFlight(options?: RuntimeShutdownOptions): Promise<void> {
     if (this.closed) return;

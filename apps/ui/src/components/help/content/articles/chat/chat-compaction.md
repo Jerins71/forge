@@ -19,7 +19,6 @@ The context indicator in the header shows how full the live window is. Amber or 
 Open the **⋮ menu** in the chat header for:
 
 - **Compact context** — on Summary, compacts older context; on Context v2, starts another window from the saved continuation state without an AI summarizing pass.
-- **Smart compact** — on Summary, creates an AI handoff and resumes work when appropriate; on Context v2, follows the same transition as Compact context.
 
 A manually compacted idle manager stays idle. On Context v2, manual compaction requires the manager to be idle; retry after active work settles. During compaction or recovery, the menu indicator spins and the session row shows a violet `C` badge. Continue the conversation normally once the transition finishes.
 

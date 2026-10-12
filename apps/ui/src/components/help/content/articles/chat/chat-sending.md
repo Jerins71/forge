@@ -17,9 +17,9 @@ The pill is hidden when you are viewing a worker or a system profile.
 
 ## Changing context management
 
-Eligible Pi-backed Builder managers also show a compact **Context management** control beside Send. Native Claude and Codex sessions don't show it; their own harness handles compaction. It reports the policy the runtime can use (Summary or Context v2) and the saved project default or session override. Open it to inherit the project default, force Summary, or opt into experimental Context v2. Saving a choice does not clear the current conversation; it applies at the next Compact, Smart compact, or automatic context transition.
+Eligible Pi-backed Builder managers also show a compact **Context management** control beside Send. Native Claude and Codex sessions don't show it; their own harness handles compaction. It reports the policy the runtime can use (Summary or Context v2) and the saved project default or session override. Open it to inherit the project default, force Summary, or opt into experimental Context v2. Saving a choice does not clear the current conversation; it applies at the next Compact context or automatic context transition.
 
-Context v2 requires a supported ordinary Pi Builder manager and an eligible model. The control is hidden for workers and system profiles. If the current runtime cannot execute Context v2, that option is disabled with the server's reason. Summary is used while any existing Context v2 preference stays saved. Compact and Smart compact follow the supported policy.
+Context v2 requires a supported ordinary Pi Builder manager and an eligible model. The control is hidden for workers and system profiles. If the current runtime cannot execute Context v2, that option is disabled with the server's reason. Summary is used while any existing Context v2 preference stays saved. Compact context follows the supported policy.
 
 ### Model-change notices
 

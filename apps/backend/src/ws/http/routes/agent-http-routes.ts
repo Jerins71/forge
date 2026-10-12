@@ -18,7 +18,6 @@ import { rpcError } from "../../rpc/rpc-dispatcher.js";
 import type { HttpRoute } from "../shared/http-route.js";
 
 const AGENT_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/compact$/;
-const AGENT_SMART_COMPACT_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/smart-compact$/;
 const AGENT_CLEAR_ENDPOINT_PATTERN = /^\/api\/agents\/([^/]+)\/clear$/;
 const AGENT_SYSTEM_PROMPT_PATTERN = /^\/api\/agents\/([^/]+)\/system-prompt$/;
 
@@ -29,13 +28,6 @@ export function createAgentHttpRoutes(options: { swarmManager: SwarmManager; con
       matches: (pathname) => AGENT_COMPACT_ENDPOINT_PATTERN.test(pathname),
       handle: async (request, response, requestUrl) => {
         await handleCompactAgentHttpRequest(options.swarmManager, request, response, requestUrl, options.control);
-      }
-    },
-    {
-      methods: "POST, OPTIONS",
-      matches: (pathname) => AGENT_SMART_COMPACT_ENDPOINT_PATTERN.test(pathname),
-      handle: async (request, response, requestUrl) => {
-        await handleSmartCompactAgentHttpRequest(options.swarmManager, request, response, requestUrl, options.control);
       }
     },
     {
@@ -102,61 +94,6 @@ async function handleCompactAgentHttpRequest(
     const commandId = payload && typeof payload === "object" && "commandId" in payload ? payload.commandId : randomUUID();
     const receipt = await createDetailFeatureRpc({ swarmManager, control }).execute(requireHttpPrincipal(request), "session.compact", {
       commandId, sessionId: agentId, mode: "manual", customInstructions,
-    }) as CommandReceipt;
-    if (receipt.state !== "succeeded") { sendJson(response, 409, { error: "Compaction outcome is unknown", receipt }); return; }
-    const result = receipt.result;
-
-    sendJson(response, 200, {
-      ok: true,
-      agentId,
-      result, receipt
-    });
-  } catch (error) {
-    sendCompactionError(response, error);
-  }
-}
-
-async function handleSmartCompactAgentHttpRequest(
-  swarmManager: SwarmManager,
-  request: IncomingMessage,
-  response: ServerResponse,
-  requestUrl: URL,
-  control?: ControlService
-): Promise<void> {
-  const methods = "POST, OPTIONS";
-  const matched = requestUrl.pathname.match(AGENT_SMART_COMPACT_ENDPOINT_PATTERN);
-  const rawAgentId = matched?.[1] ?? "";
-
-  if (request.method === "OPTIONS") {
-    applyCorsHeaders(request, response, methods);
-    response.statusCode = 204;
-    response.end();
-    return;
-  }
-
-  if (request.method !== "POST") {
-    applyCorsHeaders(request, response, methods);
-    response.setHeader("Allow", methods);
-    sendJson(response, 405, { error: "Method Not Allowed" });
-    return;
-  }
-
-  applyCorsHeaders(request, response, methods);
-
-  const agentId = decodeURIComponent(rawAgentId).trim();
-  if (!agentId) {
-    sendJson(response, 400, { error: "Missing agent id" });
-    return;
-  }
-
-  const payload = await readJsonBody(request);
-  const customInstructions = parseCompactCustomInstructionsBody(payload);
-
-  try {
-    if (!control) throw new StreamFault("UNAVAILABLE", "Compaction control is not composed");
-    const commandId = payload && typeof payload === "object" && "commandId" in payload ? payload.commandId : randomUUID();
-    const receipt = await createDetailFeatureRpc({ swarmManager, control }).execute(requireHttpPrincipal(request), "session.compact", {
-      commandId, sessionId: agentId, mode: "smart", customInstructions,
     }) as CommandReceipt;
     if (receipt.state !== "succeeded") { sendJson(response, 409, { error: "Compaction outcome is unknown", receipt }); return; }
     const result = receipt.result;

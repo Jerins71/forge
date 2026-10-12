@@ -763,7 +763,7 @@ export function SettingsGeneral({
           <>
             <SettingsWithCTA
               label="Compaction model"
-              description="Model used for Forge-owned automatic compaction and Smart compact summaries."
+              description="Model used for Forge-owned automatic and manual compaction summaries."
             >
               <div className="flex flex-col items-end gap-1.5">
                 <div className="flex items-center gap-2">

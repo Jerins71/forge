@@ -63,7 +63,6 @@ forge sessions merge-back <agentId> [--source latest|run:<runId>|message:<entryI
 forge sessions lineage <agentId>
 forge workers continue <workerId> [--session <agentId>] [--label <label>]
 forge sessions compact <agentId> [--instructions <text>]
-forge sessions smart-compact <agentId> [--instructions <text>]
 forge sessions rename <agentId> --label <label>
 forge sessions pin|unpin <agentId> [--pinned true|false]
 forge sessions clear|delete <agentId> --yes
@@ -79,7 +78,7 @@ Durations accept milliseconds by default, or `ms`, `s`, and `m` suffixes.
 
 `sessions fork --source/--model`, `sessions switch`, `sessions merge-back`, `sessions lineage` and `workers continue` need an environment that advertises context transfers; otherwise they exit with the unsupported code and change nothing. `switch` hands the same session off to another provider or model. `merge-back` targets the session's lineage parent. `workers continue` turns a finished worker into a normal conversation and prints the new session. `sessions lineage` prints the parent, base point and each context handoff's included, omitted and truncated entries, per original thread when the handoff inherited context; `--json` returns the lineage snapshot unchanged.
 
-Compaction commands use native `session.compact` receipts. `sessions compact` waits for manual compaction to finish or fail. `sessions smart-compact` waits for the runtime smart-compaction decision and returns `outcome: "compacted"`, `"skipped"`, or `"not_reduced"`. Both follow the session's effective context policy (Summary handoff/resume, or Context v2 checkpoint with no Smart LLM handoff). Pair with a backend that advertises the CLI transport capability before running controls.
+Compaction commands use native `session.compact` receipts. `sessions compact` waits for manual compaction to finish or fail. Native Codex sessions reject `--instructions`. Pair with a backend that advertises the CLI transport capability before running controls.
 
 ## Automation notes
 

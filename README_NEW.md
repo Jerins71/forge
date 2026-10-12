@@ -28,7 +28,7 @@ Using one coding agent is easy. Using five turns you into their project manager 
 
 Forge gives you one persistent manager that handles the choreography for you. Describe what needs to happen and the manager breaks it down, dispatches specialist workers in parallel, keeps context alive across long-running sessions, and surfaces only what needs your attention.
 
-Your sessions, prompts, memory, terminals, and artifacts live on disk. No cloud dependency for the core product. Backup is copying a folder. When sessions hit context limits, smart compaction writes structured handoff files and preserves pinned messages verbatim — conversations that have compacted dozens of times still maintain coherence.
+Your sessions, prompts, memory, terminals, and artifacts live on disk. No cloud dependency for the core product. Backup is copying a folder. When sessions hit context limits, compaction writes structured handoff files and preserves pinned messages verbatim — conversations that have compacted dozens of times still maintain coherence.
 
 Configure once, delegate forever.
 

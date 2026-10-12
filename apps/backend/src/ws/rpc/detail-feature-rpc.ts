@@ -60,7 +60,6 @@ export function createDetailFeatureRpc({ swarmManager: swarm, control, compactio
           await swarm.controlSessionGoal(sessionId!, goal.action === 'edit' ? { action: goal.action, objective: goal.objective, tokenBudget: goal.tokenBudget } : { action: goal.action });
         } else {
           const compact = input as RpcInput<'session.compact'>;
-          if (compact.mode === 'smart') return swarm.smartCompactAgentContext(sessionId!, { customInstructions: compact.customInstructions, sourceContext: { channel: compact.source ?? compactionSource, messageId: compact.commandId }, trigger: (compact.source ?? compactionSource) === "cli" ? "cli" : "api" });
           await swarm.compactAgentContext(sessionId!, { customInstructions: compact.customInstructions, sourceContext: { channel: compact.source ?? compactionSource, messageId: compact.commandId }, trigger: (compact.source ?? compactionSource) === "cli" ? "cli" : "api" });
           return { compacted: true };
         }

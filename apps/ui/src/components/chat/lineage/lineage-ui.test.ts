@@ -415,7 +415,7 @@ describe('ChatHeader lineage and merge back', () => {
     render(createElement(ChatHeader, {
       connected: true, activeAgentId: 'session-1', activeAgentLabel: 'Forge / Fork', activeAgentStatus: 'idle', activeAgentRole: 'manager',
       channelView: 'web', onChannelViewChange: () => {}, contextWindowUsage: null,
-      showCompact: false, compactInProgress: false, onCompact: () => {}, showSmartCompact: false, smartCompactInProgress: false, onSmartCompact: () => {},
+      showCompact: false, compactInProgress: false, onCompact: () => {},
       showStopAll: false, stopAllInProgress: false, stopAllDisabled: false, onStopAll: () => {}, showNewChat: false, onNewChat: () => {},
       isArtifactsPanelOpen: false, onToggleArtifactsPanel: () => {}, ...props,
     }))

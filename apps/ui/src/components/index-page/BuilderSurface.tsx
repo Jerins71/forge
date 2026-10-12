@@ -1017,8 +1017,6 @@ export function BuilderSurface({
   const {
     isCompactingManager,
     handleCompactManager,
-    isSmartCompactingManager,
-    handleSmartCompactManager,
     isStoppingAllAgents,
     handleStopAllAgents,
   } = useManagerActions({
@@ -2457,9 +2455,6 @@ export function BuilderSurface({
                   showCompact: isActiveManager,
                   compactInProgress: isCompactingManager,
                   onCompact: () => void handleCompactManager(),
-                  showSmartCompact: isActiveManager,
-                  smartCompactInProgress: isSmartCompactingManager,
-                  onSmartCompact: () => void handleSmartCompactManager(),
                   autoCompactionInProgress,
                   pinnedCount: transcript.pinnedCount,
                   pinnedMessageIds: transcript.pinnedMessageIds,

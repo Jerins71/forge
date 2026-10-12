@@ -252,8 +252,8 @@ export type CliRunTarget =
   | { kind: 'session'; agentId: string }
   | { kind: 'project_agent'; profileId: string; handle: string }
 
-export type CliSessionCompactionAction = 'compact' | 'smart_compact'
-export type CliSessionCompactionOutcome = 'compacted' | 'skipped' | 'not_reduced'
+export type CliSessionCompactionAction = 'compact'
+export type CliSessionCompactionOutcome = 'compacted'
 
 export interface CliSessionCompactionResult {
   action: CliSessionCompactionAction
@@ -261,7 +261,6 @@ export interface CliSessionCompactionResult {
   profileId?: string
   outcome: CliSessionCompactionOutcome
   compacted: boolean
-  reason?: string
   customInstructionsProvided: boolean
   completedAt: string
 }

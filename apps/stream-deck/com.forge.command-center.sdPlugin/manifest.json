@@ -114,7 +114,7 @@
       "Name": "Context Core",
       "UUID": "com.forge.command-center.context",
       "Icon": "imgs/context",
-      "Tooltip": "Context-window gauge; hold to smart compact",
+      "Tooltip": "Context-window gauge; hold to compact",
       "PropertyInspectorPath": "ui/inspector.html",
       "Controllers": [
         "Keypad"

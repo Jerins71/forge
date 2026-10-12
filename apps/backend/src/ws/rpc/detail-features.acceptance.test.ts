@@ -27,7 +27,7 @@ async function fixture() {
     resumeRestartRecovery: vi.fn(async () => loadState(streams.database).recovery), dismissRestartRecovery: vi.fn(async () => loadState(streams.database).recovery),
     emit: vi.fn(),
     controlSessionGoal: vi.fn(async () => ({ revision: 1, goal: null })),
-    compactAgentContext: vi.fn(async () => undefined), smartCompactAgentContext: vi.fn(async () => ({ compacted: true })),
+    compactAgentContext: vi.fn(async () => undefined),
     getPendingCodexElicitationsForManager: () => [{ elicitationId: 'pending', managerAgentId: 'session', sidecarAgentId: 'sidecar', threadId: 'thread', turnId: 'turn' }],
     respondToCodexElicitation: vi.fn(() => true),
   };
