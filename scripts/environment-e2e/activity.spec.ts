@@ -274,38 +274,46 @@ test('a successful turn after a failure and a model switch clears the failure, l
   assertions.failureResolvedBySuccess = { sessionId, attention: (await attention()) ?? null }
 })
 
-test('after a model switch the session still streams, settles and reports it finished, live and after reload', async ({ page }) => {
+test('after a model switch a session still streams, settles and reports it finished, and a cut-off reply is marked, live and after reload', async ({ page }) => {
   const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
-  const sessionId = fleet.a.sessionId
   const settled = async (commandId: string) => { await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000) }
-  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
-  const configure = async (model: Record<string, unknown>) => { const commandId = randomUUID(); await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.configure', { commandId, sessionId, model }); await settled(commandId) }
-  // A second session to look at while the turn finishes: the session in view is never left needing the user.
-  const launch = { commandId: randomUUID(), projectId: sessionId, title: 'Elsewhere', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Somewhere else to look', artifactIds: [] } }
-  const elsewhere = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
+  const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title: 'Switched model', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Before the switch', artifactIds: [] } }
+  const sessionId = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
   await settled(launch.commandId)
-  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
-  await expect(transcript(page)).toBeVisible()
-  await configure({ mode: 'override', provider: 'codex-native', modelId: 'gpt-6-luna', thinkingLevel: 'high' })
+  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
+  const open = async (id: string) => { await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(id)}`); await expect(transcript(page)).toBeVisible() }
+  await open(sessionId)
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  const configure = { commandId: randomUUID(), sessionId, model: { mode: 'override', provider: 'codex-native', modelId: 'gpt-6-luna', thinkingLevel: 'high' } }
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.configure', configure)
+  await settled(configure.commandId)
   // The rebound runtime's turn shows as running live...
   const stop = page.getByRole('button', { name: 'Stop', exact: true })
   await rm(releaseFile(), { force: true })
   await send(page, '[fixture:retry] Answer on the new model')
   await expect(stop).toBeVisible({ timeout: 15_000 })
-  // ...and, once it finishes out of view, it is reported finished.
-  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(elsewhere)}`)
-  await expect(transcript(page)).toBeVisible()
+  // ...and, once it finishes out of view (the session in view is never left needing the user), it is reported finished.
+  await open(fleet.a.sessionId)
   await writeFile(releaseFile(), 'release')
   await expect.poll(attention, { timeout: 30_000 }).toBe('work_settled')
   await page.reload()
   await expect(transcript(page)).toBeVisible()
   expect(await attention()).toBe('work_settled')
-  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+  await open(sessionId)
   await expect.poll(async () => { const text = await transcript(page).innerText(); return text.lastIndexOf('assistant reply') > text.lastIndexOf('Answer on the new model') }, { timeout: 30_000 }).toBe(true)
   await expect(stop).toHaveCount(0)
   await shot(page, 'rebound-runtime-settled')
-  assertions.reboundRuntime = { attention: 'work_settled' }
-  await configure({ mode: 'inherit' })
+  // The rebound provider numbers its items afresh; a reply it cuts off is still its own row and is marked.
+  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
+  const before = await status().count()
+  await send(page, '[fixture:crash-mid-reply] Stop halfway after the switch')
+  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
+  await expect(transcript(page)).toContainText('This reply stops halfway through its')
+  await page.reload()
+  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.', { timeout: 30_000 })
+  await shot(page, 'rebound-runtime-reply-interrupted')
+  assertions.reboundRuntime = { sessionId, attention: 'work_settled', replyInterrupted: true }
 })
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
