@@ -1,4 +1,4 @@
-Forge combines a base behavioral prompt with the current work mode, specialists, project instructions, memory, skills, and runtime guidance. Understanding which parts replace the base and which add context helps keep customizations predictable.
+Forge combines a base behavioral prompt with project instructions, memory, skills, and runtime guidance. Understanding which parts replace the base and which add context helps keep customizations predictable.
 
 ## Base prompt lookup
 
@@ -8,7 +8,7 @@ Archetype and operational templates are resolved in order:
 2. **Repo template** — the matching template supplied by the repository.
 3. **Builtin default** — the template shipped with Forge.
 
-A matching override replaces that template. An ordinary manager can also have a session-specific system prompt that replaces its archetype template. Forge still assembles the applicable work mode, specialist roster, and other runtime resources around the chosen base.
+A matching override replaces that template. An ordinary manager can also have a session-specific system prompt that replaces its archetype template. Forge still assembles the worker preset list and other runtime resources around the chosen base.
 
 Project Agents use Forge's shared base plus their authored role instructions. Optional model-specific instructions are user-authored; Forge does not add hidden model-family prompt defaults.
 

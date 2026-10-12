@@ -1,25 +1,17 @@
-Forge delegates work through rosters of complete specialists. Work mode decides who normally owns an outcome. A specialist combines a task type and its instructions with the model, reasoning, use/avoid guidance, fallback, and escalation behavior used to run the assignment.
+The manager works directly. It spawns a worker when you ask for one or when a worker clearly helps: separable parallel work, a different model, or an independent check.
 
-## Work mode
+## Worker presets
 
-Delegate first assigns substantive project execution to workers while the manager stays read-only. Adaptive starts directly and delegates when the expected benefit outweighs total handoff and verification effort. Hands-on is the default and keeps investigation, implementation, and validation with the manager; complexity alone does not trigger a handoff. Explicit requests, unavailable capabilities, and concrete benefits from separable work can still justify delegation.
+A worker preset is a saved model choice for a worker: a name, a model, a reasoning level, and an optional one-line note. The manager names a worker preset when it wants a worker on that model. With no worker preset, the worker uses the manager's own model.
 
-## Task types
+Worker presets are one flat, global list. They are not the model family presets described in the Provider Guide.
 
-The manager chooses the instructions and output contract that fit the task: Build & Execute, Planning, Correctness Review, Design Review, or Research. Build & Execute uses the normal worker prompt. The other task types use concise, editable builtin prompts.
+## Specialist files
 
-## Rosters
+Specialist markdown files you wrote also appear as worker presets. The file's handle is the name, `whenToUse` is the note, and the markdown body is that worker's instructions. Forge never rewrites these files, and a file wins over a saved worker preset with the same name.
 
-A roster is a reusable team of specialists. One specialist is the default for each task type, and a roster may contain alternatives for the same task when a cheaper, independent, or stronger executor is useful. The manager normally uses the task default and names an alternative only when its guidance clearly fits.
+## What a worker receives
 
-Internally, Forge retains stable task-mode and route identifiers for persistence and replay. Those compatibility fields are not separate concepts users need to configure.
+A worker gets the assignment the manager writes for it, not a copy of the manager conversation. Its final response returns to the manager automatically. The manager verifies the result and stays accountable for the outcome.
 
-## Custom specialists
-
-A custom specialist is a complete saved domain-specific execution template with its own name, standalone prompt, model settings, fallback, and "when to use" guidance. It is an escape hatch for durable roles that do not fit the shared task types. Managers select a custom specialist directly rather than combining it with a mode or roster route.
-
-## Routing and fallback
-
-The manager receives a compact instruction/custom-specialist block plus a separate versioned `[delegationRoster]` context containing the active roster specialists. Forge pins the resolved specialist, model, and fallback on each attempt, then handles availability fallback and worker-result attribution internally. Capability escalation is a distinct new-attempt decision. Hard OpenRouter routing/privacy filters on the primary model suppress that automatic model fallback; preferences-only OpenRouter settings do not. OpenRouter endpoint fallback is a different control from Forge specialist fallback.
-
-Configure this under **Settings → Delegation**. Project-level task-instruction overrides take precedence over global definitions; roster selection resolves global → project → session.
+Manage the list under **Settings → Worker presets**.

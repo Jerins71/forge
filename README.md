@@ -28,7 +28,7 @@ Forge gives you one.
 
 ---
 
-You talk to a single persistent manager agent per project. Describe what needs to happen (a feature, a batch of bug fixes, a refactor). The manager owns the outcome, executes or delegates according to Work Mode, parallelizes where it makes sense, and surfaces only the things that need your attention. If you're spending more time managing AI agents than doing your work, Forge is the next step.
+You talk to a single persistent manager agent per project. Describe what needs to happen (a feature, a batch of bug fixes, a refactor). The manager owns the outcome, works on it directly, spawns workers where it makes sense, and surfaces only the things that need your attention. If you're spending more time managing AI agents than doing your work, Forge is the next step.
 
 ## Why Forge?
 
@@ -125,9 +125,7 @@ Then start rating messages. Thumbs up when the manager nails it, thumbs down whe
 
 ### Manager & Workers
 
-Every Forge manager is tied to a project directory. You talk to the manager; it remains the accountable owner. Describe work at a high level ("implement the search feature," "fix these three bugs," "refactor the auth module") and the manager executes or delegates according to the selected Work Mode.
-
-**Delegate first** (the default) assigns substantive execution to workers. **Adaptive** starts directly and hands off only when the total path improves. **Hands-on** keeps the critical path with the manager while explicit delegation remains available.
+Every Forge manager is tied to a project directory. You talk to the manager; it remains the accountable owner. Describe work at a high level ("implement the search feature," "fix these three bugs," "refactor the auth module") and the manager works on it directly. It spawns workers when you ask or when a worker clearly helps: separable parallel work, a different model, or an independent check. Saved [worker presets](docs/SPECIALISTS.md) let it pick a worker's model by name.
 
 When work is delegated, workers run in isolated worktrees so they don't step on each other. They execute focused tasks and report evidence; the manager retains accountability, performs the smallest focused check needed to accept their work, handles merging, and reports the accepted result or a material blocker. You can watch it all happen in real time from the dashboard, or walk away and check in later.
 

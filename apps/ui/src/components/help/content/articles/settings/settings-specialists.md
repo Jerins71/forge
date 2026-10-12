@@ -1,72 +1,36 @@
-Delegation separates manager ownership from worker configuration. A roster is a reusable team of complete specialists. Each specialist combines one task type and its instructions with the model, reasoning, use/avoid guidance, fallback, and escalation behavior used to run it.
+A worker preset is a saved model choice the manager can name when it spawns a worker. The manager works directly and spawns workers when you ask or when a worker clearly helps: separable parallel work, a different model, or an independent check.
 
-## Work mode
+Worker presets are different from the model family presets described in the Provider Guide.
 
-- **Delegate first** — the manager delegates substantial project work and keeps direct work to answers, bounded read-only orientation, and acceptance checks.
-- **Adaptive** — starts directly and delegates when expected time, total cost, or independent assurance benefits outweigh briefing, waiting, verification, and likely rework.
-- **Hands-on** — the default. The manager executes investigation, implementation, and validation directly. It delegates for explicit requests, unavailable capabilities, or concrete benefits from separable work. Complexity, multiple files, and worktrees alone do not trigger a handoff.
+## The list
 
-Projects can set a default work mode. An eligible Builder manager session can inherit it or override it from the work-mode control beside Send. A mid-session work-mode change replaces the manager runtime before its next turn and may cause one prompt-cache miss. It does not stop workers or alter an active graph.
+**Settings → Worker presets** shows one flat, global list. Each worker preset has:
 
-## Task types
+- **Name** — a lowercase slug the manager uses to pick it.
+- **Model** — the provider and model the worker runs on.
+- **Reasoning** — the reasoning level for that model.
+- **Note** — an optional one-line hint that tells the manager when the worker preset fits.
 
-- **Build & execute** — implementation, debugging, and other outcome-focused work. This is the default.
-- **Planning** — task breakdown, sequencing, design analysis, and risks.
-- **Correctness review** — bugs, edge cases, invariants, and contract validation.
-- **Design review** — maintainability, API design, architecture fit, and consistency.
-- **Research** — fact-checking, documentation, and source-backed investigation.
+When the manager spawns a worker without naming a worker preset, the worker uses the manager's own model.
 
-Task type describes the specialist's job. A roster may contain more than one specialist for the same task type when different cost, capability, or provider choices are useful.
+Forge stores the list in `shared/config/worker-presets.json` in your Forge data directory.
 
-## Rosters
+## Specialist files
 
-A roster is a reusable team of complete specialists. Every specialist has one task type and a complete execution configuration. One specialist is the default for each task type; alternatives can provide cheaper, independent, or stronger execution when their guidance clearly fits.
+Specialist markdown files you wrote also appear in the list. Forge reads them from the shared and profile `specialists` folders and from a repository's `.forge/specialists/` folder.
 
-Managers normally choose the work to delegate and let Forge use that task type's default specialist. They name another specialist only when its guidance clearly fits. Capability escalation is reserved for a later attempt after evidence that the selected specialist was inadequate. Graph size and fan-in are not reasons to select a stronger specialist.
+- The file's handle becomes the name.
+- `whenToUse` becomes the note.
+- The markdown body becomes that worker's instructions.
 
-The roster selection order is global default → project default → session override. Roster changes affect future attempts; running attempts keep their pinned specialist and execution settings. Availability fallback swaps only the model when the primary is unavailable and keeps the same attempt. Capability escalation starts a fresh attempt on another specialist and never happens merely because a provider is rate-limited.
+Older keys such as `defaultTier`, the fallback keys, `color`, `pinned`, and `webSearch` are ignored. Forge never rewrites these files. If a file and a saved worker preset share a name, the file wins.
 
-OpenRouter provider routing is configured separately in **Settings > Models**. Hard OpenRouter filters on the primary model suppress Forge automatic model fallback; preferences-only order or sort do not. OpenRouter endpoint fallback is not this specialist fallback. Shared required ZDR and disallowed collection cannot be weakened per model.
+## After upgrading
 
-Configure this under **Rosters**. Select a specialist to edit both what it does and how it runs. Its task-type badge shows its job; the **Default** badge shows whether Forge chooses it automatically for that task. Use **Make default** to replace the current default without editing a separate routing table. Use the compact work menu beside Send to select a session roster, return to the project default, or make the current choice the project default.
+Forge converts your existing rosters into worker presets once, on first start after the upgrade. Each keeps its model and reasoning, takes its route id as the name, and uses the first sentence of its old guidance as the note.
 
-### Default roster
+Work modes, task types, automatic fallback models, and the builtin planner, reviewer, researcher, and architect prompts are gone.
 
-Forge's **Default** roster is designed for Hands-on mode. It provides a Plan consultant, Independent reviewer, and Researcher for bounded questions and concrete risks while the manager retains implementation and integration. New installations select it globally; updated installations can opt into the complete recommended defaults from the one-time update dialog.
+## Codex Plugin
 
-Consultation results return automatically. The manager integrates useful findings and continues; a follow-up to a completed worker is another assignment.
-
-## Global and project scopes
-
-Use the scope selector to edit shared definitions or narrower overrides:
-
-- **Global** — task-instruction prompts and custom specialists shared by all Builder projects.
-- **Project** — overrides for one Builder project.
-
-## Custom specialists
-
-Use **New Specialist** in the Instruction library when a durable domain-specific worker needs a complete standalone prompt and fixed model configuration outside the normal roster task types.
-
-1. Enter a kebab-case handle and display name.
-2. Describe when the manager should use it.
-3. Choose its model, reasoning, and optional fallback, or keep its stored tier default.
-4. Write a concise standalone worker prompt with its role and output contract.
-5. Save it.
-
-Builtin task-instruction prompts can be customized per project. Pin a builtin customization to prevent a future Forge update from replacing it. Use **Revert** to remove a project override and return to the inherited definition.
-
-Legacy Architect and system-managed Codex Plugin definitions live in the collapsed **System & Compatibility** section. They are not offered as normal task types, but remain inspectable so existing customizations can be repaired or reverted.
-
-## Multi-model coordination
-
-The built-in `multi-model-coordination` skill provides self-contained examples for parallel exploration, adversarial review, competing solutions, research panels, and thorough code review. It is used when the user asks for that style of work or when a consequential ambiguous decision clearly benefits from independent perspectives. Ordinary implementation, planning, research, and review do not need to read it.
-
-Each scenario declares whether autonomous use needs confirmation and shows one adaptable work-graph topology. The manager keeps the graph small, normally synthesizes two to four accepted results itself, compares evidence rather than votes, and preserves unresolved dissent.
-
-## Dedicated Codex Plugin delegation
-
-Codex Plugin is not a normal task type or custom specialist. When a user includes an active `@Codex` plugin selector, Forge provides a dedicated delegation tool and binds its worker to the server-owned selector scope. The model cannot supply or widen selectors. Explicit retry turns can reuse a stopped or failed worker's stored scope; unrelated turns require a fresh selector tag.
-
-## Prompt preview
-
-In project scope, use the prompt preview to inspect the compact instruction/custom-specialist block injected into the manager prompt. The active roster is supplied separately in a versioned runtime context so roster changes do not rewrite the stable system-prompt prefix.
+Codex Plugin is not a worker preset. When you include an active `@Codex` plugin selector, Forge provides a dedicated tool and binds its worker to the server-owned selector scope. The model cannot supply or widen selectors. Explicit retry turns can reuse a stopped or failed worker's stored scope; unrelated turns require a fresh selector tag.

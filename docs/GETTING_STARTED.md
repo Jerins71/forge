@@ -76,7 +76,7 @@ That's it. Your manager is now live.
 
 A manager agent is your single point of contact for a project. You talk to the manager; it remains accountable for the outcome. It may execute work directly or talk to workers. You never directly interact with workers. The manager handles ownership, dispatch, status tracking, and result synthesis.
 
-You're the executive. The manager is your team lead. Selected Work Mode decides whether that lead keeps the work or assigns it.
+You're the executive. The manager is your team lead. That lead does the work directly and brings in workers when you ask or when one clearly helps.
 
 ### What Is a Session?
 
@@ -84,19 +84,13 @@ A session is a conversation thread within a manager. Your first session is creat
 
 In eligible Builder manager sessions, a compact pill beside **Send** shows the effective model and reasoning level. Click it to open **Session Model**, choose a session override, or select **Use Project Default** to copy the current project default onto that one session. Later project-default changes do not cascade. The pill is not shown in worker views or system profiles.
 
-The Send-adjacent work-mode control chooses how the manager owns subsequent turns:
-
-- **Delegate first** — workers own substantive execution; the manager answers, orients with bounded read-only checks, and accepts results.
-- **Adaptive** — starts directly and hands off only when the total path, including briefing, waiting, acceptance, and likely rework, improves.
-- **Hands-on** (default) — keeps investigation, implementation, and validation, including the critical path; explicit delegation remains available.
-
-See [Worker Delegation](SPECIALISTS.md) for the maintained work-mode guidance.
+A worker uses the manager's own model unless the manager names a saved worker preset. See [Worker presets](SPECIALISTS.md).
 
 Sessions are where that owned work happens.
 
 ### The Manager–Worker Relationship
 
-When you ask your manager to do something ("fix the login bug," "add dark mode," "refactor the auth module"), the manager owns the outcome. Work Mode decides whether it executes directly or delegates: Delegate first assigns substantive execution to workers, Adaptive starts directly and hands off only when the total path improves, and Hands-on keeps the critical path while explicit delegation remains available. When work is delegated, workers run in their own processes, execute tool calls (file edits, terminal commands, web searches), and report evidence back to the manager. The manager retains accountability, performs the smallest focused check needed to accept the work, and reports an accepted result or material blocker.
+When you ask your manager to do something ("fix the login bug," "add dark mode," "refactor the auth module"), the manager owns the outcome and works on it directly. It spawns workers when you ask or when a worker clearly helps: separable parallel work, a different model, or an independent check. When work is delegated, workers run in their own processes, execute tool calls (file edits, terminal commands, web searches), and report evidence back to the manager. The manager retains accountability, performs the smallest focused check needed to accept the work, and reports an accepted result or material blocker.
 
 The key insight: **your manager writes better prompts than you do.** Especially at 2am when you're tired, you're not giving the best instructions. But your manager takes your casual, imprecise request and translates it into a precise execution path—and, when it delegates, into well-structured worker prompts. It handles the "write a prompt to write a prompt" step that you used to do manually across different chat windows.
 
@@ -278,7 +272,7 @@ The manager may stay quiet while workers are running routine tasks. It will surf
 
 > "Refactor the auth middleware to support both JWT and session tokens."
 
-Your manager will break these down, plan the approach, and execute or dispatch according to Work Mode. For complex tasks, you'll see the plan before implementation starts.
+Your manager will break these down, plan the approach, and execute directly or dispatch workers. For complex tasks, you'll see the plan before implementation starts.
 
 ### Parallel Task Execution
 
@@ -341,7 +335,7 @@ Click any session in the sidebar to switch to it. Your manager tracks state inde
 
 For substantial multi-step work, a manager can publish a working plan with `update_plan`. The first revision creates one card at that point in the conversation. Progress revisions update the same card in place instead of adding timeline clutter. When every step is complete, that card stays where it was and becomes a collapsed **Plan complete** card with a frozen final checklist; a later plan creates a new card at its new conversation position. Compact controls in the chat header and above the composer keep current progress available after the inline card scrolls away. Plans use only Pending, In progress, and Completed states, and multiple steps can be In progress during parallel work; small requests usually skip the plan entirely.
 
-For larger work with meaningful parallel streams, dependencies, user gates, retries, or synthesis, a manager may use `update_work_graph` instead. A graph is an optional executable form of the same plan state, not a second planning system. Forge dispatches ready non-decision nodes up to the graph's concurrency limit and normally uses the default specialist for each node's task type from the session's active roster. A named alternative specialist is appropriate only when its current guidance clearly fits. A successful worker node remains **awaiting review** until the manager verifies its result and calls `accept_work_graph_node`; Forge then completes only that node and releases newly ready dependents. Select a step in **Graph** or **List** to inspect assignment, acceptance criteria, authoritative status, unresolved dependencies, and execution attempts; switching views keeps that selection. Decision nodes wait for user or manager input and never auto-dispatch. Small requests, one-worker delegations, and short checklists should not use a graph.
+For larger work with meaningful parallel streams, dependencies, user gates, retries, or synthesis, a manager may use `update_work_graph` instead. A graph is an optional executable form of the same plan state, not a second planning system. Forge dispatches ready non-decision nodes up to the graph's concurrency limit. A successful worker node remains **awaiting review** until the manager verifies its result and calls `accept_work_graph_node`; Forge then completes only that node and releases newly ready dependents. Select a step in **Graph** or **List** to inspect assignment, acceptance criteria, authoritative status, unresolved dependencies, and execution attempts; switching views keeps that selection. Decision nodes wait for user or manager input and never auto-dispatch. Small requests, one-worker delegations, and short checklists should not use a graph.
 
 When a manager delegates work that belongs to one plan step, Forge associates the assignment with that step's stable internal id. Forge saves the current snapshot in `plan.json`, outgoing revisions in `plan-history.ndjson`, and append-only assignment and token-usage estimates in `plan-usage.ndjson`, including manager totals, per-step worker totals, unassigned usage, and attribution coverage. Clearing the conversation clears its current plan; stopping or archiving preserves it. Forks do not copy the live plan or its history/accounting files.
 
@@ -619,7 +613,7 @@ Different models have different strengths. A powerful workflow pattern is routin
 
 Your manager can handle this routing automatically once you've taught it your preferences. Tell it which models to use for which kinds of tasks.
 
-OpenRouter endpoint routing is a different control: shared defaults and exact-model overrides in **Settings → Models** constrain which OpenRouter providers may serve an OpenRouter call. That is not specialist fallback or Forge automatic model fallback.
+OpenRouter endpoint routing is a different control: shared defaults and exact-model overrides in **Settings → Models** constrain which OpenRouter providers may serve an OpenRouter call. It does not change which model Forge selected.
 
 ### Plan → Review → Remediate Cycles
 

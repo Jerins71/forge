@@ -18,6 +18,6 @@ Anthropic reasoning is catalog-driven per model, not one global clamp. Claude Op
 
 ## How to choose
 
-Start at **medium** or **high** and adjust from there. If a worker route rushes complex work, raise that route's reasoning level or point its capability escalation at a stronger route. If simple delegated work is taking too long, lower its normal route or choose a faster model.
+Start at **medium** or **high** and adjust from there. If a worker rushes complex work, raise its worker preset's reasoning level or point the worker preset at a stronger model. If simple delegated work is taking too long, lower the reasoning level or choose a faster model.
 
-Worker reasoning is configured per delegation route or direct custom specialist in Settings > Delegation. You can also set it for the manager model when creating or editing a session.
+Worker reasoning is set per worker preset in Settings > Worker presets. You can also set it for the manager model when creating or editing a session.

@@ -20,7 +20,7 @@ Select a step in **Graph** or **List** to open the inline inspector. The same se
 
 The inspector shows the stored assignment, acceptance criteria, and the graph's authoritative step status. A worker succeeding is not manager acceptance: a succeeded attempt can still leave the step **awaiting review**. Unresolved dependencies include every predecessor that is not **completed**; only accepted steps satisfy a dependency.
 
-Execution attempts appear newest first, with worker attribution, specialist or route, model, and the stored result summary. Older attempts stay collapsed until you expand them. Long assignment, criteria, and summary text stay truncated until expanded, then reveal the complete stored text.
+Execution attempts appear newest first, with worker attribution, worker preset, model, and the stored result summary. Older attempts stay collapsed until you expand them. Long assignment, criteria, and summary text stay truncated until expanded, then reveal the complete stored text.
 
 ## Persistence and scope
 

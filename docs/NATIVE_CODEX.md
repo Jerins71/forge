@@ -17,8 +17,6 @@ and browser integration tools. No existing session changes runtime automatically
   Windows `.cmd` and PowerShell wrappers are not executable through the native
   version-check/RPC path. Set `CODEX_BIN` to the full native `codex.exe` path for a
   custom installation. Windows execution still requires live validation.
-- Select **Hands-on** or **Adaptive** for direct execution. The selected work mode
-  still applies; Delegation-first continues to ask Forge workers to do project work.
 
 If the CLI is missing or too old, Forge's error includes the install/update command
 for the backend's operating system: `npm.cmd install -g @openai/codex@latest` in
@@ -86,7 +84,7 @@ An optional **Base URL** sends Codex's requests through a router or proxy.
 
 Codex retains its native base instructions, coding tools, repository instruction
 discovery, and context management. Forge adds a compact developer contract for
-work mode, worker ownership, proportionate verification, routing, notes, and history.
+worker ownership, proportionate verification, routing, notes, and history.
 Forge memory, selected skill descriptions/paths, and SWARM.md context are included.
 User-authored manager prompts and model instructions remain authoritative Forge
 configuration and are preserved. Review those overrides if old delegation or
@@ -142,7 +140,7 @@ session's native tool definitions.
 
 Start with an isolated Forge data directory and distinct backend/UI ports. Keep its
 authentication copy private. Never point two Forge processes at the same data directory.
-Compare the same model, effort, work mode, repository state, and requested outcome.
+Compare the same model, effort, repository state, and requested outcome.
 Measure elapsed completion time and useful acceptance evidence across several real
 tasks. A successful small fixture establishes functionality, not a performance win.
 

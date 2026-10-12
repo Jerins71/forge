@@ -28,7 +28,7 @@ const modelsOverview: HelpArticle = {
     'context cap',
   ],
   relatedIds: ['models-providers', 'models-reasoning', 'models-routing'],
-  contextKeys: ['settings.general', 'settings.models', 'settings.specialists'],
+  contextKeys: ['settings.general', 'settings.models', 'settings.presets'],
 }
 
 const modelsProviders: HelpArticle = {
@@ -95,7 +95,7 @@ const modelsProviders: HelpArticle = {
     'Haiku',
   ],
   relatedIds: ['models-overview', 'models-cost', 'models-reasoning', 'settings-auth', 'settings-oauth', 'getting-started-configuration', 'chat-compaction'],
-  contextKeys: ['settings.general', 'settings.models', 'settings.auth', 'settings.specialists'],
+  contextKeys: ['settings.general', 'settings.models', 'settings.auth', 'settings.presets'],
 }
 
 const modelsReasoning: HelpArticle = {
@@ -118,26 +118,20 @@ const modelsReasoning: HelpArticle = {
     'quality',
   ],
   relatedIds: ['models-overview', 'models-cost', 'models-providers'],
-  contextKeys: ['settings.general', 'settings.models', 'settings.specialists'],
+  contextKeys: ['settings.general', 'settings.models', 'settings.presets'],
 }
 
 const modelsRouting: HelpArticle = {
   id: 'models-routing',
   title: 'How Model Routing Works',
   category: 'models',
-  summary: 'How session models, work mode, task types, rosters, specialists, and fallbacks determine which model runs work.',
+  summary: 'How the session model and worker presets determine which model runs work.',
   content: modelsRoutingContent,
   keywords: [
     'routing',
+    'worker preset',
     'specialist',
-    'fallback',
     'delegation',
-    'worker roster',
-    'execution profile',
-    'worker profile',
-    'model policy',
-    'specialist roster',
-    'work mode',
     'manager',
     'worker',
     'spawn',
@@ -174,7 +168,7 @@ const modelsRouting: HelpArticle = {
     'price ceiling',
   ],
   relatedIds: ['models-overview', 'models-providers', 'concepts-specialists', 'chat-sending'],
-  contextKeys: ['settings.models', 'settings.specialists', 'chat.workers', 'chat.main'],
+  contextKeys: ['settings.models', 'settings.presets', 'chat.workers', 'chat.main'],
 }
 
 const modelsCost: HelpArticle = {
@@ -198,7 +192,7 @@ const modelsCost: HelpArticle = {
     'pi-6',
   ],
   relatedIds: ['models-overview', 'models-reasoning', 'models-routing'],
-  contextKeys: ['settings.general', 'settings.models', 'settings.specialists'],
+  contextKeys: ['settings.general', 'settings.models', 'settings.presets'],
 }
 
 export const modelsArticles: HelpArticle[] = [

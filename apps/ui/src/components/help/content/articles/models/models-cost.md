@@ -4,8 +4,8 @@ Every model choice is a tradeoff between cost, speed, and output quality. Here i
 
 Use these for high-volume or simple tasks where speed matters more than depth.
 
-- **GPT-6 Luna** — Fast with decent quality. The Scout specialist uses this by default for exploration and information gathering.
-- **GPT-5.5 at low reasoning** — A fast, cheaper Codex option for bulk formatting, simple code generation, and lightweight review. Good for doc-heavy and simple specialist work.
+- **GPT-6 Luna** — Fast with decent quality. A good fit for exploration and information gathering.
+- **GPT-5.5 at low reasoning** — A fast, cheaper Codex option for bulk formatting, simple code generation, and lightweight review. Good for doc-heavy and simple worker tasks.
 
 ## Balanced
 
@@ -13,7 +13,7 @@ These work well for everyday development tasks.
 
 - **GPT-5.5** — The standard full coding model. Good balance of speed and quality for implementation work.
 - **GPT-5.5 at low reasoning** — A practical middle ground for documentation tasks where higher-reasoning models would be wasteful.
-- **Grok 4.6 at low reasoning** — A lighter native xAI choice for manager or specialist tasks.
+- **Grok 4.6 at low reasoning** — A lighter native xAI choice for manager or worker tasks.
 - **Cursor Grok 4.5 Fast** — Cursor SDK fast-pool variant for Grok 4.5 sessions.
 
 ## Thorough but expensive
@@ -22,8 +22,8 @@ Reserve these for work where quality matters most.
 
 - **GPT-6 Astra** — The most capable Codex choice. Best for the hardest backend work, large multi-file refactors, and demanding research tasks.
 - **GPT-6 Sol at high reasoning** — Forge's recommended Codex-native manager default. Strong for everyday implementation and orchestration without paying the latency cost of the highest reasoning levels.
-- **GPT-5.5 at medium reasoning** — A capable specialist-work balance of quality and cost. Best for frontend work, nuanced code review, and tasks that need careful judgment.
-- **Grok 4.6 at high reasoning** — The native xAI default configured for more thorough manager or specialist work.
+- **GPT-5.5 at medium reasoning** — A capable balance of quality and cost for worker tasks. Best for frontend work, nuanced code review, and tasks that need careful judgment.
+- **Grok 4.6 at high reasoning** — The native xAI default configured for more thorough manager or worker tasks.
 - **Cursor Grok 4.5** — Cursor SDK Grok 4.5 for high-quality Cursor runtime sessions; the fast variant trades higher price for lower latency.
 
 ## Reasoning level adds cost too
@@ -32,4 +32,4 @@ Higher reasoning levels multiply both cost and latency on top of the base model 
 
 ## General advice
 
-Match the model to the task. Use cheap models for exploration, mid-range models for standard work, and expensive models for the tasks that actually need them. The specialist system makes this automatic once configured.
+Match the model to the task. Use cheap models for exploration, mid-range models for standard work, and expensive models for the tasks that actually need them. Save a worker preset for each choice so the manager can pick it by name.
