@@ -966,7 +966,6 @@ body {
   font-size: 0.6875rem;
   font-weight: 500;
   opacity: 0;
-  pointer-events: none;
   transition: color 150ms ease, opacity 150ms ease;
 }
 .sidebar-room-inbox-done:hover {
@@ -975,7 +974,6 @@ body {
 .sidebar-room-inbox-row:hover .sidebar-room-inbox-done,
 .sidebar-room-inbox-row:focus-within .sidebar-room-inbox-done {
   opacity: 1;
-  pointer-events: auto;
 }
 .sidebar-room-inbox-row:has(.sidebar-room-inbox-done):hover .sidebar-room-inbox-trailing,
 .sidebar-room-inbox-row:has(.sidebar-room-inbox-done):focus-within .sidebar-room-inbox-trailing {

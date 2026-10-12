@@ -192,6 +192,19 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     if (!descriptor || descriptor.role !== "manager") throw rpcFailure("NOT_FOUND", "Session is unavailable.");
     return [descriptor, ...swarmManager.listWorkersForSession(sessionId)];
   }
+  /** A launch is acknowledged before the swarm has its session; a read in that window waits for it instead of failing. */
+  function launchMaterialized(sessionId: string): Promise<void> {
+    const launching = () => !swarmManager.getAgentForInternalUse(sessionId)
+      && !!database.prepare("SELECT 1 FROM effects WHERE session_id=? AND kind='session.ensure' AND state IN ('pending','claimed')").get(sessionId);
+    if (!launching()) return Promise.resolve();
+    return new Promise(resolve => {
+      const finish = () => { unsubscribe(); clearTimeout(giveUp); resolve(); };
+      // Outside the committing transaction: a commit listener must not start another one.
+      const unsubscribe = eventSink.subscribeCommit(() => { setImmediate(() => { if (!launching()) finish(); }); });
+      const giveUp = setTimeout(finish, 60_000);
+      giveUp.unref?.();
+    });
+  }
   function authorizeRead(principal: Principal, sessionId: string) {
     if (!principal.scopes.has("session:read")) throw rpcFailure("FORBIDDEN", "Session reading requires session:read.");
     const device = database.prepare("SELECT revoked_at,expires_at FROM device_sessions WHERE device_session_id=?").get(principal.deviceSessionId) as { revoked_at: number | null; expires_at: number } | undefined;
@@ -404,6 +417,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     ensureDetailInitialized(sessionId) {
       const existing = initializing.get(sessionId); if (existing) return existing;
       const work = (async () => {
+        await launchMaterialized(sessionId);
         const sources = sessionSources(sessionId);
         if (swarmManager.getSessionPlanSnapshot) detailFeature(sessionId, "plan.upsert", await swarmManager.getSessionPlanSnapshot(sessionId));
         if (swarmManager.getSessionGoalSnapshot) detailFeature(sessionId, "goal.upsert", await swarmManager.getSessionGoalSnapshot(sessionId));
