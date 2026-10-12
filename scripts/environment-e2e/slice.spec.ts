@@ -1000,7 +1000,7 @@ async function busySendFixture(index = 0, waitForOnboarding = true) {
   return { environment, rpc, sessionId, state, run, counters, detail, send, slow };
 }
 const silentNotice = 'The manager completed this turn without a visible response.';
-test('F7: an immediate first send after project.create joins onboarding without interrupting it', async () => {
+test('F7: an immediate first send after project.create waits for onboarding and gets a visible reply', async () => {
   const hold = join(manifest.environments[0]!.checkout, '.fixture-onboarding-slow');
   await writeFile(hold, 'hold the hidden onboarding turn');
   const f = await busySendFixture(0, false);
@@ -1018,6 +1018,10 @@ test('F7: an immediate first send after project.create joins onboarding without 
     expect(detail.items.some((item: any) => item.text?.includes('no active turn to interrupt'))).toBe(false);
     expect(detail.items.some((item: any) => item.text === silentNotice)).toBe(false);
     expect(detail.items.filter((item: any) => item.kind === 'user' && item.text === 'The immediate first user task')).toHaveLength(1);
+    // Onboarding's own reply stays hidden; steered into that turn, this message's answer would be hidden with it.
+    expect(detail.items.filter((item: any) => item.kind === 'assistant' && item.text === 'fixture:env-a:assistant reply')).toHaveLength(1);
+    expect(state.runs[`run-${sent.commandId}`]).toMatchObject({ delivery: 'queue' });
+    expect((await f.counters()).steers).toBe(0);
     evidence.immediateProjectSend = { onboardingOutcome: onboarding[0]!.outcome, inputOutcome: 'completed', counters: await f.counters(), delivery: state.runs[`run-${sent.commandId}`].delivery };
   } finally { f.rpc.close(); await rm(hold, { force: true }); }
 });
