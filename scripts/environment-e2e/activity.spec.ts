@@ -1,6 +1,6 @@
 // Live tool and reasoning rows in the built UI, against a real backend and the scripted Codex peer:
-// rows appear while the turn runs, the running row shimmers, rows expand and collapse from the
-// keyboard, finished runs fold into a group, and a reload replays the same rows from canonical history.
+// a running turn folds its work into one live group that expands to rows, rows expand and collapse from
+// the keyboard, the group becomes the finished summary, and a reload replays the same rows from canonical history.
 //   pnpm exec playwright test scripts/environment-e2e/activity.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -71,14 +71,25 @@ test('tool and reasoning rows stream live, expand, group, and replay after reloa
   await expect(transcript(page)).toBeVisible()
   await send(page, '[fixture:activity-hold] Show the activity timeline')
 
-  // Live: finished rows are listed in arrival order and the held command is still running.
+  // Live: the run is one folded group that names its work and the step it is on; only the failure stays in view.
+  const header = page.getByTestId('activity-group-header')
+  await expect(header).toHaveText(`Running 3 commands, changing 1 file · ${HELD}`)
+  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await expect(header.locator('[data-activity-shimmer]')).toHaveCSS('animation-name', 'activity-shimmer')
+  await expect.poll(() => describeRows(page)).toEqual([FINISHED[2]])
+  await expect(page.getByTestId('activity-work-timer')).toContainText('Working for')
+  assertions.liveCollapsed = { header: await header.textContent(), rows: await describeRows(page) }
+  await shot(page, 'live-collapsed')
+
+  // Expanded: every step in arrival order, the held command still running.
+  await header.click()
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
   const running = row(page, HELD)
   await expect(running).toHaveAttribute('data-activity-status', 'running')
   await expect.poll(() => describeRows(page)).toEqual([...FINISHED, { kind: 'command', status: 'running', summary: HELD }])
-  await expect(page.getByTestId('activity-work-timer')).toContainText('Working for')
-  const shimmer = running.locator('[data-activity-shimmer]')
-  await expect(shimmer).toHaveCSS('animation-name', 'activity-shimmer')
+  await expect(running.locator('[data-activity-shimmer]')).toHaveCSS('animation-name', 'activity-shimmer')
   assertions.liveRows = await describeRows(page)
+  await shot(page, 'live-group-expanded')
 
   // Keyboard: the row is a button; Enter expands the streamed output, Enter again collapses it.
   await running.getByRole('button').focus()
@@ -89,17 +100,20 @@ test('tool and reasoning rows stream live, expand, group, and replay after reloa
   await shot(page, 'live-running-expanded')
   await page.keyboard.press('Enter')
   await expect(running.getByTestId('activity-detail')).toHaveCount(0)
-  await shot(page, 'live-running')
+  // Streaming updates leave the group open.
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
 
-  // Completion: the run folds into one group above the reply, and the timer stops.
+  // Completion: the run becomes the finished summary above the reply, still open as the reader left it, and the timer stops.
   await writeFile(releaseFile(), 'release')
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
-  const header = page.getByTestId('activity-group-header')
   await expect(header).toHaveText('Ran 3 commands, changed 1 file')
-  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await expect(header).toHaveAttribute('aria-expanded', 'true')
+  await expect.poll(() => describeRows(page)).toEqual(COMPLETED)
   await expect(page.getByTestId('activity-work-timer')).toContainText('Worked for')
-  await expect(rows(page)).toHaveCount(0)
   await expect(page.getByTestId('live-activity')).toHaveCount(0)
+  await header.click()
+  await expect(header).toHaveAttribute('aria-expanded', 'false')
+  await expect(rows(page)).toHaveCount(0)
   await shot(page, 'grouped')
 
   const expandAndRead = async () => {

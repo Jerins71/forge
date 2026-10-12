@@ -567,7 +567,7 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   // The first message is the session's first turn and is answered at once, live and after reload.
   await composer(page).fill('[fixture:activity] Show the work of a turn I sent')
   await page.keyboard.press('Enter')
-  await expect(page.getByTestId('activity-row').filter({ hasText: 'ls -la' })).toBeVisible({ timeout: 30_000 })
+  await expect(page.getByTestId('activity-group-header').filter({ hasText: /(Running|Ran) \d+ commands?/ })).toBeVisible({ timeout: 30_000 })
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
   expect(await readFile(join(directory, 'fixture-provider-marker.txt'), 'utf8')).toContain('turns=1')
   await page.reload()

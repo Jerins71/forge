@@ -586,6 +586,12 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     const hasActivity = displayEntries.some((entry) => entry.type === 'activity_group' && entry.turnIndex === index)
     return { index, startedAt, hasActivity }
   }, [displayEntries, messages])
+  // While the newest turn runs, its latest run of work continues in the live rows as one group.
+  const liveTail = useMemo(() => {
+    const last = displayEntries.at(-1)
+    return isLoading && liveActivity && activeAgentId && last?.type === 'activity_group'
+      && last.turnIndex === liveTurn.index && last.rows[0]?.kind !== 'status' ? last : undefined
+  }, [displayEntries, isLoading, liveActivity, activeAgentId, liveTurn.index])
   const [expandedActivityIds, setExpandedActivityIds] = useState<ReadonlySet<string>>(() => new Set())
   const toggleActivity = useCallback((id: string) => {
     setExpandedActivityIds((current) => {
@@ -641,13 +647,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
       next.push({ kind: 'missing_choice', id: `missing-choice-${choiceId}`, choiceId })
     }
     for (const entry of displayEntries) {
-      next.push({ kind: 'entry', id: entry.id, entry })
+      if (entry !== liveTail) next.push({ kind: 'entry', id: entry.id, entry })
     }
     if (isLoading) {
       next.push({ kind: 'loading', id: 'loading-indicator' })
     }
     return next
-  }, [showPlanCard, missingPendingChoiceIds, displayEntries, hasOlder, historyCompleteness, isLoading])
+  }, [showPlanCard, missingPendingChoiceIds, displayEntries, liveTail, hasOlder, historyCompleteness, isLoading])
   rowCountRef.current = rows.length
   const rowsRef = useRef(rows)
   rowsRef.current = rows
@@ -1318,10 +1324,11 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
             <LiveActivityRows
               store={liveActivity}
               actorId={activeAgentId}
+              tail={liveTail?.rows}
               expandedIds={expandedActivityIds}
               onToggle={toggleActivity}
               loadContent={loadActivityContent}
-              turnStartedAt={liveTurn.hasActivity ? undefined : liveTurn.startedAt}
+              turnStartedAt={liveTail?.turn?.startedAt ?? (liveTurn.hasActivity ? undefined : liveTurn.startedAt)}
             />
           ) : null}
           <LoadingIndicator streamingStartedAt={streamingStartedAt} />
@@ -1448,13 +1455,12 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     }
 
     if (entry.type === 'activity_group') {
-      // While the newest turn runs, its timer keeps counting and its latest run stays listed.
+      // While the newest turn runs, its timer keeps counting.
       const inLiveTurn = isLoading && entry.turnIndex === liveTurn.index
       return (
         <ActivityGroup
-          groupId={entry.id}
           rows={entry.rows}
-          open={entry.rows[0]?.kind === 'status' || (inLiveTurn && displayEntries.at(-1) === entry)}
+          open={entry.rows[0]?.kind === 'status'}
           expandedIds={expandedActivityIds}
           onToggle={toggleActivity}
           loadContent={loadActivityContent}
