@@ -90,7 +90,9 @@ export class ActivityTimelineTracker {
    */
   observeText(fact: ProviderTextFact): TimelineActivity | undefined {
     const reply = fact.channel === "assistant";
-    const itemId = `${reply ? "message" : "reasoning"}:${fact.actorId}:${fact.nativeId}`;
+    // Native item ids are unique only within one provider binding; a rebound provider starts over.
+    // Scoping the row to its run, like the status row, keeps a new turn from landing on a finished row.
+    const itemId = `${reply ? "message" : "reasoning"}:${fact.actorId}:${fact.runId ? `${fact.runId}:` : ""}${fact.nativeId}`;
     let tracked = this.items.get(itemId);
     if (tracked && tracked.item.status !== "running") return undefined;
     // A reply item with no text yet, such as one that only calls tools, has nothing to show.
