@@ -292,6 +292,7 @@ export class ConversationProjector {
     const descriptor = this.deps.descriptors.get(agentId);
     if (descriptor) {
       const result = this.loadConversationHistoryForDescriptorWithDiagnostics(descriptor);
+      dropMovedInputs(result.history);
       this.recordHistoryDiagnostics(agentId, result.diagnostics);
       return result;
     }
@@ -612,8 +613,11 @@ export class ConversationProjector {
     const pending = history.find((entry): entry is ConversationMessageEvent =>
       entry.type === "conversation_message" && entry.steerPending === true && !!entry.id && !placed.has(entry.id) && eligible(entry));
     if (!pending) return;
-    const { steerPending: _pending, timelineEntryId: _entry, timelineSequence: _sequence, ...message } = pending;
-    this.emitConversationMessage({ ...message, id: `${pending.id}:consumed`, consumedFrom: pending.id, timestamp: this.deps.now() });
+    // The input keeps its identity and moves: its send record leaves the history, and the entry written here,
+    // carrying the same IDs, is the one record every reader sees from now on.
+    history.splice(history.indexOf(pending), 1);
+    const { steerPending: _pending, timelineSequence: _sequence, ...message } = pending;
+    this.emitConversationMessage({ ...message, consumedFrom: pending.id, timestamp: this.deps.now() });
   }
 
   private emitConversationEntry(
@@ -1300,4 +1304,14 @@ function decrementCounter(counter: Map<string, number>, key: string): boolean {
   }
 
   return true;
+}
+
+/** A held input that was later placed has one record: the later one, at the point it was placed. */
+function dropMovedInputs(history: ConversationEntryEvent[]): void {
+  const moved = new Set(history.flatMap(entry => entry.type === "conversation_message" && entry.consumedFrom ? [entry.consumedFrom] : []));
+  if (moved.size === 0) return;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index]!;
+    if (entry.type === "conversation_message" && entry.steerPending && entry.id && moved.has(entry.id)) history.splice(index, 1);
+  }
 }
