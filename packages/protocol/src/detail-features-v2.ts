@@ -12,15 +12,14 @@ const nullable = <T extends TSchema>(s: T) => Type.Union([s, Type.Null()])
 const ids = Type.Array(id, { maxItems: 1000 })
 const model = O({ provider: short, modelId: short, thinkingLevel: short })
 const attempt = O({ id, number: n, status: E('dispatching','running','succeeded','blocked','cancelled'), startedAt: time,
-  completedAt: Type.Optional(time), workerId: Type.Optional(id), behaviorMode: E('general','plan','correctness-review','design-review','research'), requestedRoute: Type.Optional(short),
-  resolvedRouteId: Type.Optional(id), resolvedRouteLabel: Type.Optional(short), rosterId: Type.Optional(id), rosterRevision: Type.Optional(n),
-  model: Type.Optional(model), capabilityEscalationRouteId: Type.Optional(id), executionPolicy: Type.Optional(E('support','routine','deep')), summary: Type.Optional(text) })
+  completedAt: Type.Optional(time), workerId: Type.Optional(id), preset: Type.Optional(short),
+  model: Type.Optional(model), summary: Type.Optional(text) })
 export const PlanSnapshotV2Schema = O({ revision: n, updatedAt: nullable(time), explanation: Type.Optional(text),
   plan: Type.Array(O({ id: Type.Optional(id), step: text, status: E('pending','in_progress','completed') }), { maxItems: 256 }),
   coordinationMode: Type.Optional(E('plan','graph')), workGraph: Type.Optional(O({ maxConcurrency: n,
     nodes: Type.Array(O({ id, title: text, task: text, kind: E('task','plan','research','implementation','review','design-review','synthesis','decision'),
       status: E('pending','running','awaiting_review','waiting','blocked','completed','cancelled'), statusUpdatedAt: Type.Optional(time),
-      dependsOn: ids, acceptanceCriteria: Type.Optional(text), route: Type.Optional(short), effort: Type.Optional(E('auto','support','routine','deep')),
+      dependsOn: ids, acceptanceCriteria: Type.Optional(text), preset: Type.Optional(short),
       attempts: Type.Array(attempt, { maxItems: 256 }) }), { maxItems: 256 }) })) })
 export const GoalSnapshotV2Schema = O({ revision: n, measuredAt: time, goal: nullable(O({ id, objective: text,
   status: E('active','paused','blocked','completed','cancelled'), createdAt: time, updatedAt: time, endedAt: Type.Optional(time),

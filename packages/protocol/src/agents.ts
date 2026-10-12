@@ -1,10 +1,5 @@
 import type { CliSessionMetadata } from './cli.js'
 import type { ContextMode } from './context-mode.js'
-import type {
-  DelegationRosterOrigin,
-  ManagerPostureOrigin,
-  WorkModeId,
-} from './delegation.js'
 import { CATALOG_FAMILY_IDS } from './model-catalog.js'
 
 export type AgentStatus = 'idle' | 'streaming' | 'terminated' | 'stopped' | 'error'
@@ -168,9 +163,6 @@ export interface ManagerProfile {
   displayName: string
   defaultSessionAgentId: string
   defaultModel: AgentModelDescriptor
-  /** Bounded transport identity. Backend persistence still stores closed ManagerPosture. */
-  defaultManagerPosture?: WorkModeId
-  defaultDelegationRosterId?: string
   /** Absent preserves Secure Sessions for projects created before this setting. */
   secureSessionsEnabled?: boolean
   /** Absent means inherit the product summary default. */
@@ -212,11 +204,6 @@ export interface AgentDescriptor {
   cwd: string
   model: AgentModelDescriptor
   modelOrigin?: AgentModelOrigin
-  /** Bounded transport identity. Backend persistence still stores closed ManagerPosture. */
-  managerPosture?: WorkModeId
-  managerPostureOrigin?: ManagerPostureOrigin
-  delegationRosterId?: string
-  delegationRosterOrigin?: DelegationRosterOrigin
   /** Manager-session override. Absent means inherit the project default. */
   contextModeOverride?: ContextMode
   sessionFile: string
@@ -236,14 +223,10 @@ export interface AgentDescriptor {
   activeWorkerCount?: number
   streamingStartedAt?: number
   pendingChoiceCount?: number
+  /** Worker preset name the worker was started on. Absent when it uses its manager's model. */
   specialistId?: string
-  specialistTier?: import('./specialists.js').EffortTier
-  specialistLens?: string
   specialistDisplayName?: string
   specialistColor?: string
-  delegationRouteId?: string
-  delegationRouteLabel?: string
-  delegationRosterRevision?: number
   internalWorkerKind?: InternalWorkerKind
   projectAgent?: ProjectAgentInfo
   agentCreatorResult?: AgentCreatorResult

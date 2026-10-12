@@ -1,5 +1,4 @@
 import type { AgentModelDescriptor } from './agents.js'
-import type { DelegationBehaviorMode } from './delegation.js'
 
 export const PLAN_STEP_STATUSES = ['pending', 'in_progress', 'completed'] as const
 
@@ -37,10 +36,6 @@ export const WORK_GRAPH_NODE_STATUSES = [
 
 export type WorkGraphNodeStatus = (typeof WORK_GRAPH_NODE_STATUSES)[number]
 
-export const WORK_GRAPH_EFFORTS = ['auto', 'support', 'routine', 'deep'] as const
-
-export type WorkGraphEffort = (typeof WORK_GRAPH_EFFORTS)[number]
-
 export const WORK_GRAPH_ATTEMPT_STATUSES = [
   'dispatching',
   'running',
@@ -58,16 +53,9 @@ export interface WorkGraphAttempt {
   startedAt: string
   completedAt?: string
   workerId?: string
-  behaviorMode: DelegationBehaviorMode
-  requestedRoute?: string
-  resolvedRouteId?: string
-  resolvedRouteLabel?: string
-  rosterId?: string
-  rosterRevision?: number
+  /** Worker preset the attempt ran on. Absent when it used the manager's own model. */
+  preset?: string
   model?: AgentModelDescriptor
-  capabilityEscalationRouteId?: string
-  /** @deprecated Retained only for persisted pre-roster attempts. */
-  executionPolicy?: 'support' | 'routine' | 'deep'
   summary?: string
 }
 
@@ -81,10 +69,8 @@ export interface WorkGraphNode {
   statusUpdatedAt?: string
   dependsOn: string[]
   acceptanceCriteria?: string
-  /** Missing on persisted pre-roster graphs and treated as auto. */
-  route?: string
-  /** @deprecated Retained only for persisted pre-roster graphs. */
-  effort?: WorkGraphEffort
+  /** Worker preset for this node. Absent means the manager's own model. */
+  preset?: string
   attempts: WorkGraphAttempt[]
 }
 
