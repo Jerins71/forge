@@ -15,6 +15,8 @@ A **worker preset** is a saved model choice the manager can name when it spawns 
 
 Manage the list under **Settings → Worker presets**. Forge stores it in `<dataDir>/shared/config/worker-presets.json`.
 
+Forge ships one worker preset: `plan-consultant` (`codex-native/gpt-6-astra`, `xhigh`), for consulting on a specific consequential decision or critiquing a proposed plan. A new install starts with only that preset; edit or delete it like any other.
+
 ## Spawning workers
 
 `spawn_agent` takes a required `initialMessage`, plus optional `preset`, `cwd`, `planStepId`, and `requiresSecureRuntime`.
@@ -56,7 +58,7 @@ The old keys `defaultTier`, `fallbackModelId`, `fallbackReasoningLevel`, `color`
 
 ## Upgrading
 
-On first boot after the upgrade, Forge converts each existing roster entry into a worker preset once: the name is the route id, the model and reasoning are unchanged, and the note is the first sentence of its `useWhen` guidance.
+On first boot after the upgrade, Forge converts each existing roster entry into a worker preset once: the name is the route id, the model and reasoning are unchanged, and the note is the first sentence of its `useWhen` guidance. Routes Forge itself shipped in the Balanced, Default, and Hands-on support rosters are dropped unless you edited their guidance; routes you added are kept. Forge then adds `plan-consultant` unless a preset already has that name. An existing `worker-presets.json` is never changed.
 
 These are gone: work modes, task types, rosters and routes, `useWhen`/`avoidWhen` guidance, automatic fallback models, escalation to a stronger worker, effort tiers, the builtin `planner`, `code-reviewer`, `code-reviewer-2`, `researcher`, and `architect` role prompts, the post-update recommended-defaults offer, and the per-turn `[delegationRoster]` context.
 

@@ -211,10 +211,14 @@ describe("specialist-registry", () => {
     const userCodexPlugin = ["---", "displayName: Mine", "whenToUse: Mine", "---", "User replaced this."].join("\n");
     await writeFile(join(sharedDir, "planner.md"), retiredBuiltin, "utf8");
     await writeFile(join(sharedDir, "my-architect.md"), userPlanner, "utf8");
+    // A user-authored file that happens to share a retired builtin's name is the user's.
+    await writeFile(join(sharedDir, "researcher.md"), userPlanner, "utf8");
 
     await seedBuiltins(dataDir);
 
-    expect((await readdir(sharedDir)).sort()).toEqual(["codex-plugin.md", "my-architect.md"]);
+    expect((await readdir(sharedDir)).sort()).toEqual(["codex-plugin.md", "my-architect.md", "researcher.md"]);
+    expect(await readFile(join(sharedDir, "researcher.md"), "utf8")).toBe(userPlanner);
+    expect((await resolveRoster("default", dataDir)).map((entry) => entry.specialistId)).toContain("researcher");
     expect(await readFile(join(sharedDir, "my-architect.md"), "utf8")).toBe(userPlanner);
     expect((await parseSpecialistFile(join(sharedDir, "codex-plugin.md")))?.frontmatter).toMatchObject({ builtin: true, displayName: "Codex Plugin" });
 

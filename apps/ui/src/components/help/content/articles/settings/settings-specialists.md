@@ -15,6 +15,8 @@ When the manager spawns a worker without naming a worker preset, the worker uses
 
 Forge stores the list in `shared/config/worker-presets.json` in your Forge data directory.
 
+Forge ships one worker preset, **plan-consultant** (GPT-6 Astra on Codex, extra-high reasoning), for consulting on a specific consequential decision or critiquing a proposed plan. A new install starts with only that one. You can edit or delete it.
+
 ## Specialist files
 
 Specialist markdown files you wrote also appear in the list. Forge reads them from the shared and profile `specialists` folders and from a repository's `.forge/specialists/` folder.
@@ -27,7 +29,7 @@ Older keys such as `defaultTier`, the fallback keys, `color`, `pinned`, and `web
 
 ## After upgrading
 
-Forge converts your existing rosters into worker presets once, on first start after the upgrade. Each keeps its model and reasoning, takes its route id as the name, and uses the first sentence of its old guidance as the note.
+Forge converts your existing rosters into worker presets once, on first start after the upgrade. Each keeps its model and reasoning, takes its route id as the name, and uses the first sentence of its old guidance as the note. Entries Forge shipped in its Balanced, Default, and Hands-on support rosters are left out unless you edited their guidance. Entries you added are kept, and **plan-consultant** is added unless you already have a preset with that name. If you already have a worker preset list, Forge leaves it unchanged.
 
 Work modes, task types, automatic fallback models, and the builtin planner, reviewer, researcher, and architect prompts are gone.
 
