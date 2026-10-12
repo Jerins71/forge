@@ -122,8 +122,11 @@
   --content-max: 128rem;
   /* Forms keep label and control within reach of each other. */
   --content-max-form: 68rem;
-  /* A single focused task, such as starting a thread. */
-  --content-max-focus: 54rem;
+  /* Settings pages: wide enough for two columns of cards, left-aligned to the settings nav. */
+  --content-max-settings: 84rem;
+  /* The one composer width, for a new thread and a running session alike. It follows its pane
+     (`cqi`) between a comfortable minimum and a ceiling; panes narrower than the minimum fill. */
+  --content-max-composer: clamp(54rem, 60cqi, 80rem);
   /* Running text keeps a readable line inside a wider column. The measure follows the
      transcript column (`cqi`), so wide panes get longer lines up to a readable ceiling. */
   --prose-measure: clamp(84ch, 72cqi, 120ch);
@@ -367,12 +370,12 @@ body {
   padding-inline: var(--content-gutter);
 }
 
-@utility content-form {
-  --content-max: var(--content-max-form);
+@utility content-settings {
+  --content-max: var(--content-max-settings);
 }
 
-@utility content-focus {
-  --content-max: var(--content-max-focus);
+@utility content-composer {
+  --content-max: var(--content-max-composer);
 }
 
 /* Running text keeps its measure; code, tables, diffs and tool output span the column.

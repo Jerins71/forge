@@ -81,23 +81,21 @@ export function NativeAgentsSetup({ apiClient }: { apiClient: SettingsApiClient 
           <p className="text-xs text-destructive">{error}</p>
         </div>
       ) : null}
-      <div className="flex flex-col gap-3">
-        {(['claude', 'codex'] as const).map((id) => (
-          <section key={id} aria-label={`${NAME[id]} setup`} className="flex flex-col gap-3 rounded-lg border border-border p-4" data-testid={`native-agent-${id}`}>
-            <h3 className="text-sm font-medium">{NAME[id]}</h3>
-            {runtimeFor(id) ? (
-              <RuntimeRow runtime={runtimeFor(id)!} busy={running} onUpdate={() => void update(runtimeFor(id)!)} />
-            ) : (
-              <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                {loading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null} Checking runtime…
-              </p>
-            )}
-            <div className="border-t border-border pt-3">
-              {id === 'claude' ? <ClaudeNativeAuth apiClient={apiClient} embedded /> : <CodexNativeAuth apiClient={apiClient} />}
-            </div>
-          </section>
-        ))}
-      </div>
+      {(['claude', 'codex'] as const).map((id) => (
+        <section key={id} aria-label={`${NAME[id]} setup`} className="flex flex-col gap-3" data-testid={`native-agent-${id}`}>
+          <h3 className="eyebrow">{NAME[id]}</h3>
+          {runtimeFor(id) ? (
+            <RuntimeRow runtime={runtimeFor(id)!} busy={running} onUpdate={() => void update(runtimeFor(id)!)} />
+          ) : (
+            <p className="flex items-center gap-2 text-xs text-muted-foreground">
+              {loading ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null} Checking runtime…
+            </p>
+          )}
+          <div className="border-t border-hairline pt-3">
+            {id === 'claude' ? <ClaudeNativeAuth apiClient={apiClient} embedded /> : <CodexNativeAuth apiClient={apiClient} />}
+          </div>
+        </section>
+      ))}
     </SettingsSection>
   )
 }

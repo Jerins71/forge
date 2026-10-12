@@ -14,7 +14,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import {
   readSidebarLayoutPref,
@@ -24,7 +23,7 @@ import {
   storeSidebarModelIconsPref,
   storeSidebarProviderUsagePref,
 } from '@/lib/sidebar-prefs'
-import { SettingsSection, SettingsWithCTA } from './settings-row'
+import { SettingsSection, SettingsSectionGrid, SettingsWithCTA } from './settings-row'
 import { isElectron, type SleepBlockerStatus } from '@/lib/electron-bridge'
 import {
   EDITOR_LABELS,
@@ -606,7 +605,7 @@ export function SettingsGeneral({
   }, [apiClient])
 
   return (
-    <div className="flex flex-col gap-8">
+    <SettingsSectionGrid>
       {/* Editor — local-only (Builder) */}
       <SettingsSection
         label="Editor"
@@ -645,13 +644,14 @@ export function SettingsGeneral({
         label="Repositories"
         description="Default base path for Clone repository when creating a project. Configured home wins over last-used clone base; otherwise Forge uses your home directory."
       >
-        <div className="space-y-3">
-          <div className="space-y-2">
-            <Label htmlFor="repository-configured-home" className="text-sm font-medium">
-              Configured repository home
-            </Label>
+        <SettingsWithCTA
+          label="Configured repository home"
+          description={<>Effective default: <span className="font-mono text-foreground">{repositoryEffectiveBasePath || '…'}</span>{repositorySource ? ` (${repositorySource.replace('_', ' ')})` : null}</>}
+        >
+          <div className="flex w-full max-w-xl flex-col gap-2 @lg/settings:w-1/2">
             <Input
               id="repository-configured-home"
+              aria-label="Configured repository home"
               value={repositoryConfiguredHome}
               onChange={(event) => {
                 setRepositoryConfiguredHome(event.target.value)
@@ -660,11 +660,6 @@ export function SettingsGeneral({
               placeholder={repositoryEffectiveBasePath || 'Absolute directory path'}
               disabled={repositoryLoading || repositoryUpdating}
             />
-            <p className="text-xs text-muted-foreground">
-              Effective default: <span className="font-mono text-foreground">{repositoryEffectiveBasePath || '…'}</span>
-              {repositorySource ? ` (${repositorySource.replace('_', ' ')})` : null}
-            </p>
-          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -694,7 +689,8 @@ export function SettingsGeneral({
           {repositoryError ? (
             <p className="text-xs text-destructive">{repositoryError}</p>
           ) : null}
-        </div>
+          </div>
+        </SettingsWithCTA>
       </SettingsSection>
 
       <SettingsSection
@@ -717,31 +713,27 @@ export function SettingsGeneral({
         label="Prompt Cache Visualization"
         description="Show a compact prompt-cache indicator in manager chat headers for OpenAI/Codex Pi sessions when provider-reported cached input token counts are available."
       >
-        <div className="flex items-center gap-3">
-          <Switch
-            id="model-cache-visualization-enabled-toggle"
-            checked={modelCacheVisualizationEnabled}
-            disabled={modelCacheVisualizationLoading || modelCacheVisualizationUpdating}
-            onCheckedChange={handleModelCacheVisualizationToggle}
-            aria-label="Enable prompt cache visualization"
-          />
-          <Label htmlFor="model-cache-visualization-enabled-toggle" className="text-sm font-medium">
-            Enable prompt cache visualization
-          </Label>
-          {modelCacheVisualizationUpdating ? (
-            <span className="text-xs text-muted-foreground">Saving…</span>
-          ) : null}
-        </div>
-        {!modelCacheVisualizationEnabled && !modelCacheVisualizationLoading ? (
-          <p className="mt-2 text-xs italic text-muted-foreground/70">
-            Prompt cache visualization is off by default. While disabled, Forge does not collect new cache
-            observations and hides the header indicator. Observations from earlier enabled periods may appear
-            after you turn this on and load session history; Forge does not report guaranteed miss or drop causes.
-          </p>
-        ) : null}
-        {modelCacheVisualizationError ? (
-          <p className="mt-2 text-xs text-destructive">{modelCacheVisualizationError}</p>
-        ) : null}
+        <SettingsWithCTA
+          label="Enable prompt cache visualization"
+          description={modelCacheVisualizationError
+            ? <span className="text-destructive">{modelCacheVisualizationError}</span>
+            : !modelCacheVisualizationEnabled && !modelCacheVisualizationLoading
+              ? 'Off by default. While disabled, Forge does not collect new cache observations and hides the header indicator. Observations from earlier enabled periods may appear after you turn this on and load session history; Forge does not report guaranteed miss or drop causes.'
+              : undefined}
+        >
+          <div className="flex shrink-0 items-center gap-3">
+            {modelCacheVisualizationUpdating ? (
+              <span className="text-xs text-muted-foreground">Saving…</span>
+            ) : null}
+            <Switch
+              id="model-cache-visualization-enabled-toggle"
+              checked={modelCacheVisualizationEnabled}
+              disabled={modelCacheVisualizationLoading || modelCacheVisualizationUpdating}
+              onCheckedChange={handleModelCacheVisualizationToggle}
+              aria-label="Enable prompt cache visualization"
+            />
+          </div>
+        </SettingsWithCTA>
       </SettingsSection>
 
       {/* Sleep Prevention — Electron-only, Builder-only */}
@@ -1149,6 +1141,6 @@ export function SettingsGeneral({
           </Button>
         </SettingsWithCTA>
       </SettingsSection>
-    </div>
+    </SettingsSectionGrid>
   )
 }

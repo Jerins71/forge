@@ -23,9 +23,11 @@ import { SettingsSection } from './settings-row'
 import { ModelIdSelect } from './specialists/ModelIdSelect'
 
 const WORKER_PRESETS_PATH = '/api/settings/worker-presets'
-/** One row per preset from the `@3xl/settings` width up; stacked fields below it. */
-const ROW_GRID = '@3xl/settings:grid-cols-[minmax(11rem,1fr)_minmax(15rem,1.5fr)_9.5rem_minmax(14rem,2.5fr)_2rem]'
-const FIELD_LABEL = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-subtle-foreground @3xl/settings:sr-only'
+/** One row per preset once the settings pane fits every column's minimum; stacked fields below it. */
+const ROW_GRID = '@min-[52rem]/settings:grid-cols-[minmax(9rem,1fr)_minmax(12rem,1.5fr)_9rem_minmax(10rem,2.5fr)_2rem]'
+/** Reasoning levels in words; a catalog label that is only the capitalised id falls back to these. */
+const REASONING_LABEL: Record<string, string> = { none: 'None', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' }
+const FIELD_LABEL = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-subtle-foreground @min-[52rem]/settings:sr-only'
 
 interface Row extends WorkerPreset { key: number }
 
@@ -84,8 +86,8 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
   }, [apiClient, modelConfigChangeKey])
 
   const reasoningOptions = (row: Row) =>
-    findCatalogModel(catalog, row.provider, row.modelId)?.reasoningOptions
-    ?? MANAGER_REASONING_LEVELS.map((id) => ({ id, label: id[0].toUpperCase() + id.slice(1) }))
+    (findCatalogModel(catalog, row.provider, row.modelId)?.reasoningOptions.map((option) => option.id) ?? MANAGER_REASONING_LEVELS)
+      .map((id) => ({ id, label: REASONING_LABEL[id] ?? id }))
 
   const update = (key: number, patch: Partial<WorkerPreset>) =>
     setRows((current) => current?.map((row) => (row.key === key ? { ...row, ...patch } : row)) ?? null)
@@ -155,7 +157,7 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
         </div>
       ) : (
         <div className="!py-2" role="table" aria-label="Worker presets">
-          <div role="row" className={cn('hidden gap-3 px-1 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground @3xl/settings:grid', ROW_GRID)}>
+          <div role="row" className={cn('hidden gap-3 px-1 pb-1.5 pt-2 text-[11px] font-medium uppercase tracking-wide text-subtle-foreground @min-[52rem]/settings:grid', ROW_GRID)}>
             <span role="columnheader">Name</span>
             <span role="columnheader">Model</span>
             <span role="columnheader">Reasoning</span>
@@ -190,6 +192,7 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
                       provider={row.provider}
                       models={models}
                       presets={modelPresets}
+                      showUnavailable
                       onValueChange={(next) => {
                         const model = findCatalogModel(catalog, next.provider, next.modelId)
                         const keep = !model || model.reasoningOptions.some((option) => option.id === row.reasoningLevel)
@@ -218,7 +221,7 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
                       className="text-xs"
                     />
                   </div>
-                  <div role="cell" className="flex justify-end @md/settings:col-span-2 @3xl/settings:col-span-1">
+                  <div role="cell" className="flex justify-end @md/settings:col-span-2 @min-[52rem]/settings:col-span-1">
                     <Button
                       type="button"
                       variant="ghost"

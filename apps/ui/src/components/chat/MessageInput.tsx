@@ -55,6 +55,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
     sessionModelPicker,
     sessionContextModePicker,
     secureSessionPicker,
+    contextControls,
   },
   ref,
 ) {
@@ -356,8 +357,8 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
   )
 
   return (
-    <form onSubmit={handleSubmit} className="content-gutter sticky bottom-0 shrink-0 bg-transparent pb-3 pt-2 md:pb-4" data-tour="chat-input">
-      <div className="content-column">
+    <form onSubmit={handleSubmit} className="@container/composer-pane content-gutter sticky bottom-0 shrink-0 bg-transparent pb-3 pt-2 md:pb-4" data-tour="chat-input">
+      <div className="content-column content-composer">
       {/* Slash command autocomplete dropdown */}
       {slash.isSlashMenuOpen ? (
         <SlashCommandMenu
@@ -461,6 +462,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(fu
           <div className="@container/composer flex items-center justify-between gap-1.5 px-2.5 pb-2.5 pt-1.5">
             {/* One row. Secondary controls drop to icons below 50rem; send actions stay pinned right. */}
             <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {contextControls}
               {secureSessionPicker ? <SecureSessionPicker config={secureSessionPicker} /> : null}
               {sessionContextModePicker
                 ? <SessionContextModePicker config={sessionContextModePicker} />

@@ -8,7 +8,7 @@ import type {
   ManagerReasoningLevel,
   SessionModelUpdateMode,
 } from '@forge/protocol'
-import type { RefObject } from 'react'
+import type { ReactNode, RefObject } from 'react'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { SlashCommand } from '@/components/settings/slash-commands-api'
 import type { SecureSessionPickerConfig } from '../secure-session/types'
@@ -72,6 +72,8 @@ export interface MessageInputProps {
   onStop?: () => void
   disabled?: boolean
   placeholderOverride?: string
+  /** Extra chips at the start of the composer's control row, such as where a new thread runs. */
+  contextControls?: ReactNode
   agentLabel?: string
   allowWhileLoading?: boolean
   /** The session's environment for mentions/catalog reads. */

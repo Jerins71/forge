@@ -19,13 +19,6 @@ import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { SessionModelPicker } from '@/components/chat/message-input/SessionModelPicker'
 
-/** Same column and gutters as MessageInput. */
-const COMPOSER_COLUMN = 'content-frame'
-
-function TraySeparator() {
-  return <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-hairline" />
-}
-
 const LAST_MACHINE_KEY = (groupKey: string) => `forge.runOn.lastEnvironment.${groupKey}`
 const SETUP_PHASE_LABEL: Record<string, string> = {
   validating: 'Checking the destination', cloning: 'Cloning', publishing: 'Finishing the checkout',
@@ -81,41 +74,21 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
     return <EmptyState title="Project not found" detail="This project is no longer available on any paired environment." />
   }
 
-  // One composer: heading, message box and the context tray tucked under it share one focused column,
-  // aligned with MessageInput's own max width and gutters.
+  // The same composer as a running session: the heading shares its column, and the machine, workspace
+  // and model chips sit in its control row.
   return (
-    <div className="content-focus flex min-h-0 flex-1 flex-col" data-testid="launch-workspace">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="launch-workspace">
       <div className="flex min-h-0 flex-1 flex-col justify-center overflow-y-auto pb-[6vh] pt-6">
-        <div className={COMPOSER_COLUMN}>
-          <div className="pb-6 text-center">
-            <p className="eyebrow mb-2">New thread</p>
-            <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
-            <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
-          </div>
-          {launch.error ? (
-            <div role="alert" className="mx-1 mb-2 rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger">{launch.error}</div>
-          ) : null}
-        </div>
-        {/* The tray below replaces the composer's keyboard-hint line on this screen. */}
-        <div className="[&_[data-tour=chat-input]>div>div[aria-hidden=true]]:hidden">
-          <MessageInput
-            draftKey={`launch:${groupKey}`}
-            isLoading={launch.submitting}
-            disabled={!launch.target}
-            placeholderOverride={launch.target ? undefined : setupEnvironmentId ? 'Set this machine up first, then send' : 'Choose where to run this thread first'}
-            onSend={(text: string, attachments?: ConversationAttachment[]) => launch.launch(text, attachments)}
-          />
-        </div>
-        {/* Pulled up under the composer card (which paints above it) so the two read as one object. */}
-        <div className={`${COMPOSER_COLUMN} -mt-3 md:-mt-4`}>
-          <div className="mx-2.5 -mt-[18px] rounded-b-2xl border border-t-0 border-hairline bg-foreground/[0.025] px-1.5 pb-1.5 pt-[22px]">
-            <div className="flex min-w-0 flex-wrap items-center gap-0.5" data-testid="composer-context">
-              <RunOnPicker groupKey={groupKey} value={choice} onChange={setChoice} canSetUp={canSetUp} />
-              {launch.target ? <TraySeparator /> : null}
-              {launch.target ? <WorkspacePicker target={launch.target} value={launch.workspace} onChange={launch.setWorkspace} /> : null}
-              {launch.target ? <LaunchModelPicker target={launch.target} model={launch.model} onChange={launch.setModel} /> : null}
-              {launch.target ? <TargetBranch target={launch.target} /> : null}
+        <div className="@container/composer-pane content-gutter">
+          <div className="content-column content-composer">
+            <div className="pb-6 text-center">
+              <p className="eyebrow mb-2">New thread</p>
+              <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
+              <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
             </div>
+            {launch.error ? (
+              <div role="alert" className="mb-2 rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger">{launch.error}</div>
+            ) : null}
             {setupEnvironmentId ? (
               <SetupCheckoutRow
                 environmentId={setupEnvironmentId}
@@ -126,6 +99,21 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
             ) : null}
           </div>
         </div>
+        <MessageInput
+          draftKey={`launch:${groupKey}`}
+          isLoading={launch.submitting}
+          disabled={!launch.target}
+          placeholderOverride={launch.target ? undefined : setupEnvironmentId ? 'Set this machine up first, then send' : 'Choose where to run this thread first'}
+          onSend={(text: string, attachments?: ConversationAttachment[]) => launch.launch(text, attachments)}
+          contextControls={(
+            <div className="contents" data-testid="composer-context">
+              <RunOnPicker groupKey={groupKey} value={choice} onChange={setChoice} canSetUp={canSetUp} />
+              {launch.target ? <WorkspacePicker target={launch.target} value={launch.workspace} onChange={launch.setWorkspace} /> : null}
+              {launch.target ? <LaunchModelPicker target={launch.target} model={launch.model} onChange={launch.setModel} /> : null}
+              {launch.target ? <TargetBranch target={launch.target} /> : null}
+            </div>
+          )}
+        />
       </div>
     </div>
   )
@@ -144,7 +132,7 @@ function SetupCheckoutRow({ environmentId, projectTitle, checkout, onStart }: {
   return (
     <div
       className={cn(
-        'mx-0.5 mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3 py-2 text-[13px]',
+        'mb-2 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-3 py-2 text-[13px]',
         failed ? 'border-danger/25 bg-danger/[0.06]' : status?.phase === 'done' ? 'border-success/25 bg-success/[0.06]' : 'border-attention/20 bg-attention-surface',
       )}
       data-testid="run-on-setup"

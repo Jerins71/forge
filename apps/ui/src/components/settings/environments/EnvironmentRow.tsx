@@ -128,7 +128,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             ) : null}
             {entry.enabled ? (
               <span className="tabular-nums">
-                {projectCount} projects · {sessionCount} sessions
+                {projectCount} {projectCount === 1 ? 'project' : 'projects'} · {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
                 {stale ? ` · cached ${formatAge(Date.now() - Date.parse(cachedAt!))} ago` : ''}
               </span>
             ) : null}

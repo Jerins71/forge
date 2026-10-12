@@ -264,7 +264,7 @@ function ForgeExtensionCard({ extension }: { extension: ForgeDiscoveredExtension
           {extension.loadError}
         </div>
       ) : (
-        <p className="text-xs italic text-muted-foreground/70">Metadata loaded successfully</p>
+        <p className="text-xs text-muted-foreground">Metadata loaded successfully</p>
       )}
     </div>
   )
@@ -350,7 +350,7 @@ function PiDiscoveredExtensionCard({
       )}
 
       {activeBindings.length === 0 && runtimeErrors.length === 0 && (
-        <p className="text-xs italic text-muted-foreground/70">Not loaded in active runtimes</p>
+        <p className="text-xs text-muted-foreground">Not loaded in active runtimes</p>
       )}
 
       {activeBindings.length > 0 && (

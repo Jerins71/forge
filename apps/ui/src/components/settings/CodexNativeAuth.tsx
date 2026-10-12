@@ -115,7 +115,7 @@ export function CodexNativeAuth({ apiClient }: { apiClient: SettingsApiClient })
       ) : null}
       {active && status?.verificationUri ? (
         <Input aria-label="OpenAI sign-in link" readOnly value={status.verificationUri}
-          onFocus={event => event.currentTarget.select()} className="max-w-lg text-xs" />
+          onFocus={event => event.currentTarget.select()} className="max-w-xl text-xs" />
       ) : null}
       {active && !status?.userCode ? (
         <p role="status" className="flex items-center gap-2 text-xs text-muted-foreground">

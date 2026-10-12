@@ -90,7 +90,7 @@ function EnvVariableRow({
               {variable.skillName}
             </Badge>
             {!variable.required && (
-              <span className="text-[11px] italic text-muted-foreground/70">
+              <span className="text-[11px] text-muted-foreground">
                 · optional
               </span>
             )}

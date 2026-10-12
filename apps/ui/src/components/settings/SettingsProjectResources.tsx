@@ -206,7 +206,7 @@ function InventoryTile({ title, section, executable }: { title: string; section:
       <div className="mt-1 text-2xl font-semibold">{section.count}</div>
       <div className="mt-1 truncate text-xs text-muted-foreground">{section.path ?? 'No path'}</div>
       {section.items.length > 0 && <div className="mt-2 text-xs text-muted-foreground">{section.items.slice(0, 3).map((item) => item.path).join(', ')}{section.count > 3 || section.truncated ? '…' : ''}</div>}
-      {section.truncated && <div className="mt-1 text-xs text-muted-foreground">Showing first {section.items.length} items.</div>}
+      {section.truncated && <div className="mt-1 text-xs text-muted-foreground">Showing first {section.items.length} {section.items.length === 1 ? 'item' : 'items'}.</div>}
     </div>
   )
 }
