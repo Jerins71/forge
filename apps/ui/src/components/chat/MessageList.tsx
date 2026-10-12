@@ -1206,6 +1206,15 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
     && !hasOlder
     && !hasSecureSessionAttention
   ) {
+    // A worker that failed before writing anything shows that, not the new-conversation prompt.
+    const activeAgent = agents?.find(agent => agent.agentId === activeAgentId)
+    if (activeAgent?.role === 'worker' && activeAgent.status === 'error') {
+      return (
+        <div className="flex h-full items-center justify-center p-6">
+          <p role="alert" className="text-sm text-destructive">This worker failed before it produced any output.</p>
+        </div>
+      )
+    }
     return (
       <EmptyState
         activeAgentId={activeAgentId}

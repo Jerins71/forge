@@ -6,6 +6,7 @@ import { claudeRuntimeEnvironment } from "../runtime/claude/claude-runtime-envir
 import { CodexAuthService } from "../runtime/codex/codex-auth-service.js";
 import { CodexRuntimeAuth } from "../runtime/codex/codex-runtime-auth.js";
 import { describeNativeApiAccess, readNativeApiAccess, writeNativeApiAccess } from "../runtime/native-api-access.js";
+import { getManagedModelProviderCredentialAvailability, resolveModelCredentialProvider } from "../secrets-env-service.js";
 import type { AgentDescriptor, SwarmConfig } from "../types.js";
 
 // What the end-to-end run (scripts/environment-e2e/native-api-access.e2e.ts) cannot reach: a runtime
@@ -18,7 +19,7 @@ let root: string;
 let config: SwarmConfig;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), "forge-native-api-access-"));
-  config = { paths: { dataDir: root, sharedAuthDir: root, sharedAuthFile: join(root, "auth.json"), authFile: join(root, "legacy-auth.json") } } as SwarmConfig;
+  config = { paths: { dataDir: root, sharedAuthDir: root, sharedAuthFile: join(root, "auth.json"), authFile: join(root, "legacy-auth.json"), sharedSecretsFile: join(root, "secrets.json"), secretsFile: join(root, "legacy-secrets.json") } } as SwarmConfig;
 });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 const loseKey = async (provider: "claude-native" | "codex-native") => {
@@ -78,5 +79,14 @@ describe("native API access", () => {
     expect(Object.keys(JSON.parse(await readFile(config.paths.sharedAuthFile, "utf8"))).sort()).toEqual(["claude-native", "codex-native"]);
     await expect(writeNativeApiAccess(config, "codex-native", { mode: "api_key", baseUrl: "router.example.com" })).rejects.toThrow("must be a complete URL");
     await expect(writeNativeApiAccess(config, "codex-native", { mode: "api_key", baseUrl: "https://user:secret@router.example.com" })).rejects.toThrow("without embedded credentials");
+  });
+
+  // Claude native signs in with its own CLI login, not Forge's Anthropic credentials. A worker on
+  // claude-native was refused as unavailable even though its manager ran on the same login.
+  it("admits a claude-native worker on the Claude login, and refuses one only in API-key mode without a key", async () => {
+    const claudeWorker = resolveModelCredentialProvider({ provider: "claude-native", modelId: "claude-sonnet-5-5" });
+    expect((await getManagedModelProviderCredentialAvailability(config)).get(claudeWorker)).toBe(true);
+    await loseKey("claude-native");
+    expect((await getManagedModelProviderCredentialAvailability(config)).get(claudeWorker)).toBe(false);
   });
 });

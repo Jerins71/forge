@@ -270,6 +270,8 @@ export function projectSessionWorkers(
       const previous = byId.get(worker.agentId)
       return previous?.role === 'worker' && previous.managerId === sessionId
         && previous.status === projected.status && previous.displayName === projected.displayName
+        && previous.specialistDisplayName === projected.specialistDisplayName && previous.model.provider === projected.model.provider
+        && previous.model.modelId === projected.model.modelId && previous.model.thinkingLevel === projected.model.thinkingLevel
         ? previous
         : projected
     }),
@@ -292,7 +294,8 @@ export function projectWorker(
     createdAt: manager?.updatedAt ?? '',
     updatedAt: manager?.updatedAt ?? '',
     cwd: manager?.workspace.cwd ?? '',
-    model: pendingModel,
+    model: worker.model ?? pendingModel,
+    ...(worker.preset ? { specialistId: worker.preset, specialistDisplayName: worker.preset } : {}),
     sessionFile: '',
   }
 }

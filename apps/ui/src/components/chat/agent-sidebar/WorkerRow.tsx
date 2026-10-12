@@ -3,11 +3,21 @@ import React from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { isCodexAppServerExternalThreadDescriptor } from '@forge/protocol'
+import { isCodexAppServerExternalThreadDescriptor, type AgentDescriptor } from '@forge/protocol'
 import { CodexExternalThreadIcon, HighlightedText } from './shared'
 import { WorkerHighlightOutline } from '../WorkGraphWorkerHighlight'
 import { DeleteSessionDialog } from './dialogs/DeleteSessionDialog'
 import type { WorkerRowProps } from './types'
+
+/** The worker's name, then `preset · provider/model · reasoning`, or the model alone for a worker started without a preset. */
+export function workerTooltipLines(agent: Pick<AgentDescriptor, 'agentId' | 'displayName' | 'model' | 'specialistId' | 'specialistDisplayName'>): string[] {
+  const preset = agent.specialistDisplayName ?? agent.specialistId
+  const model = agent.model.modelId ? `${agent.model.provider}/${agent.model.modelId}` : ''
+  return [
+    agent.displayName || agent.agentId,
+    ...(preset ? [[preset, model, agent.model.thinkingLevel].filter(Boolean).join(' · ')] : model ? [model] : []),
+  ]
+}
 
 export const WorkerRow = React.memo(function WorkerRow({
   agent,
@@ -24,13 +34,10 @@ export const WorkerRow = React.memo(function WorkerRow({
 }: WorkerRowProps) {
   const [deleting, setDeleting] = React.useState(false)
   const name = agent.displayName || agent.agentId
-  const tooltipLines = [
-    name,
-    `${agent.model.provider}/${agent.model.modelId}`,
-    ...(agent.model.thinkingLevel ? [`reasoning: ${agent.model.thinkingLevel}`] : []),
-  ]
+  const tooltipLines = workerTooltipLines(agent)
   const statusValue = liveStatus.status
   const isActive = statusValue === 'streaming'
+  const isFailed = statusValue === 'error'
   const isStopped = statusValue === 'terminated' || statusValue === 'stopped'
   const isCodexWorker = isCodexAppServerExternalThreadDescriptor(agent)
 
@@ -65,15 +72,16 @@ export const WorkerRow = React.memo(function WorkerRow({
                       'inline-block size-1.5 shrink-0 rounded-full',
                       roomsV2 ? 'sidebar-room-status-glyph' : undefined,
                       roomsV2
-                        ? isActive ? 'sidebar-room-status-running' : 'sidebar-room-status-idle'
-                        : isActive ? 'bg-emerald-500' : 'bg-muted-foreground/40',
+                        ? isActive ? 'sidebar-room-status-running' : isFailed ? 'bg-destructive' : 'sidebar-room-status-idle'
+                        : isActive ? 'bg-emerald-500' : isFailed ? 'bg-destructive' : 'bg-muted-foreground/40',
                     )}
-                    aria-label={isActive ? 'Active' : 'Idle'}
+                    aria-label={isActive ? 'Active' : isFailed ? 'Failed' : 'Idle'}
                   />
                   {isCodexWorker ? <CodexExternalThreadIcon /> : null}
                   <span className={cn('min-w-0 flex-1 truncate text-sm leading-5', roomsV2 ? 'text-xs leading-4' : undefined)}>
                     {highlightQuery ? <HighlightedText text={name} query={highlightQuery} /> : name}
                   </span>
+                  {isFailed ? <span className="shrink-0 text-[10.5px] text-destructive">Failed</span> : null}
                   {agent.specialistId ? (
                     <span className="shrink-0 text-[10.5px] text-muted-foreground">{agent.specialistDisplayName ?? agent.specialistId}</span>
                   ) : null}
