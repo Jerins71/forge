@@ -47,7 +47,7 @@ export interface SwarmManagerSessionCompositionServices {
 }
 
 type ProvisionerOwnedKeys = "dataDir" | "runtimes" | "forgetPinnedMessages" | "conversationProjector";
-type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "resolveGlobalDelegationRosterId" | "deleteProjectAgentRecord" | "copyPinnedMessagesForFork" | "resetConversationHistory";
+type SessionOwnedKeys = "profiles" | "runtimes" | "getDescriptor" | "provisioner" | "prepareSessionCreation" | "deleteProjectAgentRecord" | "copyPinnedMessagesForFork" | "resetConversationHistory";
 type ProjectAgentOwnedKeys = "dataDir" | "descriptors" | "provisioner" | "now" | "prepareSessionCreation";
 type SharingOwnedKeys = "dataDir" | "now" | "getProfiles" | "getDescriptor" | "getDescriptors";
 type ProjectCoordinatorOwnedKeys = "config" | "descriptors" | "profiles" | "projectAgents" | "sharing" | "now";

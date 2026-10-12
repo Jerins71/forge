@@ -219,28 +219,5 @@ describe('durable lineage with the real kernel, SQLite store and outbox',()=>{
     await expect(materializeHandoff({dataDir:f.root,transfer:{...transfer,source:{threadId:'source',sequence:entries.length,entryId:entries.at(-1)!.timelineEntryId}},entries,coveredEntryIds:[],now})).rejects.toThrow('coverage metadata budget');
   });
   it('declares unsupported operations and rejects unstable points explicitly',async()=>{const f=await fixture();const r=await f.submit('source','active');expect(()=>f.point('source',{kind:'run',runId:r.runId})).toThrow(/stable|terminal/i);f.terminal(r.runId);const source=f.point();f.fork('target',source);const t=f.state().transfers['fork-target'];expect(planTransferResolution(f.state(),t,{...declaredCapabilities('pi'),native:{...declaredCapabilities('pi').native,fork:false}}).strategy).toBe('portable_context');expect(()=>f.fork('bad',{...source,runId:'missing'})).toThrow(/source/i);});
-  it('falls back within the same run once, records A to B and its reason, and rejects stale primary callbacks',async()=>{
-    const f=await fixture();const original=f.adapter.start;let starts=0;let selections=0;
-    f.options.swarm.selectProviderFallback=async()=>{selections++;return model('claude');};
-    f.adapter.start=async input=>{starts++;if(starts===1)throw Object.assign(new Error('primary unavailable before dispatch'),{delivery:'not_dispatched'});return original(input);};
-    const run=await f.submit('source','fallback');const state=f.state();const attempts=Object.values(state.attempts).filter(a=>a.runId===run.runId);const active=state.attempts[state.runs[run.runId].activeAttemptId];
-    // Draining the old binding fences the queued fallback attempt and gives its
-    // replacement the new generation. Only two native starts are permitted.
-    expect(starts).toBe(2);expect(state.runs[run.runId].fallbackCount).toBe(1);expect(active.delivery).toBe('dispatched');expect(attempts.filter(a=>a.delivery==='dispatched')).toEqual([active]);
-    const transfer=Object.values(state.transfers).find(t=>t.kind==='provider_switch')!;expect(transfer).toMatchObject({sourceProvider:'codex',targetProvider:'claude-native',state:'consumed',error:{message:expect.stringContaining('before dispatch')}});expect(selections).toBe(1);
-    const old=attempts.find(a=>a.state==='terminal' && a.outcome==='failed')!;f.record({type:'provider.observe',commandId:'late-primary-end',now,observation:{type:'terminal',scope:{threadId:'source',bindingId:old.bindingId,generation:old.generation},attemptId:old.attemptId,sequence:100,origin:{kind:'root',conversation:state.bindings[old.bindingId].conversation},terminalAuthority:'root_attempt',outcome:'completed'}});expect(f.state().runs[run.runId].state).toBe('running');expect(f.state().runs[run.runId].activeAttemptId).toBe(active.attemptId);
-    f.adapter.start=async()=>{throw Object.assign(new Error('fallback unavailable before dispatch'),{delivery:'not_dispatched'});};
-    f.record({type:'effect.failed',commandId:'secondary-failure',now,threadId:'source',attemptId:active.attemptId,kind:'provider.start',delivery:'not_dispatched'});
-    expect(f.state().runs[run.runId].outcome).toBe('failed');expect(selections).toBe(1);expect(Object.values(f.state().runs)).toHaveLength(1);
-  });
-  it('uses a proved not-dispatched observation when a provider throws a raw protocol error and fences the fallback selection race',async()=>{
-    const f=await fixture();const start=f.adapter.start;let dispatches=0;let selections=0;
-    let rejectObservation!:(value:import('@forge/protocol').ProviderObservation)=>void;const failure=new Promise<import('@forge/protocol').ProviderObservation>(resolve=>{rejectObservation=resolve;});
-    f.adapter.observations=async function*(){yield await failure;};
-    f.adapter.start=async input=>{if(++dispatches===1){rejectObservation({type:'error',scope:input.binding.scope,attemptId:input.attemptId,sequence:0,origin:{kind:'root',conversation:input.binding.conversation},delivery:'not_dispatched',code:'FIXTURE_REJECTED',message:'request rejected before dispatch'});await new Promise<void>(resolve=>setImmediate(resolve));throw new Error('raw native protocol error');}return start(input);};
-    f.options.swarm.selectProviderFallback=async()=>{selections++;await Promise.resolve();return model('claude');};
-    const run=await f.submit('source','observed-fallback');expect(selections).toBe(1);expect(f.state().runs[run.runId]).toMatchObject({state:'running',fallbackCount:1});expect(Object.values(f.state().transfers)).toEqual(expect.arrayContaining([expect.objectContaining({sourceProvider:'codex',targetProvider:'claude-native',error:{code:'SOURCE_UNAVAILABLE',message:expect.stringContaining('rejected before dispatch')}})]));
-  });
-  it('never selects fallback when provider delivery is unknown',async()=>{const f=await fixture();let selected=0;f.options.swarm.selectProviderFallback=async()=>{selected++;return model('claude');};f.adapter.start=async()=>{throw new Error('ack lost');};const run=await f.submit('source','unknown');expect(f.state().runs[run.runId].state).toBe('recovery');expect(selected).toBe(0);await f.boot();await f.boot();expect(selected).toBe(0);});
-
+  it('enters recovery when provider delivery is unknown',async()=>{const f=await fixture();f.adapter.start=async()=>{throw new Error('ack lost');};const run=await f.submit('source','unknown');expect(f.state().runs[run.runId].state).toBe('recovery');});
 });

@@ -127,14 +127,14 @@ async function runTurn(turn, text) {
     }
     if (text.includes('[fixture:spawn]') || text.includes('[fixture:spawn-choice]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: text.includes('[fixture:spawn-choice]') ? 'fixture-choice-worker' : 'fixture-worker', customSpecialist: 'fixture-worker',
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: text.includes('[fixture:spawn-choice]') ? 'fixture-choice-worker' : 'fixture-worker', preset: 'fixture-worker',
         cwd: checkout, initialMessage: text.includes('[fixture:spawn-choice]') ? '[fixture:choice] Request the synthetic worker choice.' : '[fixture:worker] Return the synthetic worker result.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:worker spawned`;
     }
     if (text.includes('[fixture:spawn-fail]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-fail-worker', customSpecialist: 'fixture-worker',
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-fail-worker', preset: 'fixture-worker',
         cwd: checkout, initialMessage: '[fixture:fail] Fail this assignment.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:failing worker spawned`;
@@ -144,21 +144,21 @@ async function runTurn(turn, text) {
     // The manager delegates and then waits inside this turn; only input steered into the turn moves it on.
     if (text.includes('[fixture:spawn-wait]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-wait-worker', customSpecialist: 'fixture-worker',
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-wait-worker', preset: 'fixture-worker',
         cwd: checkout, initialMessage: '[fixture:worker] Return the synthetic worker result.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       turn.holding = true; return;
     }
     if (text.includes('[fixture:spawn-hold]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-hold-worker', customSpecialist: 'fixture-worker',
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-hold-worker', preset: 'fixture-worker',
         cwd: checkout, initialMessage: '[fixture:hold] Keep working until stopped.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:hold worker spawned`;
     }
     if (text.includes('[fixture:spawn-activity]')) {
       count('workerSpawns');
-      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-activity-worker', customSpecialist: 'fixture-worker',
+      const result = await dynamicTool(turn, 'spawn_agent', { agentId: 'fixture-activity-worker', preset: 'fixture-worker',
         cwd: checkout, initialMessage: '[fixture:worker] [fixture:activity] Return the synthetic worker result after some work.' });
       if (result.success !== true) throw new Error('Fixture worker spawn failed');
       reply = `fixture:${fixture.instanceId}:activity worker spawned`;

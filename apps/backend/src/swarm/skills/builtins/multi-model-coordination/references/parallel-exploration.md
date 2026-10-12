@@ -34,8 +34,7 @@ must exist before the next question is knowable.
       "kind": "research",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result identifies the actual runtime path with source-backed evidence and explicit uncertainty.",
-      "route": "auto"
+      "acceptanceCriteria": "The result identifies the actual runtime path with source-backed evidence and explicit uncertainty."
     },
     {
       "id": "explore-data",
@@ -44,8 +43,7 @@ must exist before the next question is knowable.
       "kind": "research",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result identifies persistence and replay invariants with source-backed evidence.",
-      "route": "auto"
+      "acceptanceCriteria": "The result identifies persistence and replay invariants with source-backed evidence."
     },
     {
       "id": "explore-experience",
@@ -54,8 +52,7 @@ must exist before the next question is knowable.
       "kind": "design-review",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The result identifies concrete user-visible behavior, risks, and evidence without duplicating the other scopes.",
-      "route": "auto"
+      "acceptanceCriteria": "The result identifies concrete user-visible behavior, risks, and evidence without duplicating the other scopes."
     }
   ]
 }

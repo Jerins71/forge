@@ -28,7 +28,7 @@ export async function createProviderBoundaryFixture() {
   await new ProjectResourceSettingsStore(config.paths.dataDir).setOverride(createWorkspaceKey("profile", root), join(root, ".forge"));
   const registry = new FileBackedPromptRegistry({ dataDir: config.paths.dataDir, repoDir: root,
     builtinArchetypesDir: join(root, "unused-archetypes"), builtinOperationalDir: join(root, "unused-operational") });
-  await registry.save("archetype", "manager", "# Synthetic manager archetype\n${MANAGER_POSTURE}\n${SPECIALIST_ROSTER}\n${MODEL_SPECIFIC_INSTRUCTIONS}", "profile"); // eslint-disable-line no-template-curly-in-string
+  await registry.save("archetype", "manager", "# Synthetic manager archetype\n${WORKER_PRESETS}\n${MODEL_SPECIFIC_INSTRUCTIONS}", "profile"); // eslint-disable-line no-template-curly-in-string
   await registry.save("archetype", "worker", "# Synthetic worker archetype\nMemory file: ${SWARM_MEMORY_FILE}", "profile"); // eslint-disable-line no-template-curly-in-string
   const descriptor = (provider: string, role: "manager" | "worker" = "manager"): AgentDescriptor => ({
     agentId: role === "manager" ? "manager" : "worker", displayName: role, role,

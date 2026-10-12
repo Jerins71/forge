@@ -9,11 +9,6 @@ export interface Deferred<T> {
   reject: (error: unknown) => void
 }
 
-export interface DelegationRosterRuntimeContext {
-  message: string
-  roster: Record<string, unknown>
-}
-
 const DEFAULT_TIMESTAMP = '2026-01-01T00:00:00.000Z'
 const DEFAULT_MODEL: AgentModelDescriptor = {
   provider: 'openai-codex',

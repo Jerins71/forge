@@ -67,7 +67,7 @@ function chooseSelection(state: CoreState, command: Extract<CoreCommand, { type:
   }
   if (!candidates) return selection;
   const selected = candidates.find(candidate => candidate.available);
-  if (!selected) throw new Error("No eligible specialist model or fallback");
+  if (!selected) throw new Error(`Worker model is not available: ${selection.provider}/${selection.modelId}`);
   return { ...selection, provider: selected.provider, modelId: selected.modelId };
 }
 

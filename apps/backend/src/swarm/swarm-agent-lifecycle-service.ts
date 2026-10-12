@@ -584,7 +584,10 @@ export class SwarmAgentLifecycleService {
     let webSearch = false;
 
     if (preset) {
-      if (!modelCatalogService.isKnownModelId(preset.modelId, preset.provider)) {
+      // Only a model the user chose is checked: a file that names none runs on the manager's,
+      // and the internal Codex plugin worker is bound to its own runtime after spawn.
+      const usesManagerModel = preset.provider === manager.model.provider && preset.modelId === manager.model.modelId;
+      if (input.preset !== undefined && !usesManagerModel && !modelCatalogService.isKnownModelId(preset.modelId, preset.provider)) {
         throw new Error(`Preset "${preset.name}" uses a model that is not available: ${preset.provider}/${preset.modelId}.`);
       }
       model = {

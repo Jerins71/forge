@@ -5,7 +5,7 @@ import type { LifecycleAdmission } from "./control-types.js";
 import { ControlError } from "./command-service.js";
 import type { SwarmReasoningLevel } from "../../swarm/types.js";
 
-export type PolicyMethod = Exclude<Extract<CommandReceipt["method"], `project.${string}` | "session.configure" | "settings.recommendedDefaults.apply" | "workspace.directories.create">, "project.readState.clear">;
+export type PolicyMethod = Exclude<Extract<CommandReceipt["method"], `project.${string}` | "session.configure" | "workspace.directories.create">, "project.readState.clear">;
 export type DirectoryReadMethod = "workspace.directories.list" | "workspace.directories.validate";
 export interface PolicyPort {
   prepare(method: PolicyMethod, input: RpcInput<PolicyMethod>): Promise<Pick<LifecycleAdmission, "sessionIds" | "projectIds" | "intent"> & { frozen: RpcInput<PolicyMethod>; projectId?: string; sessionId?: string }>;

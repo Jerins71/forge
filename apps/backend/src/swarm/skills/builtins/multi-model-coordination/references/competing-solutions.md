@@ -34,8 +34,7 @@ implementation.
       "kind": "plan",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The candidate is concrete, preserves stated invariants, and identifies its tradeoffs.",
-      "route": "auto"
+      "acceptanceCriteria": "The candidate is concrete, preserves stated invariants, and identifies its tradeoffs."
     },
     {
       "id": "candidate-structural",
@@ -44,8 +43,7 @@ implementation.
       "kind": "plan",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The candidate is concrete and explains why its added structure earns its cost.",
-      "route": "auto"
+      "acceptanceCriteria": "The candidate is concrete and explains why its added structure earns its cost."
     },
     {
       "id": "candidate-operational",
@@ -54,8 +52,7 @@ implementation.
       "kind": "plan",
       "status": "pending",
       "dependsOn": [],
-      "acceptanceCriteria": "The candidate is concrete and proves how rollout and recovery risks are controlled.",
-      "route": "auto"
+      "acceptanceCriteria": "The candidate is concrete and proves how rollout and recovery risks are controlled."
     }
   ]
 }
