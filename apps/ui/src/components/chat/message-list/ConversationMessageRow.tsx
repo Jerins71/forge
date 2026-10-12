@@ -112,6 +112,8 @@ interface ConversationMessageRowProps {
   onResendCommand?: (commandId: string) => void
   environmentClient?: EnvironmentClient | null
   activeAgentDisplayName?: string
+  /** Label on assistant replies; the model name rather than the session title. */
+  assistantLabel?: string
   transcriptAgentId?: string | null
   feedbackTargetId?: string
   feedbackLegacyTargetId?: string
@@ -156,6 +158,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
   onResendCommand,
   environmentClient,
   activeAgentDisplayName,
+  assistantLabel,
   transcriptAgentId,
   feedbackTargetId,
   feedbackLegacyTargetId,
@@ -507,7 +510,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
       ? transcriptAgentId.trim()
       : undefined
 
-  const assistantName = activeAgentDisplayName?.trim() || 'Assistant'
+  const assistantName = assistantLabel?.trim() || 'Assistant'
 
   return (
     <div className="-ml-[var(--transcript-inset)] flex min-w-0">

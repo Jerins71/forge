@@ -327,7 +327,9 @@ export class ManagerWsClient {
       },
       snapshot: snapshot => this.updateBrowserSnapshot(snapshot),
       disconnected: () => this.resetEnvironmentBrowserHost(),
-      error: error => this.updateState({ lastError: error instanceof Error ? error.message : String(error) }),
+      // Host attachment is background Desktop plumbing that every renderer attempts. A denied or failed
+      // attachment leaves browserHost disconnected; browser actions report their own failures to the caller.
+      error: error => console.warn('[browser-host]', error instanceof Error ? error.message : String(error)),
     }, handleRequest, handleLifecycle)
     return () => { if (this.browserHostRegistration === registration) { this.browserHostRegistration = null; this.detachEnvironmentBrowserHost() } }
   }

@@ -5,7 +5,8 @@
 //  - an agent's automation request is not executed, or its answer is not returned on the host channel;
 //  - focus reports and host commands leak onto the legacy session bridge;
 //  - after a reconnect the stale host stays "connected" or is never registered again;
-//  - unregistering leaves the host channel subscribed.
+//  - unregistering leaves the host channel subscribed;
+//  - a renderer without the local Desktop capability turns the denied attachment into a session error banner.
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   createEnvironmentRegistry,
@@ -104,6 +105,17 @@ describe('embedded browser host on the environment runtime', () => {
 
     unregister()
     await until(() => ![...server.subscriptions.values()].some((subscription) => subscription.method === 'browser.host.attach'))
+  })
+
+  it('keeps a denied host attachment out of the session error banner', async () => {
+    const { server, facade } = await environment()
+    server.denyBrowserHost()
+    const unregister = facade.registerBrowserAutomationHost(registration, async () => { throw new Error('unused') })
+    cleanups.push(unregister)
+    await until(() => server.inputs.some(input => input.method === 'browser.host.attach'))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(facade.getState().browserHost.connected).toBe(false)
+    expect(facade.getState().lastError).toBeNull()
   })
 
   it('opens no host channel until a host registers', async () => {
