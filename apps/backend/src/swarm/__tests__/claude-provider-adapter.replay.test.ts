@@ -226,9 +226,13 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   // Failure modes written before implementation: the user stops a reply while its text is still streaming.
   // The text already shown must stay as the reply, and a stopped turn is not a turn that completed silently.
   // A reply cut off by a failure is the same: the text stays, and the failure is reported by the error path.
-  it.each([["stop-mid-stream", ["Streaming answer"]], ["stop-before-text", []], ["fail-mid-stream", ["Streaming answer"]], ["exit-mid-stream", ["Streaming answer"]]] as const)("keeps the streamed text as the reply and adds no empty-completion notice when stopped or failed (%s)", async (scenario, streamed) => {
+  it.each([["stop-mid-stream", ["Streaming answer"]], ["stop-before-text", []], ["fail-mid-stream", ["Streaming answer"]], ["exit-mid-stream", ["Streaming answer"]],
+    // The process can outlive the close by seconds; the reply already shown must not wait for it to exit.
+    ["stop-lingering-process", ["Streaming answer"]]] as const)("keeps the streamed text as the reply and adds no empty-completion notice when stopped or failed (%s)", async (scenario, streamed) => {
     const resources = await createProviderBoundaryFixture();
-    const f = await fixture(scenario, { root: resources.root, matchAnyPrompt: true });
+    const lingering = scenario === "stop-lingering-process";
+    const f = await fixture(lingering ? "stop-mid-stream" : scenario, { root: resources.root, matchAnyPrompt: true });
+    if (lingering) f.runtimeOptions.env.FORGE_CLAUDE_REPLAY_LINGER = "1";
     const descriptor = { ...resources.descriptor("claude-native"), model: f.descriptor.model };
     const kernelScope = { ...scope, threadId: descriptor.agentId };
     const runId = "kernel-run";
@@ -282,7 +286,13 @@ describe("Claude frozen provider contract through real SDK transport", () => {
         await vi.waitFor(() => expect(events.some(event => event.type === (streamed.length ? "message_update" : "turn_start"))).toBe(true));
       }
       // Stop is a release of the provider binding: the process is closed, with no interrupt and no result frame.
-      await runtime.terminate({ abort: true });
+      const stopped = runtime.terminate({ abort: true });
+      if (lingering) {
+        let settled = false; void stopped.then(() => { settled = true; });
+        await vi.waitFor(async () => expect((await read()).filter(entry => entry.role === "assistant")).toHaveLength(1), { timeout: 5_000 });
+        expect(settled).toBe(false);
+      }
+      await stopped;
       const entries = await read();
       expect(entries.filter(entry => entry.role === "assistant")).toEqual(streamed.map(text => expect.objectContaining({ text, turnId: runId, source: "assistant_output" })));
       expect(entries.filter(entry => entry.role === "system")).toEqual([]);
@@ -694,15 +704,17 @@ describe("Claude frozen provider contract through real SDK transport", () => {
     } finally { await f.close(); await f.cleanup(); }
   });
   // Ways this can fail: the CLI's ten backed-off retries of a refused key run to the end; the failure is
-  // reported as a retry, as an interrupt, or more than once.
+  // reported as a retry, as an interrupt, more than once, or as a delivery nobody can vouch for.
   it("ends the turn at once when the endpoint refuses the key", async () => {
     const f = await fixture("refused-key");
     try {
-      const binding = await f.open(); void start(f, binding).catch(() => undefined);
+      const binding = await f.open(); const dispatched = start(f, binding);
       await f.release("refused"); await f.release("terminal");
       expect(await f.observed("terminal:root_attempt")).toMatchObject({ outcome: "failed", error: { message: "401 authentication failed" } });
       expect(f.observations.filter(value => value.type === "retry")).toEqual([]);
-      expect(f.observations.filter(value => value.type === "error")).toMatchObject([{ message: "401 authentication failed" }]);
+      // The endpoint answered for this input, so its delivery is known: it fails, it does not ask for restart recovery.
+      expect(f.observations.filter(value => value.type === "error")).toMatchObject([{ message: "401 authentication failed", delivery: "accepted" }]);
+      expect(await dispatched).toMatchObject({ status: "accepted" });
     } finally { await f.close(); await f.cleanup(); }
   });
   it("preserves native text and reasoning deltas with stable item refs", async () => {

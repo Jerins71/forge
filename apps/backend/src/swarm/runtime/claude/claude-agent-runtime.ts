@@ -248,8 +248,13 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     const timeout = options?.shutdownTimeoutMs ?? 3_000;
     const signal = (name: NodeJS.Signals) => { if (this.child && this.child.exitCode === null && this.child.signalCode === null) this.child.kill(name); };
     const escalation = [setTimeout(signal, timeout / 3, "SIGTERM"), setTimeout(signal, timeout * 2 / 3, "SIGKILL")];
-    try { await deadline(Promise.all([this.childExit, this.reader.catch(() => undefined), this.bridge.drain()]), timeout); }
-    finally { for (const timer of escalation) clearTimeout(timer); }
+    try {
+      // No frame is read once stopping, so the reply is already as long as it will get. Write it now:
+      // the process can take seconds to exit, and the text the user was reading must not be gone meanwhile.
+      await this.operations;
+      for (const event of this.mapper.finish(undefined, true)) await this.emit(event);
+      await deadline(Promise.all([this.childExit, this.reader.catch(() => undefined), this.bridge.drain()]), timeout);
+    } finally { for (const timer of escalation) clearTimeout(timer); }
     await this.operations;
     for (const input of [...this.sent.values(), ...this.followUps]) input.compact?.reject(new Error("Claude compaction stopped"));
     this.turnCompaction?.reject(new Error("Claude compaction stopped"));
@@ -259,7 +264,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.providerOutcome = "cancelled";
     this.turnOpen = false;
     this.status = "idle";
-    for (const event of this.mapper.finish(undefined, true)) await this.emit(event);
     if (hadTurn) {
       // A turn the host stopped did not complete; say so before its end is judged for visible output.
       await this.emit({ type: "turn_end", toolResults: [], meta: { outcome: "cancelled" } });

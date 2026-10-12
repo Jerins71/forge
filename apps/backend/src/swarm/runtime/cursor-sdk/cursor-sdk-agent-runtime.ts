@@ -771,7 +771,13 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
   }
 
   private async updateStatus(status: AgentStatus): Promise<void> {
-    this.status = transitionAgentStatus(this.status, status);
+    try { this.status = transitionAgentStatus(this.status, status); }
+    catch {
+      // A detached dispatch can report on a session already in error. That report is stale; nothing
+      // awaits the dispatch, so refusing it must not reject.
+      this.logDebug("status:refused", { current: this.status, reported: status });
+      return;
+    }
     this.descriptor.status = this.status;
     this.descriptor.updatedAt = this.now();
     await this.emitStatus();

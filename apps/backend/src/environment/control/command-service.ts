@@ -652,7 +652,7 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
         assertInputShutdown(owner);
         if (owner.desired === "stopped") sink.commitCommand(tx, { type:"thread.resume", commandId:input.commandId, now:options.clock(), threadId:input.threadId });
         if (input.assignment) sink.commitCommand(tx, { type:"worker.assign", ...base, ...input.assignment, workerThreadId:input.threadId, workerRunId:runId, authorized:true });
-        else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue" });
+        else sink.commitCommand(tx, { type:"run.submit", ...base, threadId:input.threadId, runId, source:input.source, delivery:input.delivery ?? "queue", ...(input.prepared?.presentation.internalDeliveryKind ? { outputHidden:true } : {}) });
         if (input.prepared || input.userOptions)
           database.prepare("INSERT INTO orchestration_run_inputs (run_id,prepared_json) VALUES (?,?)").run(runId,JSON.stringify({ ...input.prepared, ...(input.userOptions ? { userOptions: input.userOptions } : {}) }));
         if (input.prepared) tx.afterCommit(() => options.swarm.enqueuePresentation?.(input.threadId,runId,input.prepared!.presentation));

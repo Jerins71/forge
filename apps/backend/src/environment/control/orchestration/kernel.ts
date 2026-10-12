@@ -45,12 +45,14 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     if (state.recovery && !state.recovery.resumedAt && !state.recovery.dismissedAt && state.recovery.undeliveredReports.some(report => report.toAgentId === id)) return;
     const queued = Object.values(state.runs).filter(r => r.threadId === id && r.state === "queued").sort((a, b) => a.sequence - b.sequence);
     if (owner.activeRunId) {
-      const root = state.attempts[state.runs[owner.activeRunId].activeAttemptId];
+      const active = state.runs[owner.activeRunId];
+      const root = state.attempts[active.activeAttemptId];
       if (!root.turn || root.state !== "accepted" || !state.bindings[root.bindingId]?.capabilities.native.steer) return;
       // A turn waiting on the user's answer cannot take input: steering it would go unacknowledged and
-      // read as lost. Such a message becomes a follow-up, delivered after this turn; it is not steered
-      // in once the request settles either, because the turn may already be ending.
-      if (Object.values(state.requests).some(request => request.attemptId === root.attemptId && ["pending", "responding"].includes(request.state))) {
+      // read as lost. A turn whose replies are hidden would hide the answer to a steered message too.
+      // Such a message becomes a follow-up, delivered after this turn; it is not steered in once the
+      // request settles either, because the turn may already be ending.
+      if (active.outputHidden || Object.values(state.requests).some(request => request.attemptId === root.attemptId && ["pending", "responding"].includes(request.state))) {
         for (const held of queued.filter(run => run.delivery === "steer")) emit({ type: "run.started", run: { ...held, delivery: "queue" } });
         return;
       }
@@ -157,7 +159,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       const owner = thread(command.threadId);
       if (owner.desired !== "running" || owner.shutdown === "quarantined") throw new Error("Thread shutdown must be confirmed before input admission");
       if (Object.values(state.runs).some(run => run.inputId === command.inputId)) break;
-      emit({ type: "input.accepted", run: { runId: command.runId, threadId: command.threadId, inputId: command.inputId, input: command.input, source: command.source, delivery: command.delivery, commandId: command.commandId, state: "queued", sequence: owner.nextRunSequence, activeAttemptId: command.attemptId } });
+      emit({ type: "input.accepted", run: { runId: command.runId, threadId: command.threadId, inputId: command.inputId, input: command.input, source: command.source, delivery: command.delivery, ...(command.outputHidden ? { outputHidden: true } : {}), commandId: command.commandId, state: "queued", sequence: owner.nextRunSequence, activeAttemptId: command.attemptId } });
       emit({ type: "attempt.created", attempt: { attemptId: command.attemptId, runId: command.runId, threadId: owner.threadId, bindingId: owner.bindingId ?? command.bindingId, generation: owner.generation, state: "created", delivery: "pending", lastSequence: -1 } });
       emit({ type: "thread.changed", thread: { ...owner, bindingId: owner.bindingId ?? command.bindingId, nextRunSequence: owner.nextRunSequence + 1 } });
       decision.effects.push({ kind: "transcript.append", threadId: owner.threadId, inputId: command.inputId, runId: command.runId });

@@ -196,7 +196,29 @@ async function runTurn(turn, text) {
       }
       return;
     }
-    if (text.includes('[fixture:activity')) await activity(turn, text.includes('[fixture:activity-hold]'));
+    // A real onboarding turn reads the repository before it says anything.
+    const onboardingWork = text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-activity'));
+    if (text.includes('[fixture:activity') || onboardingWork) await activity(turn, text.includes('[fixture:activity-hold]'));
+    if (text.includes('[fixture:list]')) {
+      // Recorded from Codex 0.162.1 over HTTP: a steer abandons the reply being streamed, which never
+      // completes, and the same turn answers the steered message in a new item.
+      const list = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };
+      notify('item/started', { ...context(turn), item: list });
+      turn.streaming = true;
+      for (let line = 1; line <= 300 && !turn.done && turn.steered === undefined; line++) {
+        notify('item/agentMessage/delta', { ...context(turn), itemId: list.id, delta: `Synthetic list line ${line}\n\n` });
+        await pause(40);
+      }
+      if (turn.done) return;
+      if (turn.steered === undefined) { notify('item/completed', { ...context(turn), item: { ...list, text: 'Synthetic list complete' } }); complete(turn); return; }
+      notify('item/agentMessage/delta', { ...context(turn), itemId: list.id, delta: 'Synthetic list li' });
+      const answer = { id: `${turn.id}-assistant-2`, type: 'agentMessage', text: '', phase: 'final_answer' };
+      notify('item/started', { ...context(turn), item: answer });
+      notify('item/agentMessage/delta', { ...context(turn), itemId: answer.id, delta: 'DONE' });
+      notify('item/completed', { ...context(turn), item: { ...answer, text: 'DONE' } });
+      complete(turn);
+      return;
+    }
     if (turn.done) return;
     write(join(checkout, 'fixture-provider-marker.txt'), `${fixture.instanceId}:turns=${counters.turnStarts}\n`);
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };
@@ -309,6 +331,7 @@ async function request(method, params = {}) {
     const text = (params.input ?? []).map(item => item.text ?? '').join('\n');
     if (text.includes('worker result')) count('workerResults');
     notify('item/completed', { ...context(active), item: { id: `${active.id}-steer-${counters.steers}`, type: 'userMessage', clientId: params.clientUserMessageId } });
+    if (active.streaming) active.steered = text;
     if (active.holding) { const turn = active; turn.holding = false; setTimeout(() => void runTurn(turn, text), 15); }
     return { turnId: active.id };
   }
