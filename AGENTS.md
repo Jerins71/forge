@@ -11,8 +11,13 @@ Electron desktop app, shared protocol packages, and real-time WebSocket updates.
 The built-in manager experience is concise and outcome-first. Product copy and documentation should
 not promise constant progress narration.
 
-Use the Node.js and pnpm versions declared by the repository. `package.json` is authoritative for the
-package manager version.
+Use the Node.js and pnpm versions declared by the repository: Node from `.nvmrc`, pnpm from
+`package.json`. Reinstall after switching Node, because native modules are built for the installing
+Node.
+
+This branch is **Forge V2**: environments, the orchestration kernel, and worker presets. Read
+[`docs/V2.md`](docs/V2.md) first. Never run a development build against the data directory of an
+installed Forge (`~/.forge` by default); set `FORGE_DATA_DIR` to a fresh directory or a copy.
 
 ## Design principle: elegantly simple
 
@@ -41,23 +46,28 @@ package manager version.
 ## Repository map
 
 - `apps/backend/` — orchestration, persistence, HTTP/WebSocket APIs, integrations, and terminals.
+  `src/environment/` holds the environment service and control plane; `src/environment/control/orchestration/`
+  is the kernel that decides runs, attempts, bindings, choices, assignments, and recovery.
 - `apps/ui/` — TanStack Start/Vite React application.
 - `apps/electron/` — desktop packaging, runtime staging, updates, releases, and the local Automatic Browser Host.
 - `apps/stream-deck/` — optional local Forge Desktop Stream Deck plugin and packaging assets.
 - `apps/chrome-extension/` and `apps/native-messaging-host/` — optional Chrome adapter extension and bounded native relay.
 - `packages/protocol/` — shared wire types, API contracts, and event definitions.
-- `packages/cli/` — first-party Forge CLI.
+- `packages/cli/` — first-party Forge CLI, including `forge serve` for running a backend.
+- `packages/client-runtime/` — the environment client shared by the UI and CLI.
+- `scripts/environment-e2e/` — multi-environment E2E fleets with a scripted Codex provider.
 
 ## Sources of truth
 
 | Topic | Authoritative source |
 |---|---|
 | Setup, common commands, ports, project layout | [`README.md`](README.md) |
+| V2 overview: running it, environments, remote machines, testing | [`docs/V2.md`](docs/V2.md) |
 | Configuration, environment variables, data layout | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `.env.example` |
 | Local validation tiers and reports | [`docs/QUALITY.md`](docs/QUALITY.md) |
 | Automatic Browser Host | [`docs/BROWSER_AUTOMATION.md`](docs/BROWSER_AUTOMATION.md) |
 | Model catalog and model additions | [`docs/MODEL_CATALOG.md`](docs/MODEL_CATALOG.md) and [`docs/ADDING_MODELS.md`](docs/ADDING_MODELS.md) |
-| Specialists | [`docs/SPECIALISTS.md`](docs/SPECIALISTS.md) |
+| Worker presets | [`docs/SPECIALISTS.md`](docs/SPECIALISTS.md) |
 | Project resources | [`docs/PROJECT_RESOURCES.md`](docs/PROJECT_RESOURCES.md) |
 | Forge and Pi extensions | [`docs/FORGE_EXTENSIONS.md`](docs/FORGE_EXTENSIONS.md) and [`docs/PI_EXTENSIONS.md`](docs/PI_EXTENSIONS.md) |
 | Electron build and release workflow | [`apps/electron/README.md`](apps/electron/README.md) |
@@ -74,6 +84,8 @@ variable catalogs, or release runbooks back into this file. Link to their mainta
 - For a protocol change, update the shared contract first, then every producer, parser, consumer,
   persistence/replay path, and relevant test in the same change.
 - Conversation behavior must remain correct for both live WebSocket events and replayed JSONL history.
+- Orchestration decisions belong to the kernel. Provider runtimes report facts; they do not decide run
+  outcomes, retries, or recovery. Pin provider behavior with replay tests built from real traffic.
 - Treat public facades and exported contracts as stable. When changing one, audit and update all
   downstream consumers; use a narrow compatibility seam only when the migration actually requires it.
 - If a task explicitly calls for complete replacement, remove obsolete code, routes, prompts, docs,
@@ -131,6 +143,9 @@ the current command definitions.
   validation, and `pnpm quality:full` for broad, structural, release, or cross-package work.
 - Protocol/API changes must be verified end to end through the backend handler and the UI
   client/consumer.
+- Before running the E2E fleets, build the UI with `VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build`;
+  `pnpm quality:full` rebuilds it without that flag. The fleets use a scripted provider and never need
+  real credentials.
 - Persistence changes must be verified by a write/read/restart or migration run, not only a check of
   the serializer.
 - UI event changes must be verified on both the live-event and replay/bootstrap paths when both
