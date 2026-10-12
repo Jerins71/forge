@@ -9,8 +9,11 @@ export interface CoreLineagePort {
   execute(callerAgentId:string,toolCallId:string,method:LineageMethod,input:Omit<RpcInput<LineageMethod>,'commandId'>):Promise<CommandReceipt>;
   read(callerAgentId:string,threadId:string):SessionLineageSnapshot;
   switchContext(threadId:string,model:AgentDescriptor['model']):Promise<void>;
-  /** Replace the thread's provider binding with its model unchanged, at its next idle boundary. Resolves once recorded or deferred. */
-  refreshContext(threadId:string):Promise<void>;
+  /**
+   * Replace the thread's provider binding with its model unchanged, at its next idle boundary. Resolves once recorded
+   * or deferred, with false when the thread has no live binding: the runtime that will acquire one is the caller's to replace.
+   */
+  refreshContext(threadId:string):Promise<boolean>;
 }
 export function buildLineageTools(port:CoreLineagePort|undefined,descriptor:AgentDescriptor):ToolDefinition[] {
   if(!port || descriptor.role!=='manager') return [];

@@ -26,7 +26,7 @@ export function createCoreLineagePort(sink:EventSink,control:EnvironmentControlS
   const applyRefreshes=async () => {
     for(const threadId of [...refreshes]) {
       const state=loadState(sink.database),thread=state.threads[threadId],model=thread?.model ?? options.getAgent(threadId)?.model;
-      // Without a live binding the next acquisition already starts a fresh provider.
+      // Without a live binding there is nothing to replace here; the caller replaces the runtime that will acquire one.
       if(!thread?.bindingId || !state.bindings[thread.bindingId] || thread.desired!=='running' || !model) {refreshes.delete(threadId);continue;}
       if(working(state,threadId)) continue;
       refreshes.delete(threadId);
@@ -48,6 +48,10 @@ export function createCoreLineagePort(sink:EventSink,control:EnvironmentControlS
     },
     read(callerId,threadId){requireTeam(callerId,threadId);return lineageSnapshot(loadState(sink.database),threadId);},
     switchContext,
-    async refreshContext(threadId) {refreshes.add(threadId);await applyRefreshes();},
+    async refreshContext(threadId) {
+      const state=loadState(sink.database),bindingId=state.threads[threadId]?.bindingId;
+      if(!bindingId || !state.bindings[bindingId]) return false;
+      refreshes.add(threadId);await applyRefreshes();return true;
+    },
   };
 }
