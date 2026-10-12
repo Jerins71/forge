@@ -437,8 +437,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.turnCompaction?.reject(new Error(message));
     for (const input of this.sent.values()) input.compact?.reject(new Error(message));
     await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, { phase: "runtime_exit", message });
-    // The error handler may already have settled the session; a status it refuses must not take the backend down.
-    await this.publishStatus().catch(() => undefined);
+    await this.publishStatus();
   }
   private serialize<T>(work: () => Promise<T>): Promise<T> { const result = this.operations.then(work); this.operations = result.catch(() => undefined); return result; }
   private assertOpen(): void { if (this.getProviderDrainStatus() !== "open") throw new Error("Claude native is stopped or unavailable. Settle the previous runtime before continuing."); }

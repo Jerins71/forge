@@ -65,7 +65,14 @@ export class RuntimeStatusProjector {
     }
 
     const previousStatus = descriptor.status;
-    const nextStatus = transitionAgentStatus(previousStatus, status);
+    let nextStatus: AgentStatus;
+    try { nextStatus = transitionAgentStatus(previousStatus, status); }
+    catch {
+      // A provider callback can report after the lifecycle owner settled the session. That report is
+      // stale; nothing awaits these callbacks, so refusing it must not reject.
+      this.deps.logDebug("runtime:status:refused", { agentId, current: previousStatus, reported: status });
+      return {};
+    }
     const statusChanged = previousStatus !== nextStatus;
     const transitionedAt = statusChanged ? this.deps.now() : undefined;
     if (statusChanged) {
