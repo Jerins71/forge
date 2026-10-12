@@ -21,4 +21,9 @@ describe('ManagerToolActivityIndicator', () => {
     expect(render({ activity: activity({ scheduledWakeupCount: 1 }) })).toContain('Waiting for scheduled follow-up')
     expect(render({ activity: null, pendingCount: 2 })).toContain('2 messages waiting for agent')
   })
+  it('counts down to the scheduled wake-up, and drops the time once it has fired', () => {
+    const wakeAt = new Date(Date.now() + 12 * 60_000 - 1_000).toISOString()
+    expect(render({ activity: activity({ scheduledWakeupCount: 1 }), wakeAt })).toMatch(/Waiting for scheduled follow-up · .+ \(in 12 min\)/)
+    expect(render({ activity: activity({ scheduledWakeupCount: 0 }), wakeAt })).not.toContain('scheduled follow-up')
+  })
 })

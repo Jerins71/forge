@@ -132,7 +132,7 @@ function isDeliveredWorkerResult(item: DetailItem): boolean {
 }
 
 /** Item sources the environment uses for timeline markers, and the notice each one is. */
-const MARKER_SOURCES = { 'system:model_change': 'model_change', 'system:worker_stopped': 'worker_stopped', 'system:turn_stopped': 'turn_stopped' } as const
+const MARKER_SOURCES = { 'system:model_change': 'model_change', 'system:worker_stopped': 'worker_stopped', 'system:turn_stopped': 'turn_stopped', 'system:manager_stalled': 'manager_stalled' } as const
 
 /** What the core delivered to an agent as its turn input (a worker's assignment); not something the user typed. */
 function isInternalInput(item: DetailItem): boolean {
@@ -165,7 +165,9 @@ export function projectItems(
         : isInternalInput(i) ? { role: 'system', source: 'system', systemNoticeKind: 'assignment' }
         // A model switch, or a turn or worker the user stopped, is a marker in the timeline, not something the assistant said.
         : i.kind === 'assistant' && i.source && i.source in MARKER_SOURCES
-          ? { role: 'system', source: 'system', systemNoticeKind: MARKER_SOURCES[i.source as keyof typeof MARKER_SOURCES] } : {
+          ? { role: 'system', source: 'system', systemNoticeKind: MARKER_SOURCES[i.source as keyof typeof MARKER_SOURCES] }
+        // Anything else Forge itself wrote is a system notice, never the assistant's reply.
+        : i.kind === 'assistant' && i.source === 'system' ? { role: 'system', source: 'system' } : {
         role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
         source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
       }),
@@ -250,6 +252,7 @@ export function projectActivityItems(
         kind: i.activity.kind, startedAt: i.activity.startedAt,
         ...(i.activity.truncated ? { truncated: true } : {}), ...(i.activity.hidden ? { hidden: true } : {}),
         ...(i.activity.exitCode !== undefined ? { exitCode: i.activity.exitCode } : {}),
+        ...(i.activity.wakeAt ? { wakeAt: i.activity.wakeAt } : {}),
       } } : {}),
     }))
 }

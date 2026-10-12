@@ -59,6 +59,7 @@ export class ActivityTimelineTracker {
         ...(event.toolName ? { toolName: event.toolName.slice(0, 128) } : {}),
         ...bounded("input", describeInput(kind, input), "head"),
       });
+      if (event.toolName === WAKEUP_TOOL) this.describeWakeup(tracked.item, input);
     }
     const item = tracked.item;
     if (item.status !== "running") return item;
@@ -79,9 +80,25 @@ export class ActivityTimelineTracker {
       if (exitCode !== undefined) item.exitCode = exitCode;
       item.status = event.isError ? "failed" : "completed";
       item.completedAt = event.timestamp;
+      // A call the provider refused scheduled nothing.
+      if (item.toolName === WAKEUP_TOOL) { if (event.isError) delete item.wakeAt; else settleWakeAt(item, text, event.timestamp); }
       this.publishNow(tracked);
     } else this.publishNow(tracked);
     return item;
+  }
+
+  /**
+   * A wake-up row reads as when the agent resumes. The provider's own waiting row has no
+   * arguments; it is the wait the actor's latest call scheduled, so it takes that call's time and reason.
+   */
+  private describeWakeup(item: TimelineActivity, input: unknown): void {
+    item.summary = "Scheduled wake-up";
+    const delay = isRecord(input) && typeof input.delaySeconds === "number" ? input.delaySeconds : undefined;
+    const call = delay === undefined ? [...this.items.values()].reverse().find(other => other.item !== item
+      && other.item.toolName === WAKEUP_TOOL && other.item.actorId === item.actorId && other.item.wakeAt)?.item : undefined;
+    const wakeAt = delay !== undefined ? offset(item.startedAt, delay) : call?.wakeAt;
+    if (wakeAt) item.wakeAt = wakeAt;
+    if (call?.input) item.input = call.input;
   }
 
   /**
@@ -257,12 +274,39 @@ export function toolActivityItemId(actorId: string, toolCallId: string): string 
 }
 
 /** The bounded content a canonical summary keeps so a reload renders the same row. */
+const WAKEUP_TOOL = "ScheduleWakeup";
+/** The range Claude's ScheduleWakeup clamps a requested delay to. */
+const WAKEUP_MIN_SECONDS = 60;
+const WAKEUP_MAX_SECONDS = 3600;
+
+function offset(iso: string, seconds: number): string | undefined {
+  const at = Date.parse(iso) + seconds * 1000;
+  return Number.isFinite(at) ? new Date(at).toISOString() : undefined;
+}
+
+/**
+ * The result says when the wake-up was actually scheduled ("… (in 82s)"); that wins. A result that
+ * only says the delay was clamped moves the requested time into the provider's range.
+ */
+function settleWakeAt(item: TimelineActivity, result: string, timestamp: string): void {
+  const reported = /\(in (\d+)s\)/.exec(result);
+  const at = reported ? offset(timestamp, Number(reported[1])) : undefined;
+  if (at) { item.wakeAt = at; return; }
+  if (!/clamped/i.test(result) || !item.input) return;
+  let args: unknown;
+  try { args = JSON.parse(item.input); } catch { return; }
+  if (!isRecord(args) || typeof args.delaySeconds !== "number") return;
+  const clamped = offset(item.startedAt, Math.min(WAKEUP_MAX_SECONDS, Math.max(WAKEUP_MIN_SECONDS, args.delaySeconds)));
+  if (clamped) item.wakeAt = clamped;
+}
+
 export function persistedActivityDetail(item: TimelineActivity): PersistedActivityDetail {
   return {
     kind: item.kind, startedAt: item.startedAt,
     ...(item.input ? { input: item.input } : {}), ...(item.detail ? { detail: item.detail } : {}),
     ...(item.truncated ? { truncated: true } : {}), ...(item.hidden ? { hidden: true } : {}),
     ...(item.exitCode !== undefined ? { exitCode: item.exitCode } : {}),
+    ...(item.wakeAt ? { wakeAt: item.wakeAt } : {}),
   };
 }
 

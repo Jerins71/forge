@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { MarkdownMessage } from '../../MarkdownMessage'
 import type { ActivityRowModel } from './activity-model'
 import { ACTIVITY_ICONS, activityRowClassName } from './activity-style'
+import { useWakeLabel } from './use-wake-label'
 
 /** Characters of content rendered before "Show more"; the rest stays out of the DOM. */
 const COLLAPSED_CONTENT_CHARS = 4000
@@ -42,7 +43,9 @@ export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, 
   const loaded = useReplayedContent(row, expanded && expandable, loadContent)
   const Icon = ACTIVITY_ICONS[row.kind]
   const running = row.status === 'running'
-  const label = row.summary || (row.kind === 'reasoning' ? 'Thinking…' : 'Tool')
+  const wakeLabel = useWakeLabel(row.wakeAt)
+  const summary = row.summary || (row.kind === 'reasoning' ? 'Thinking…' : 'Tool')
+  const label = wakeLabel ? `${summary} · ${wakeLabel}` : summary
 
   const text = row.content ?? (loaded && loaded !== 'loading' && 'text' in loaded ? loaded.text : undefined)
   // A live row knows its own bound; a replayed row knows whether its page was cut.
@@ -67,7 +70,7 @@ export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, 
   )
 
   return (
-    <div data-testid="activity-row" data-activity-id={row.itemId} data-activity-kind={row.kind} data-activity-status={row.status}>
+    <div data-testid="activity-row" data-activity-id={row.itemId} data-wake-at={row.wakeAt} data-activity-kind={row.kind} data-activity-status={row.status}>
       {expandable ? (
         <button type="button" className={cn(activityRowClassName, 'cursor-pointer')} aria-expanded={expanded} aria-controls={detailId} onClick={() => onToggle(row.itemId)}>
           {line}

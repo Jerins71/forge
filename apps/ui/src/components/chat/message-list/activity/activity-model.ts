@@ -14,6 +14,8 @@ export interface ActivityRowModel {
   hidden?: boolean
   truncated?: boolean
   exitCode?: number
+  /** A scheduled wake-up's resume time. */
+  wakeAt?: string
   /** Live rows carry their bounded content inline. */
   content?: string
   /** Replayed rows fetch their content the first time they are expanded. */
@@ -25,7 +27,7 @@ export function liveActivityRow(item: TimelineActivity): ActivityRowModel {
   return {
     itemId: item.itemId, sessionId: item.sessionId, kind: item.kind, status: item.status, summary: item.summary,
     startedAt: item.startedAt, completedAt: item.completedAt, hidden: item.hidden, truncated: item.truncated,
-    exitCode: item.exitCode, ...(content ? { content } : {}),
+    exitCode: item.exitCode, ...(item.wakeAt ? { wakeAt: item.wakeAt } : {}), ...(content ? { content } : {}),
   }
 }
 
@@ -35,7 +37,7 @@ export function replayedActivityRow(entry: EnvironmentActivityEntry & { type: 'a
     itemId: entry.itemId, sessionId: entry.agentId, kind: activity?.kind ?? 'tool',
     status: entry.status === 'completed' ? 'completed' : 'failed', summary: entry.displaySummary,
     startedAt: activity?.startedAt ?? entry.timestamp, completedAt: entry.timestamp, hidden: activity?.hidden,
-    truncated: activity?.truncated, exitCode: activity?.exitCode, ...(entry.contentRef ? { contentRef: entry.contentRef } : {}),
+    truncated: activity?.truncated, exitCode: activity?.exitCode, ...(activity?.wakeAt ? { wakeAt: activity.wakeAt } : {}), ...(entry.contentRef ? { contentRef: entry.contentRef } : {}),
   }
 }
 
@@ -77,4 +79,14 @@ export function formatWorkDuration(ms: number): string {
   const seconds = total % 60
   if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`
   return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+}
+
+/** "10:58 AM (in 12 min)": when a scheduled wake-up resumes the agent, counted down from `nowMs`. */
+export function formatWakeTime(wakeAt: string, nowMs: number): string | undefined {
+  const at = Date.parse(wakeAt)
+  if (!Number.isFinite(at)) return undefined
+  const clock = new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  const seconds = Math.ceil((at - nowMs) / 1000)
+  if (seconds <= 0) return clock
+  return `${clock} (in ${seconds < 60 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`})`
 }

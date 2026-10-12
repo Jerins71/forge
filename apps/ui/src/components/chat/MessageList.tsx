@@ -70,6 +70,8 @@ export interface MessageListProps {
   forkDisabledReason?: string
   onPinMessage?: (messageId: string, pinned: boolean) => void
   onStopExternalThread?: (sidecarAgentId: string) => void
+  /** Stops a session's running turn, offered on its stall notice. */
+  onStopSession?: (agentId: string) => void
   onReplyToMessage?: (target: ConversationReplyTargetInput) => void
   getVote?: (targetId: string, fallbackTargetId?: string) => 'up' | 'down' | null
   hasComment?: (targetId: string, fallbackTargetId?: string) => boolean
@@ -490,6 +492,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   forkDisabledReason,
   onPinMessage,
   onStopExternalThread,
+  onStopSession,
   onReplyToMessage,
   getVote,
   hasComment,
@@ -1360,6 +1363,12 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
             forkDisabledReason={forkDisabledReason}
             onPinMessage={entry.message.role !== 'system' ? onPinMessage : undefined}
             onStopExternalThread={onStopExternalThread}
+            onStopTurn={
+              entry.message.systemNoticeKind === 'manager_stalled' && onStopSession
+                && agentsById.get(entry.message.agentId)?.status === 'streaming'
+                ? () => onStopSession(entry.message.agentId)
+                : undefined
+            }
             onReplyToMessage={
               entry.message.role !== 'system' && onReplyToMessage
                 ? (message) => {

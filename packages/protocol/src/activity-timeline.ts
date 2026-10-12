@@ -50,6 +50,8 @@ export const TimelineActivitySchema = Type.Object({
   /** Reasoning the provider encrypts or withholds: shown as "Thinking…" with no content. */
   hidden: Type.Optional(Type.Boolean()),
   exitCode: Type.Optional(Type.Integer()),
+  /** When a scheduled wake-up resumes the agent; clients count down to it. */
+  wakeAt: Type.Optional(time),
 }, { additionalProperties: false })
 export type TimelineActivity = Static<typeof TimelineActivitySchema>
 
@@ -62,7 +64,7 @@ export interface TimelineActivityEvent {
 
 /** Bounded content persisted with a canonical activity summary so replay matches the live row. */
 export const PersistedActivityDetailSchema = Type.Pick(
-  TimelineActivitySchema, ['kind', 'startedAt', 'input', 'detail', 'truncated', 'hidden', 'exitCode'],
+  TimelineActivitySchema, ['kind', 'startedAt', 'input', 'detail', 'truncated', 'hidden', 'exitCode', 'wakeAt'],
   // Canonical history outlives a release: later additions must still read.
   { additionalProperties: true },
 )
