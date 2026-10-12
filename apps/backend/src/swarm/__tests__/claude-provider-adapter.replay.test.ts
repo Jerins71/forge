@@ -14,6 +14,7 @@ import { buildSwarmTools } from "../swarm-tools.js";
 import type { AgentDescriptor, AgentStatus } from "../types.js";
 import type { RuntimeSessionEvent, SwarmAgentRuntime } from "../runtime-contracts.js";
 import { RuntimeEventProjector } from "../runtime/runtime-event-projector.js";
+import { RuntimeStatusProjector } from "../runtime/runtime-status-projector.js";
 import { ConversationProjector } from "../session/conversation-projector.js";
 import { getConversationHistoryCacheFilePath } from "../session/conversation-history-cache.js";
 import { ClaudeProviderAdapter } from "../runtime/claude/claude-provider-adapter.js";
@@ -246,7 +247,11 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       isModelCacheVisualizationEnabled: () => false, emitModelCacheObservation: () => {},
       resolveManagerAssistantFinalOutputTarget: () => ({ kind: "session_transcript", channel: "web" }),
       resolveManagerAssistantFinalOutputRoute: () => ({ target: { kind: "session_transcript", channel: "web" }, requiresVisibleResponse: true, decision: { reasonCode: "render:user_web" } }) } as never);
-    const prepared = vi.fn(); const onRuntimeError = vi.fn();
+    // As in production: the failure handler settles the session, then the runtime's late status report reaches the real projector.
+    const prepared = vi.fn(); const onRuntimeError = vi.fn(() => { descriptor.status = "idle"; });
+    const statusProjector = new RuntimeStatusProjector({ descriptors: resources.descriptors, workerStallState: new Map(), workerActivityState: new Map(), now: () => new Date().toISOString(),
+      patchDescriptorFromRuntimeStatus: async (_id, patch) => Object.assign(descriptor, patch), updateSessionMetaForWorkerDescriptor: async () => {}, refreshSessionMetaStatsBySessionId: async () => {},
+      refreshSessionMetaStats: async () => {}, saveStore: async () => {}, emitStatus: () => {}, logDebug: () => {} });
     const failed = scenario === "fail-mid-stream" || scenario === "exit-mid-stream";
     let runtime: SwarmAgentRuntime | undefined;
     nativeSetup.env = f.runtimeOptions.env; nativeSetup.executable = f.runtimeOptions.executable;
@@ -254,7 +259,7 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const instructionBundle = await resources.service.buildInstructionBundle(descriptor);
       runtime = await new ClaudeRuntimeCreator({ ...resources.deps, host: { ...f.host, searchHistory: vi.fn(), readHistory: vi.fn() } } as never).create({ descriptor,
         systemPrompt: renderInstructionBundle(instructionBundle), runtimeToken: 3,
-        callbacks: { onStatusChange: () => {}, onAgentEnd: () => {}, onRuntimeError,
+        callbacks: { onStatusChange: async (agentId, status, pendingCount) => { await statusProjector.projectStatus({ agentId, status, pendingCount }); }, onAgentEnd: () => {}, onRuntimeError,
           onSessionEvent: async (agentId, event) => { events.push(event); await projector.projectEvent({ agentId, event }); } },
         creationOptions: { instructionBundle, providerScope: kernelScope, onProviderPrepared: prepared } });
       runtimes.set(descriptor.agentId, runtime);
@@ -268,6 +273,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       if (failed) {
         await dispatched; await f.release("failed");
         await vi.waitFor(() => expect(onRuntimeError).toHaveBeenCalled());
+        if (scenario === "exit-mid-stream") await vi.waitFor(() => expect(runtime!.getStatus()).toBe("error"));
+        expect(descriptor.status).toBe("idle");
         // Already there when the failure is reported, not only once the session is later stopped.
         expect((await read()).filter(entry => entry.role === "assistant")).toEqual(streamed.map(text => expect.objectContaining({ text, turnId: runId, source: "assistant_output" })));
       } else {
