@@ -3303,7 +3303,19 @@ export class AgentRuntime implements SwarmAgentRuntime {
       return;
     }
 
-    const nextStatus = transitionAgentStatus(this.status, status);
+    let nextStatus: AgentStatus;
+    try { nextStatus = transitionAgentStatus(this.status, status); }
+    catch {
+      // A provider event can report after terminate, or on a session already in error. That report is
+      // stale; nothing awaits these events, so refusing it must not reject.
+      console.warn(`[swarm][${this.now()}] runtime:status:refused`, {
+        runtime: "pi",
+        agentId: this.descriptor.agentId,
+        current: this.status,
+        reported: status,
+      });
+      return;
+    }
     this.status = nextStatus;
     this.descriptor.status = nextStatus;
     this.descriptor.updatedAt = this.now();
