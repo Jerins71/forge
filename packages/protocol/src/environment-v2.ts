@@ -280,6 +280,9 @@ export const ChoiceSummarySchema = O({
 })
 export const WorkerSummarySchema = O({
   agentId: V2Id, title: ShortText, status: E('idle', 'streaming', 'terminated', 'stopped', 'error'),
+  /** The model the worker runs on, and the preset it was started from, if any. */
+  model: Type.Optional(O({ provider: ShortText, modelId: ShortText, thinkingLevel: ShortText })),
+  preset: Type.Optional(ShortText),
 })
 export const DetailItemSchema = O({
   itemId: V2Id, userTurnId: V2Id, actorId: V2Id,

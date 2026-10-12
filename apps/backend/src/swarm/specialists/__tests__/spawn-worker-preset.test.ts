@@ -20,7 +20,7 @@ interface SpecialistFile {
   provider?: string; modelId?: string; reasoningLevel?: string; promptBody: string; available: boolean;
 }
 
-async function harness(specialists: SpecialistFile[] = []) {
+async function harness(specialists: SpecialistFile[] = [], unavailableProviders: string[] = []) {
   const dataDir = await mkdtemp(join(tmpdir(), "forge-spawn-preset-"));
   await saveWorkerPresetSettings(dataDir, {
     version: 2,
@@ -38,6 +38,7 @@ async function harness(specialists: SpecialistFile[] = []) {
     dataDir,
     descriptors,
     modelCapacityBlocks: new Map(),
+    getManagedModelProviderAvailability: async () => ({ get: (provider: string) => !unavailableProviders.includes(provider) }),
     descriptorMutations: {
       upsertDescriptor: (descriptor: AgentDescriptor) => void descriptors.set(descriptor.agentId, descriptor),
       deleteDescriptor: (agentId: string) => void descriptors.delete(agentId),
@@ -123,4 +124,26 @@ it("treats a user-authored specialist file as a preset that wins a name collisio
   // Forge's own builtin instructions are not selectable as a preset.
   await expect(service.spawnAgent("manager", { agentId: "w2", preset: "codex-plugin", initialMessage: "x" }))
     .rejects.toThrow(/Unknown preset "codex-plugin"\. Valid presets: builder\./);
+});
+
+// A worker whose model cannot start must fail at spawn, not leave a worker behind that its first
+// assignment then refuses (the manager retried and collected dead rows).
+it("fails the spawn fast with the usable presets when the worker's model is not available, and leaves no worker", async () => {
+  const { service, descriptors, systemPrompts } = await harness([{
+    specialistId: "local", displayName: "Local", color: "#111111", enabled: true, whenToUse: "", available: true, promptBody: "Mine.",
+    provider: "claude-native", modelId: "claude-sonnet-5-5",
+  }], [presetModel.provider]);
+
+  await expect(service.spawnAgent("manager", { agentId: "w1", preset: "builder", initialMessage: "x" }))
+    .rejects.toThrow(`Preset "builder" uses a model that is not available: ${presetModel.provider}/${presetModel.modelId}. Available presets: local.`);
+  expect([...descriptors.keys()]).toEqual(["manager"]);
+  expect(systemPrompts).toEqual([]);
+});
+
+it("fails a no-preset spawn fast when the manager's own model is not available to workers", async () => {
+  const { service, descriptors } = await harness([], [managerModel.provider]);
+
+  await expect(service.spawnAgent("manager", { agentId: "w1", initialMessage: "x" }))
+    .rejects.toThrow(`Worker model is not available: ${managerModel.provider}/${managerModel.modelId}.`);
+  expect([...descriptors.keys()]).toEqual(["manager"]);
 });

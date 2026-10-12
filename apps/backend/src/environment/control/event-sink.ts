@@ -9,7 +9,7 @@ import {
   type ShellStreamItem,
 } from "@forge/protocol/environment-v2";
 import { runtimeProviderCapabilities } from "../../swarm/runtime/provider-selection.js";
-import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
+import { projectLifecycleStatus, projectWorkerStatus } from "./orchestration/lifecycle-projection.js";
 import { decide } from "./orchestration/kernel.js";
 import { lineageSnapshot,sessionTransferCapabilities } from "./orchestration/transfers.js";
 import { loadState, projectLifecycle } from "./orchestration/store.js";
@@ -322,7 +322,7 @@ export function createEventSink(database: Database, clock: () => number, random:
         if (thread.role === "worker") {
           const workerRow = database.prepare("SELECT worker_json FROM control_workers WHERE agent_id=? AND deleted=0").get(threadId) as { worker_json: string } | undefined;
           if (workerRow && thread.managerId) {
-            const worker = { ...JSON.parse(workerRow.worker_json), status: lifecycleStatus.agentStatus };
+            const worker = { ...JSON.parse(workerRow.worker_json), status: projectWorkerStatus(state, threadId) };
             if (JSON.stringify(worker) !== workerRow.worker_json) sink.append(tx, { topic: "detail", sessionId: thread.managerId, event: { type: "worker.upsert", worker } });
           }
         }

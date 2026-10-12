@@ -20,3 +20,11 @@ export function projectLifecycleStatus(state: CoreState, threadId: string): {
   if (run || thread.compaction) return { agentStatus: "streaming", sessionStatus: "running" };
   return { agentStatus: "idle", sessionStatus: "idle" };
 }
+
+/** A worker's listed status: an idle worker whose latest turn failed is shown as failed, not idle. */
+export function projectWorkerStatus(state: CoreState, threadId: string): AgentStatus | undefined {
+  const status = projectLifecycleStatus(state, threadId)?.agentStatus;
+  if (status !== "idle") return status;
+  const latest = Object.values(state.runs).filter(run => run.threadId === threadId).sort((a, b) => b.sequence - a.sequence)[0];
+  return latest?.outcome === "failed" ? "error" : status;
+}

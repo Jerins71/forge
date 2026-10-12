@@ -13,7 +13,7 @@ import { OpenAIAuthBrokerRuntimeService } from "./openai-auth/openai-auth-broker
 import { normalizeEnvVarName, type ParsedSkillEnvDeclaration } from "./skills/skill-frontmatter.js";
 import { writeJsonFileAtomic } from "../utils/atomic-files.js";
 import { isEnoentError } from "../utils/fs-errors.js";
-import { readNativeApiAccess } from "./runtime/native-api-access.js";
+import { missingNativeApiKey, readNativeApiAccess } from "./runtime/native-api-access.js";
 import type {
   ForgeProviderCredentialAuthType,
   ForgeProviderCredentialSource,
@@ -450,6 +450,8 @@ export async function getManagedModelProviderCredentialAvailability(
     const access = await readNativeApiAccess(config, "codex-native");
     if (access.mode === "api_key") availability.set("codex-native", Boolean(access.apiKey));
   }
+  // Claude native signs in with its own CLI login, never Forge's Anthropic credentials; only a missing API key stops it here.
+  availability.set("claude-native", !(await missingNativeApiKey(config, "claude-native")));
   return availability;
 }
 

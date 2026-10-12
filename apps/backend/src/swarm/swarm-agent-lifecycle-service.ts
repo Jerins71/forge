@@ -638,6 +638,8 @@ export class SwarmAgentLifecycleService {
       ...(webSearch ? { webSearch: true } : {})
     };
 
+    await this.assertWorkerModelAvailable(manager, descriptor.model, input, preset);
+
     if (preset) {
       descriptor.specialistId = preset.name;
       descriptor.specialistDisplayName = preset.displayName ?? preset.name;
@@ -1602,15 +1604,31 @@ export class SwarmAgentLifecycleService {
   async resolveWorkerAssignmentSelection(worker: AgentDescriptor, requiresSecureRuntime: boolean, maxConcurrent?: number): Promise<AssignmentSelection> {
     const manager = this.options.descriptors.get(worker.managerId);
     if (worker.role !== "worker" || !manager || manager.role !== "manager") throw new Error("Assignment worker owner conflicts");
-    const availability = await this.options.getManagedModelProviderAvailability();
     const model = worker.model;
     return {
       specialistId: worker.specialistId, provider: model.provider, modelId: model.modelId, maxConcurrent,
       candidates: [{ provider: model.provider, modelId: model.modelId,
-        available: availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
-          && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider)),
+        available: this.isWorkerModelAvailable(model, await this.options.getManagedModelProviderAvailability(), requiresSecureRuntime),
       }],
     };
+  }
+
+  /** The one worker-model admission rule: spawn checks it up front so assignment never refuses a worker it created. */
+  private isWorkerModelAvailable(model: Pick<AgentModelDescriptor, "provider" | "modelId">, availability: ReadonlyMap<string, boolean>, requiresSecureRuntime: boolean): boolean {
+    return availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
+      && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider));
+  }
+
+  private async assertWorkerModelAvailable(manager: AgentDescriptor, model: AgentModelDescriptor, input: SpawnAgentInput, preset: ResolvedWorkerPreset | undefined): Promise<void> {
+    const secure = input.requiresSecureRuntime === true;
+    const availability = await this.options.getManagedModelProviderAvailability();
+    if (this.isWorkerModelAvailable(model, availability, secure)) return;
+    const usable = (await this.resolveWorkerPresetsForManager(manager))
+      .filter(entry => this.isWorkerModelAvailable(entry, availability, secure)).map(entry => entry.name);
+    const choices = usable.length > 0 ? `Available presets: ${usable.join(", ")}.` : "No preset has an available model.";
+    throw new Error(input.preset !== undefined && preset
+      ? `Preset "${preset.name}" uses a model that is not available: ${model.provider}/${model.modelId}. ${choices}`
+      : `Worker model is not available: ${model.provider}/${model.modelId}. ${choices} Or sign in to that provider in Settings > Authentication.`);
   }
 
   private resolveSpecialistRoster(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
