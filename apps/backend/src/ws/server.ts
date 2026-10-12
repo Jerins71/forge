@@ -118,7 +118,7 @@ import {
 import { createSettingsRoutes, type SettingsRouteBundle } from "./http/routes/settings-routes.js";
 import { createSkillRoutes } from "./http/routes/skill-routes.js";
 import { createSlashCommandRoutes } from "./http/routes/slash-command-routes.js";
-import { createSpecialistRoutes } from "./http/routes/specialist-routes.js";
+import { createWorkerPresetRoutes } from "./http/routes/worker-preset-routes.js";
 import { createModelCacheVisualizationRoutes } from "./http/routes/model-cache-visualization-routes.js";
 import { createRepositorySettingsRoutes } from "./http/routes/repository-settings-routes.js";
 import { createStatsRoutes } from "./http/routes/stats-routes.js";
@@ -571,7 +571,7 @@ export class SwarmWebSocketServer {
       ...createSchedulerRoutes({ swarmManager: this.swarmManager }),
       ...createSlashCommandRoutes({ swarmManager: this.swarmManager }),
       ...createMobileRoutes({ mobilePushService: this.mobilePushService }),
-      ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
+      ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager }),
       ...createAgentHttpRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createContextModeRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),
       ...createSessionAuditRoutes({ swarmManager: this.swarmManager }),
@@ -582,10 +582,7 @@ export class SwarmWebSocketServer {
       ...createRepositoryCheckoutRoutes(this.repositoryCheckoutService),
       ...(this.nativeRuntimeUpdateService ? createNativeRuntimeRoutes(this.nativeRuntimeUpdateService) : []),
       ...this.settingsRoutes.routes,
-      ...createSpecialistRoutes({
-        swarmManager: this.swarmManager,
-        broadcastEvent: (event) => this.sessionFeatures.publish(event),
-      }),
+      ...createWorkerPresetRoutes({ swarmManager: this.swarmManager }),
       ...createModelCacheVisualizationRoutes({
         swarmManager: this.swarmManager,
         broadcastEvent: (event) => this.sessionFeatures.publish(event),

@@ -100,7 +100,6 @@ const mirror = mirrorModule.createSwarmEventMirror({ swarmManager: manager, data
       return { projectId: profile.profileId, title: profile.displayName, cwd, repository, isGit, defaultBranch,
         updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt),
         defaultSessionId: profile.defaultSessionAgentId,
-        delegationDefaults: { managerPosture: profile.defaultManagerPosture, rosterId: profile.defaultDelegationRosterId },
         contextMode: profile.defaultContextMode ?? "summary",
         defaultModel: { provider: profile.defaultModel.provider, modelId: profile.defaultModel.modelId, thinkingLevel: profile.defaultModel.thinkingLevel } };
     },

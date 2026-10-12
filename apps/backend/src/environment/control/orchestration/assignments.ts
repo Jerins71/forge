@@ -5,9 +5,6 @@ import type { CoreCommand, CoreState, Decision, LifecycleEvent, Run } from "./ty
 
 export interface AssignmentSelection {
   specialistId?: string;
-  rosterId?: string;
-  rosterRevision?: number;
-  routeId?: string;
   provider: string;
   modelId: string;
   /** Ordered, preflighted availability/capacity/security facts; no I/O in policy. */

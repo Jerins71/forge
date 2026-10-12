@@ -28,31 +28,14 @@ export function formatSessionPlanModelContext(snapshot: SessionPlanSnapshot): st
             ...(node.acceptanceCriteria
               ? { acceptanceCriteria: truncateContextText(node.acceptanceCriteria, 300) }
               : {}),
-            route: node.route,
-            ...(node.effort ? { legacyEffort: node.effort } : {}),
+            ...(node.preset ? { preset: node.preset } : {}),
             ...(latestAttempt ? {
               latestAttempt: {
                 number: latestAttempt.number,
                 status: latestAttempt.status,
                 ...(latestAttempt.workerId ? { workerId: latestAttempt.workerId } : {}),
-                behaviorMode: latestAttempt.behaviorMode,
-                ...(latestAttempt.requestedRoute
-                  ? { requestedRoute: latestAttempt.requestedRoute }
-                  : {}),
-                ...(latestAttempt.resolvedRouteId
-                  ? { resolvedRouteId: latestAttempt.resolvedRouteId }
-                  : {}),
-                ...(latestAttempt.resolvedRouteLabel
-                  ? { resolvedRouteLabel: latestAttempt.resolvedRouteLabel }
-                  : {}),
-                ...(latestAttempt.rosterId ? { rosterId: latestAttempt.rosterId } : {}),
-                ...(latestAttempt.rosterRevision
-                  ? { rosterRevision: latestAttempt.rosterRevision }
-                  : {}),
+                ...(latestAttempt.preset ? { preset: latestAttempt.preset } : {}),
                 ...(latestAttempt.model ? { model: latestAttempt.model } : {}),
-                ...(latestAttempt.executionPolicy
-                  ? { legacyExecutionPolicy: latestAttempt.executionPolicy }
-                  : {}),
                 ...(latestAttempt.summary
                   ? { summary: truncateContextText(latestAttempt.summary, 600) }
                   : {}),

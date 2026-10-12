@@ -44,7 +44,6 @@ import {
   createRuntimeLifecycleControllerHostCallbacks,
   SwarmRuntimeLifecycleCoordinator,
 } from "./swarm-runtime-lifecycle-coordinator.js";
-import { SpecialistFallbackPolicy } from "./specialist-fallback-policy.js";
 import type { SwarmToolHost } from "./swarm-tool-host.js";
 import { SwarmWorkerHealthService } from "./swarm-worker-health-service.js";
 import { getManagedModelProviderCredentialAvailability } from "./secrets-env-service.js";
@@ -228,7 +227,6 @@ export class SwarmManagerRuntimeComposition {
   readonly runtimeController: SwarmRuntimeController;
   readonly assistantOutput: AssistantOutputRouter;
   readonly workerHealth: SwarmWorkerHealthService;
-  readonly specialistFallback: SpecialistFallbackPolicy;
 
   private plans: SessionPlanCoordinator | undefined;
   private goalCoordinator: SessionGoalCoordinator | undefined;
@@ -256,7 +254,6 @@ export class SwarmManagerRuntimeComposition {
       logDebug: options.events.logDebug,
     });
     this.workerHealth = this.createWorkerHealth();
-    this.specialistFallback = this.createSpecialistFallback();
   }
   get runtimes(): Map<string, SwarmAgentRuntime> {
     return this.runtimeController.runtimes;
@@ -446,11 +443,6 @@ export class SwarmManagerRuntimeComposition {
       onHealthSweep: () => this.requireRuntimeLifecycle().runLivenessHealthSweep(),
       logDebug: events.logDebug,
     });
-  }
-
-  private createSpecialistFallback(): SpecialistFallbackPolicy {
-    const {state,resolution}=this.options;
-    return new SpecialistFallbackPolicy({dataDir:state.config.paths.dataDir,descriptors:state.descriptors,resolveSpecialistRosterForProfile:resolution.resolveSpecialistRosterForProfile,resolveSpecialistRosterForManager:resolution.resolveSpecialistRosterForManager,resolveSpawnModelWithCapacityFallback:resolution.resolveSpawnModelWithCapacityFallback});
   }
 
   private createTurnContext() {

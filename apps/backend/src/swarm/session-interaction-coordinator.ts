@@ -19,7 +19,6 @@ import type {
   UpdateWorkGraphInput,
   WorkGraphDispatchClaim,
 } from "./planning/work-graph-state.js";
-import { resolveManagerDelegation } from "./specialists/delegation-policy.js";
 import { normalizeSpecialistHandle } from "./agents/specialists/specialist-registry.js";
 import type { SwarmAgentLifecycleService } from "./swarm-agent-lifecycle-service.js";
 import type { SwarmChoiceService } from "./swarm-choice-service.js";
@@ -302,25 +301,8 @@ export class SessionInteractionCoordinator {
             claim.attemptId,
             spawned.agentId,
             {
-              ...(internalWorker.delegationRouteId
-                ? { resolvedRouteId: internalWorker.delegationRouteId }
-                : {}),
-              ...(internalWorker.delegationRouteLabel
-                ? { resolvedRouteLabel: internalWorker.delegationRouteLabel }
-                : {}),
-              ...(internalWorker.delegationRosterId
-                ? { rosterId: internalWorker.delegationRosterId }
-                : {}),
-              ...(internalWorker.delegationRosterRevision
-                ? { rosterRevision: internalWorker.delegationRosterRevision }
-                : {}),
+              ...(claim.preset ? { preset: claim.preset } : {}),
               model: { ...internalWorker.model },
-              ...(internalWorker.delegationCapabilityEscalationRouteId
-                ? {
-                    capabilityEscalationRouteId:
-                      internalWorker.delegationCapabilityEscalationRouteId,
-                  }
-                : {}),
             },
           );
           await this.options.sendMessage(callerAgentId, spawned.agentId, initialMessage!, "auto", {
@@ -331,10 +313,7 @@ export class SessionInteractionCoordinator {
           dispatched.push({
             nodeId: claim.nodeId,
             workerId: spawned.agentId,
-            requestedRoute: claim.requestedRoute,
-            ...(spawned.delegationRouteId
-              ? { resolvedRouteId: spawned.delegationRouteId }
-              : {}),
+            ...(claim.preset ? { preset: claim.preset } : {}),
           });
         });
       } catch (error) {
@@ -665,7 +644,7 @@ function resolveGraphDispatch(claim: WorkGraphDispatchClaim, cwd: string): Spawn
         claim.dependencyContext,
       ].join("\n\n")
     : "";
-  return resolveManagerDelegation({
+  return {
     agentId: claim.agentId,
     initialMessage: [
       `Work graph node ${claim.nodeId}: ${claim.title}`,
@@ -674,14 +653,10 @@ function resolveGraphDispatch(claim: WorkGraphDispatchClaim, cwd: string): Spawn
       dependencies,
       acceptance,
     ].filter(Boolean).join("\n\n"),
-    mode: claim.behaviorMode,
-    route: claim.requestedRoute,
-    ...(claim.legacyExecutionPolicy
-      ? { executionPolicy: claim.legacyExecutionPolicy }
-      : {}),
+    ...(claim.preset ? { preset: claim.preset } : {}),
     planStep: claim.nodeId,
     cwd,
-  }).spawnInput;
+  };
 }
 
 function errorMessage(error: unknown): string {

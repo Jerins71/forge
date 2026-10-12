@@ -56,7 +56,6 @@ const capabilities: EnvironmentCapabilities = {
   projectPolicy: true,
   contextTransfers: true,
   resendUndelivered: true,
-  launchDelegation: true,
 };
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
   const descriptor: EnvironmentDescriptor = {

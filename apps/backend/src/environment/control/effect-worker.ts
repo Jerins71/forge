@@ -6,7 +6,7 @@ import type { ControlCoreOptions, ControlEffect, EffectRow } from "./effect-type
 import type { EventSink } from "./event-sink.js";
 import { cancelCommand, readReceipt } from "./command-service.js";
 import { loadState, rebuildLifecycleProjections } from "./orchestration/store.js";
-import { isLineageTransfer, planTransferResolution, entryIdentity, resolveSourcePoint, handoffSourcePoints } from "./orchestration/transfers.js";
+import { isLineageTransfer, planTransferResolution, entryIdentity, handoffSourcePoints } from "./orchestration/transfers.js";
 import { materializeHandoff, readHandoff } from "./orchestration/handoff-materializer.js";
 import type { CoreCommand, CoreEffect, Run } from "./orchestration/types.js";
 import { requestForChoice } from "./orchestration/request-projection.js";
@@ -61,30 +61,12 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     record({ type: "binding.drained", ...result(row, "drain-failed"), threadId: effect.threadId, bindingId: effect.bindingId, status: "pending" });
     settle(row, "interrupted", unconfirmedRelease);
   };
-  const fallbackSelections=new Map<string,Promise<void>>();
-  const selectFallback=(threadId:string,attemptId:string,message:string):Promise<void>=>{
-    const pending=fallbackSelections.get(attemptId);if(pending) return pending;
-    const task=(async()=>{
-      if(!options.swarm.selectProviderFallback || !options.swarm.readTransferEntries) return;
-      const state=loadState(database),attempt=state.attempts[attemptId],run=attempt && state.runs[attempt.runId];
-      if(!attempt || !run || attempt.delivery!=="pending" || run.outcome!=="failed" || run.activeAttemptId!==attemptId || (run.fallbackCount ?? 0)>=1) return;
-      try {
-        const model=await options.swarm.selectProviderFallback(threadId,state.threads[threadId].model);
-        if(model && !stopped) {
-          const entries=await options.swarm.readTransferEntries(threadId);
-          if(stopped) return;
-          record({type:"transfer.fallback",commandId:`fallback:${attemptId}`,now:options.clock(),threadId,failedAttemptId:attemptId,attemptId:options.random(),bindingId:options.random(),transferId:`fallback:${attemptId}`,targetModel:model,source:resolveSourcePoint(loadState(database),threadId,{kind:"run",runId:run.runId},entries),reason:`Primary provider failed before dispatch: ${message.slice(0,3000)}; selected configured specialist fallback`});
-        }
-      } catch { /* Policy/materialization failure retains the terminal provider failure. */ }
-    })();fallbackSelections.set(attemptId,task);void task.finally(()=>fallbackSelections.delete(attemptId));return task;
-  };
   const startObservations = (binding: ProviderBinding, adapter: ProviderAdapter, stop: AbortController) => {
     const task = (async () => {
       try {
         for await (const observation of adapter.observations(binding, stop.signal)) {
           if (stop.signal.aborted || stopped) break;
           record({ type: "provider.observe", commandId: `observation:${binding.scope.bindingId}:${binding.scope.generation}:${observation.attemptId}:${observation.sequence}`, now: options.clock(), observation });
-          if(observation.type==="error" && observation.delivery==="not_dispatched" && observation.origin.kind==="root") await selectFallback(binding.scope.threadId,observation.attemptId,observation.message);
         }
       } catch {
         if (!stop.signal.aborted && !stopped) {
@@ -378,10 +360,6 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
       if (effect.kind === "provider.steer" && !attemptedNative && loadState(database).attempts[effect.attemptId]?.state === "created") {
         settle(row, "done"); return;
       }
-      if(effect.kind==="provider.start" && attemptId) {
-        if(provedNotDispatched) await selectFallback(effect.threadId,attemptId,failure.message);
-        else await fallbackSelections.get(attemptId);
-      }
       settle(row, attemptedNative ? "interrupted" : "failed", failure);
       // Acquisition/start effects may be created by a core command rather than
       // the user's command. Preserve the underlying failure on its owning input.
@@ -410,7 +388,7 @@ export function createEffectWorker(sink: EventSink, options: ControlCoreOptions)
     bootId,
     start() { if (!reconciled || stopped) throw new Error("Reconcile before starting effects"); started = true; unsubscribe ??= sink.subscribeCommit(kick); kick(); },
     drain: () => drainEffects(),
-    async stop() { stopped = true; started = false; unsubscribe?.(); clearTimeout(wake); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations,...fallbackSelections.values()]); },
+    async stop() { stopped = true; started = false; unsubscribe?.(); clearTimeout(wake); for (const resource of live.values()) resource.stop.abort(); await draining; await Promise.allSettled([...observations]); },
     async reconcileOnBoot() {
       if (reconciled) return; if (started || draining) throw new Error("Boot reconciliation precedes execution");
       rebuildLifecycleProjections(database);

@@ -1,20 +1,13 @@
-import type { TierConfig } from "@forge/protocol";
 import { normalizeArchetypeId, type PromptRegistry } from "./prompts/prompt-registry.js";
 import { ProjectResourceSettingsStore } from "./project-resource-settings.js";
 import { ProjectWorkspaceResolver } from "./project-workspace-resolver.js";
 import { classifyRuntimeCapacityError } from "./runtime/runtime-utils.js";
 import type { SkillMetadata, SkillMetadataService } from "./skills/skill-metadata-service.js";
 import {
-  generateRosterBlock,
   normalizeSpecialistHandle,
   resolveRoster,
-  resolveTierConfigs,
   resolveWorkspaceRoster,
 } from "./agents/specialists/specialist-registry.js";
-import {
-  formatDelegationRosterModelContext,
-  resolveDelegationRosterForManager,
-} from "./specialists/delegation-roster-store.js";
 import type {
   AgentDescriptor,
   SpawnAgentInput,
@@ -43,9 +36,6 @@ export interface ResolvedSpecialistDefinitionLike {
   modelId?: string;
   provider?: string;
   reasoningLevel?: SwarmReasoningLevel;
-  fallbackModelId?: string;
-  fallbackProvider?: string;
-  fallbackReasoningLevel?: SwarmReasoningLevel;
   webSearch?: boolean;
   promptBody: string;
   available: boolean;
@@ -55,8 +45,6 @@ export interface ResolvedSpecialistDefinitionLike {
 
 export interface SpecialistRegistryModule {
   resolveRoster(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
-  generateRosterBlock(roster: ResolvedSpecialistDefinitionLike[], tierConfigs?: readonly TierConfig[]): string;
-  resolveTierConfigs(): Promise<TierConfig[]>;
   normalizeSpecialistHandle(value: string): string;
 }
 
@@ -170,8 +158,6 @@ export class PromptResourceCoordinator {
       this.specialistRegistryModulePromise = Promise.resolve({
         resolveRoster: (profileId) =>
           resolveRoster(profileId, dataDir) as Promise<ResolvedSpecialistDefinitionLike[]>,
-        generateRosterBlock: generateRosterBlock as SpecialistRegistryModule["generateRosterBlock"],
-        resolveTierConfigs: () => resolveTierConfigs(dataDir),
         normalizeSpecialistHandle,
       });
     }
@@ -199,12 +185,6 @@ export class PromptResourceCoordinator {
       workspace?.repoRootResources.specialistsDir,
     );
     return this.options.applySpecialistAvailability(roster, manager.agentId);
-  }
-
-  async buildDelegationRosterModelContext(manager: AgentDescriptor): Promise<string> {
-    return formatDelegationRosterModelContext(
-      await resolveDelegationRosterForManager(this.options.config.paths.dataDir, manager),
-    );
   }
 
   async resolveProjectWorkspaceForManager(manager: AgentDescriptor) {

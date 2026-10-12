@@ -15,7 +15,7 @@ import { loadState } from "./orchestration/store.js";
 import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
-  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "markControlledTurnStopped" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession"|"resolveSpecialistFallbackModelForDescriptor">;
+  swarmManager: Pick<SwarmManager, "ensureControlledSession" | "applyControlledInput" | "acquireControlledProvider" | "applyControlledChoice" | "releaseControlledProvider" | "markControlledTurnStopped" | "getAgentForInternalUse" | "listProfiles" | "installAuthoritativeInputOwner" | "enqueueControlledPresentation" | "extractWorkerRunResult" | "prepareControlledWorkerResult" | "appendControlledBlockedResult" | "installControlledTurnProjection" | "reflectControlledTurns" | "installProviderScopeOwner" | "installControlledChoicePort"> & Pick<SwarmManager,"installCoreAgentMessagePort"|"installCoreLineagePort"|"getConversationHistory"|"prepareLineageSession">;
   database: Database;
   eventSink: EventSink;
   controlService: EnvironmentControlService;
@@ -100,8 +100,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
     async ensureSession(input) {
       const defaultModel = swarmManager.listProfiles().find(profile => profile.profileId === input.projectId)?.defaultModel;
-      const { model, delegation, ...identity } = input;
-      await swarmManager.ensureControlledSession({ ...identity, ...(delegation?.managerPosture ? { managerPosture: delegation.managerPosture } : {}), ...(delegation?.rosterId ? { delegationRosterId: delegation.rosterId } : {}), ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
+      const { model, ...identity } = input;
+      await swarmManager.ensureControlledSession({ ...identity, ...(model ? { model: { ...model, thinkingLevel: model.thinkingLevel ?? defaultModel?.thinkingLevel ?? "medium" } } : {}) });
       return { materialized: true };
     },
     enqueuePresentation:(threadId,runId,presentation) => swarmManager.enqueueControlledPresentation(threadId,runId,presentation),
@@ -114,11 +114,6 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     acquireProvider: (scope, conversation,model) => swarmManager.acquireControlledProvider(scope, conversation,model),
     readTransferEntries,
     prepareLineageSession: input=>swarmManager.prepareLineageSession(input),
-    selectProviderFallback: async (threadId,currentModel)=>{
-      const descriptor=swarmManager.getAgentForInternalUse(threadId);if(!descriptor) return;
-      const fallback=await swarmManager.resolveSpecialistFallbackModelForDescriptor(descriptor);
-      return fallback && (fallback.provider!==currentModel?.provider || fallback.modelId!==currentModel?.modelId) ? fallback:undefined;
-    },
     async applyInput(input) {
       const attachments = await artifactService.attachmentsForInput(input.inputId);
       const original = input.resendOfCommandId ? database.prepare("SELECT input_id,command_id,canonical_entry_id FROM control_inputs WHERE command_id=?").get(input.resendOfCommandId) as { input_id: string; command_id: string; canonical_entry_id: string | null } : undefined;

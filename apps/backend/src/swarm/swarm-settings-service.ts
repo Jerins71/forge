@@ -5,7 +5,6 @@ import {
   type OpenAIBrokerTestResponse,
   type RedeemOpenAIBrokerInviteRequest,
   type UpdateOpenAIBrokerSettingsRequest,
-  isSystemProfile,
   getCatalogModelKey,
   type ContextMode,
   type CredentialPoolState,

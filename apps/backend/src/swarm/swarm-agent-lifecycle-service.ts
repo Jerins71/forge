@@ -1,9 +1,8 @@
 import type { AssignmentSelection } from "../environment/control/orchestration/assignments.js";
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
-import { blocksOpenRouterFallback } from "./runtime/pi/openrouter-request-policy.js";
 import type { ManagerExactModelSelection } from "@forge/protocol";
 import { getSessionFilePath, getWorkerSessionFilePath } from "./data-paths.js";
-import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, inferProviderFromModelId, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
+import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
 import {
   DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
   type RuntimeAcquisitionRequirements,
@@ -71,10 +70,6 @@ import {
 import { RETIRED_PROFILE_IDS } from "./agents/descriptor-store/descriptor-codec.js";
 
 const MANAGER_ARCHETYPE_ID = "manager";
-
-function getDefaultReasoningLevelForModel(provider: string, modelId: string): string {
-  return modelCatalogService.getModel(modelId, provider)?.defaultReasoningLevel ?? "xhigh";
-}
 
 interface ResolvedSpecialistDefinitionLike {
   specialistId: string;

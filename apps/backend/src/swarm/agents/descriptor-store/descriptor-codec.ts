@@ -188,9 +188,7 @@ function decodePersistedProfiles(
     } = candidate as ManagerProfile & Record<string, unknown>;
     const profileHint = typeof rest.profileId === "string" ? `profileId=${rest.profileId}` : "profileId=<unknown>";
     const normalized: ManagerProfile & Record<string, unknown> = { ...rest };
-    let droppedUnknown = false;
     if (defaultContextMode !== undefined && !isContextMode(defaultContextMode)) {
-      droppedUnknown = true;
       warn(
         `[swarm] Dropping unknown defaultContextMode (${profileHint}) in ${storeFilePath}; keeping the profile without a persisted default.`
       );
@@ -199,13 +197,8 @@ function decodePersistedProfiles(
     }
     if (secureSessionsEnabled !== undefined) {
       normalized.secureSessionsEnabled = secureSessionsEnabled === true;
-      if (typeof secureSessionsEnabled !== "boolean") droppedUnknown = true;
     }
-    if (droppedUnknown) {
-      profiles.push(cloneProfile(normalized as unknown as ManagerProfile));
-      continue;
-    }
-    profiles.push(cloneProfile(candidate as unknown as ManagerProfile));
+    profiles.push(cloneProfile(normalized as unknown as ManagerProfile));
   }
   return profiles;
 }

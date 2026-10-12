@@ -97,7 +97,6 @@ import type {
 } from "./user-message-coordinator.js";
 import type {
   AgentDescriptor,
-  AgentModelDescriptor,
   ChoiceAnswer,
   ChoiceQuestion,
   ChoiceRequestStatus,
@@ -1121,14 +1120,6 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
             : {}),
         } satisfies CodexTransportDebugAgentDiagnostics;
       });
-  }
-
-  resolveSpecialistFallbackModelForDescriptor(
-    descriptor: AgentDescriptor,
-  ): Promise<AgentModelDescriptor | undefined> {
-    return this.services.runtime.specialists.resolveSpecialistFallbackModelForDescriptor(
-      descriptor,
-    );
   }
 
   getWorkerActivity(

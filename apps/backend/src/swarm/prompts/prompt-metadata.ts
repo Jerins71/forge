@@ -37,16 +37,12 @@ export const PROMPT_METADATA: PromptMetadataEntry[] = [
     variables: [
       { name: 'SWARM_MEMORY_FILE', description: "Path to the agent's memory file" },
       {
-        name: 'MANAGER_POSTURE',
-        description: 'Selected manager operating posture composed by Forge.',
-      },
-      {
         name: 'MODEL_SPECIFIC_INSTRUCTIONS',
         description: 'Optional user-authored instructions for the active manager model.',
       },
       {
-        name: 'SPECIALIST_ROSTER',
-        description: 'Specialist roster block injected into manager prompts when specialists are enabled.',
+        name: 'WORKER_PRESETS',
+        description: 'Worker preset list the manager can pass to spawn_agent.',
       },
     ],
   },

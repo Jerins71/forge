@@ -2,7 +2,6 @@ import { access, copyFile, mkdir, readdir, readFile, unlink } from "node:fs/prom
 import { join } from "node:path";
 import type { Dirent } from "node:fs";
 import { isEnoentError, isNotDirLikeMissingError } from "../../../utils/fs-errors.js";
-import { writeFileAtomic } from "../../../utils/atomic-files.js";
 import type { ResolvedSpecialistDefinition } from "@forge/protocol";
 import {
   inferProviderFromModelId,

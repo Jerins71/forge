@@ -1,13 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto'
 import {
   WORK_GRAPH_ATTEMPT_STATUSES,
-  DELEGATION_BEHAVIOR_MODES,
-  WORK_GRAPH_EFFORTS,
+  isWorkerPresetName,
   WORK_GRAPH_NODE_KINDS,
   WORK_GRAPH_NODE_STATUSES,
   type PlanStep,
   type WorkGraphAttempt,
-  type WorkGraphEffort,
   type WorkGraphNode,
   type WorkGraphNodeKind,
   type WorkGraphNodeStatus,
@@ -32,9 +30,8 @@ export interface WorkGraphNodeInput {
   status: WorkGraphNodeStatus
   dependsOn?: string[]
   acceptanceCriteria?: string
-  route?: string
-  /** @deprecated Compatibility input for persisted pre-roster graphs. */
-  effort?: WorkGraphEffort
+  /** Worker preset. Omitted means the manager's own model. */
+  preset?: string
 }
 
 export interface UpdateWorkGraphInput {
@@ -56,18 +53,12 @@ export interface WorkGraphDispatchClaim {
   task: string
   acceptanceCriteria?: string
   dependencyContext?: string
-  behaviorMode: WorkGraphAttempt['behaviorMode']
-  requestedRoute: string
-  legacyExecutionPolicy?: NonNullable<WorkGraphAttempt['executionPolicy']>
+  preset?: string
 }
 
 export interface WorkGraphDispatchResolution {
-  resolvedRouteId?: string
-  resolvedRouteLabel?: string
-  rosterId?: string
-  rosterRevision?: number
+  preset?: string
   model?: WorkGraphAttempt['model']
-  capabilityEscalationRouteId?: string
 }
 
 export class WorkGraphValidationError extends Error {
@@ -284,18 +275,13 @@ export function claimReadyWorkGraphNodes(
   const now = options.now()
   const nodes = graph.nodes.map((node) => {
     if (!readyIds.has(node.id)) return node
-    const dispatch = resolveWorkGraphDispatch(node)
     const attemptId = (options.randomId ?? randomUUID)()
     const attempt: WorkGraphAttempt = {
       id: attemptId,
       number: node.attempts.length + 1,
       status: 'dispatching',
       startedAt: now,
-      behaviorMode: dispatch.behaviorMode,
-      requestedRoute: dispatch.requestedRoute,
-      ...(dispatch.legacyExecutionPolicy
-        ? { executionPolicy: dispatch.legacyExecutionPolicy }
-        : {}),
+      ...(node.preset ? { preset: node.preset } : {}),
     }
     claims.push({
       nodeId: node.id,
@@ -305,7 +291,7 @@ export function claimReadyWorkGraphNodes(
       task: node.task,
       ...(node.acceptanceCriteria ? { acceptanceCriteria: node.acceptanceCriteria } : {}),
       ...buildDependencyContext(node, graph),
-      ...dispatch,
+      ...(node.preset ? { preset: node.preset } : {}),
     })
     return {
       ...node,
@@ -520,46 +506,6 @@ export function blockInterruptedWorkGraphWorkers(
   }
 }
 
-export function resolveWorkGraphDispatch(node: WorkGraphNode): {
-  behaviorMode: WorkGraphAttempt['behaviorMode']
-  requestedRoute: string
-  legacyExecutionPolicy?: NonNullable<WorkGraphAttempt['executionPolicy']>
-} {
-  const behaviorMode = node.kind === 'research'
-    ? 'research'
-    : node.kind === 'plan'
-      ? 'plan'
-      : node.kind === 'design-review'
-        ? 'design-review'
-        : node.kind === 'review'
-          ? 'correctness-review'
-          : 'general'
-  const lastAttempt = currentAttempt(node)
-  const configuredRoute = node.route ?? 'auto'
-  const requestedRoute = lastAttempt?.status === 'blocked'
-    ? configuredRoute !== 'auto' && configuredRoute !== lastAttempt.requestedRoute
-      ? configuredRoute
-      : lastAttempt.capabilityEscalationRouteId
-        ?? (
-          lastAttempt.requestedRoute && lastAttempt.requestedRoute !== 'auto'
-            ? lastAttempt.requestedRoute
-            : configuredRoute
-        )
-    : configuredRoute
-  const legacyExecutionPolicy = node.effort && node.effort !== 'auto'
-    ? node.effort
-    : lastAttempt?.status === 'blocked'
-      && !lastAttempt.requestedRoute
-      && lastAttempt.executionPolicy
-      ? 'deep'
-      : undefined
-  return {
-    behaviorMode,
-    requestedRoute,
-    ...(legacyExecutionPolicy ? { legacyExecutionPolicy } : {}),
-  }
-}
-
 function normalizeNode(
   value: unknown,
   index: number,
@@ -616,16 +562,7 @@ function normalizeNode(
     `nodes[${index}].acceptanceCriteria`,
     MAX_WORK_GRAPH_ACCEPTANCE_LENGTH,
   )
-  const route = normalizeRoute(node.route, index, current?.route)
-  const effort = node.effort ?? current?.effort
-  if (
-    effort !== undefined
-    && (typeof effort !== 'string' || !WORK_GRAPH_EFFORTS.includes(effort as WorkGraphEffort))
-  ) {
-    throw new WorkGraphValidationError(
-      `nodes[${index}].effort must be one of: ${WORK_GRAPH_EFFORTS.join(', ')}.`,
-    )
-  }
+  const preset = normalizePreset(node, index, current?.preset)
   if (kind === 'decision' && status === 'pending') {
     throw new WorkGraphValidationError(
       `nodes[${index}] is a decision gate and must use status=waiting until resolved.`,
@@ -640,8 +577,7 @@ function normalizeNode(
       || kind !== current.kind
       || !sameValues(dependsOn, current.dependsOn)
       || acceptanceCriteria !== current.acceptanceCriteria
-      || route !== current.route
-      || effort !== current.effort
+      || preset !== current.preset
     )
   ) {
     throw new WorkGraphValidationError(
@@ -669,8 +605,7 @@ function normalizeNode(
       : (now ? { statusUpdatedAt: now() } : {})),
     dependsOn,
     ...(acceptanceCriteria ? { acceptanceCriteria } : {}),
-    route,
-    ...(effort ? { effort: effort as WorkGraphEffort } : {}),
+    ...(preset ? { preset } : {}),
     attempts,
   }
 }
@@ -706,44 +641,8 @@ function normalizeAttempts(value: unknown, nodeIndex: number): WorkGraphAttempt[
       ? undefined
       : normalizeTimestamp(record.completedAt, `${field}.completedAt`)
     const workerId = normalizeOptionalText(record.workerId, `${field}.workerId`, 160)
-    if (
-      typeof record.behaviorMode !== 'string'
-      || !DELEGATION_BEHAVIOR_MODES.includes(
-        record.behaviorMode as WorkGraphAttempt['behaviorMode'],
-      )
-    ) {
-      throw new WorkGraphValidationError(`${field}.behaviorMode is not supported.`)
-    }
-    const requestedRoute = normalizeOptionalText(
-      record.requestedRoute,
-      `${field}.requestedRoute`,
-      64,
-    )
-    const executionPolicy = record.executionPolicy
-    if (
-      executionPolicy !== undefined
-      && executionPolicy !== 'support'
-      && executionPolicy !== 'routine'
-      && executionPolicy !== 'deep'
-    ) {
-      throw new WorkGraphValidationError(`${field}.executionPolicy is not supported when present.`)
-    }
-    if (!requestedRoute && executionPolicy === undefined) {
-      throw new WorkGraphValidationError(
-        `${field} must contain requestedRoute or legacy executionPolicy.`,
-      )
-    }
-    const resolvedRouteId = normalizeOptionalText(record.resolvedRouteId, `${field}.resolvedRouteId`, 64)
-    const resolvedRouteLabel = normalizeOptionalText(record.resolvedRouteLabel, `${field}.resolvedRouteLabel`, 80)
-    const rosterId = normalizeOptionalText(record.rosterId, `${field}.rosterId`, 64)
-    const rosterRevision = record.rosterRevision === undefined
-      ? undefined
-      : normalizeInteger(record.rosterRevision, `${field}.rosterRevision`, 1, 1_000_000)
-    const capabilityEscalationRouteId = normalizeOptionalText(
-      record.capabilityEscalationRouteId,
-      `${field}.capabilityEscalationRouteId`,
-      64,
-    )
+    // Attempts written before worker presets recorded a route; its id is the preset name.
+    const preset = [record.preset, record.resolvedRouteId].find(isWorkerPresetName)
     const model = normalizeAttemptModel(record.model, field)
     const summary = normalizeOptionalText(
       record.summary,
@@ -757,15 +656,8 @@ function normalizeAttempts(value: unknown, nodeIndex: number): WorkGraphAttempt[
       startedAt,
       ...(completedAt ? { completedAt } : {}),
       ...(workerId ? { workerId } : {}),
-      behaviorMode: record.behaviorMode as WorkGraphAttempt['behaviorMode'],
-      ...(requestedRoute ? { requestedRoute } : {}),
-      ...(resolvedRouteId ? { resolvedRouteId } : {}),
-      ...(resolvedRouteLabel ? { resolvedRouteLabel } : {}),
-      ...(rosterId ? { rosterId } : {}),
-      ...(rosterRevision ? { rosterRevision } : {}),
+      ...(preset ? { preset } : {}),
       ...(model ? { model } : {}),
-      ...(capabilityEscalationRouteId ? { capabilityEscalationRouteId } : {}),
-      ...(executionPolicy ? { executionPolicy } : {}),
       ...(summary ? { summary } : {}),
     }
   })
@@ -871,22 +763,24 @@ function normalizeDependencies(value: unknown, index: number): string[] {
   return dependencies
 }
 
-function normalizeRoute(
-  value: unknown,
+function normalizePreset(
+  node: Record<string, unknown>,
   index: number,
-  currentRoute: string | undefined,
-): string {
-  const candidate = value === undefined ? currentRoute ?? 'auto' : value
-  if (typeof candidate !== 'string') {
-    throw new WorkGraphValidationError(`nodes[${index}].route must be a string.`)
+  currentPreset: string | undefined,
+): string | undefined {
+  if (node.preset === undefined) {
+    // Graphs persisted before worker presets named a route; its id is the preset name.
+    return isWorkerPresetName(node.route) && node.route !== 'auto' ? node.route : currentPreset
   }
-  const route = candidate.trim()
-  if (!/^(auto|[a-z0-9][a-z0-9-]{0,63})$/.test(route)) {
-    throw new WorkGraphValidationError(
-      `nodes[${index}].route must be auto or a lowercase route id.`,
-    )
+  if (typeof node.preset !== 'string') {
+    throw new WorkGraphValidationError(`nodes[${index}].preset must be a string.`)
   }
-  return route
+  const preset = node.preset.trim()
+  if (preset === '') return undefined
+  if (!isWorkerPresetName(preset)) {
+    throw new WorkGraphValidationError(`nodes[${index}].preset must be a lowercase preset name.`)
+  }
+  return preset
 }
 
 function normalizeAttemptModel(

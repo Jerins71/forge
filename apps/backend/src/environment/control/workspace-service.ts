@@ -6,7 +6,6 @@ import { promisify } from "node:util";
 import type Database from "better-sqlite3";
 import type { RepositoryIdentity, WorkspaceStrategy } from "@forge/protocol/environment-v2";
 import { getEnvironmentWorktreesDir } from "../../swarm/storage/data-paths.js";
-import { resolveDelegationRosterSettings } from "../../swarm/specialists/delegation-roster-store.js";
 
 import type { WorkspacePort, PreparedLaunch } from "./effect-types.js";
 import type { SwarmManager } from "../../swarm/swarm-manager.js";
@@ -77,8 +76,6 @@ export function createWorkspaceService({ database, dataDir, swarmManager }: { da
   const service: WorkspaceService = {
     async prepareLaunch(input) {
       const { profile, descriptor, revision } = currentProject(input.projectId);
-      const rosterId = input.delegation?.rosterId;
-      if (rosterId && !(await resolveDelegationRosterSettings(dataDir)).rosters.some(roster => roster.rosterId === rosterId)) throw failure("INVALID_INPUT", "The chosen roster is not available on this machine.");
       const reserved = await service.preflight({ commandId: input.commandId, sessionId: `v2-${input.commandId}`, cwd: descriptor.cwd, strategy: input.workspaceStrategy });
       let isGit = false; let defaultBranch: string | null = null;
       try { await repository(descriptor.cwd); isGit = true; defaultBranch = await git(descriptor.cwd, ["symbolic-ref", "--short", "HEAD"]); } catch { /* Non-Git profiles are valid current checkouts. */ }

@@ -10,39 +10,20 @@ import {
   resolveOwningManagerId,
 } from "./context-mode.js";
 import type { SwarmManagerFacadeServices } from "./swarm-manager-facade-services.js";
-import type { SwarmConfigurationCoordinator } from "./swarm-configuration-coordinator.js";
 import { SwarmManagerSecureSessionsFacade } from "./secure-sessions/swarm-manager-secure-sessions-facade.js";
 import { TaskNotesStore } from "./task-notes-store.js";
 import type { AgentDescriptor, ManagerProfile } from "./types.js";
 
-/** Stateless public facade for manager posture, delegation-roster, and context-mode settings. */
+/** Stateless public facade for worker-preset and context-mode settings. */
 export abstract class SwarmManagerDelegationFacade extends SwarmManagerSecureSessionsFacade {
   protected abstract getFacadeServices(): SwarmManagerFacadeServices;
 
-  updateProjectDelegationDefaults(
-    profileId: string,
-    updates: Parameters<SwarmConfigurationCoordinator["updateProjectDelegationDefaults"]>[1],
-  ): Promise<void> {
-    return this.configuration.updateProjectDelegationDefaults(profileId, updates);
+  getWorkerPresetSettings() {
+    return this.configuration.getWorkerPresetSettings();
   }
 
-  getDelegationRosterSettings() {
-    return this.configuration.getDelegationRosterSettings();
-  }
-
-  saveDelegationRosterSettings(input: unknown) {
-    return this.configuration.saveDelegationRosterSettings(input);
-  }
-
-  applyRecommendedManagerDefaults() {
-    return this.configuration.applyRecommendedManagerDefaults();
-  }
-
-  updateSessionDelegation(
-    sessionAgentId: string,
-    updates: Parameters<SwarmConfigurationCoordinator["updateSessionDelegation"]>[1],
-  ): Promise<void> {
-    return this.configuration.updateSessionDelegation(sessionAgentId, updates);
+  saveWorkerPresetSettings(input: unknown) {
+    return this.configuration.saveWorkerPresetSettings(input);
   }
 
   getProjectContextMode(profileId: string): { profileId: string; mode: ContextMode } {

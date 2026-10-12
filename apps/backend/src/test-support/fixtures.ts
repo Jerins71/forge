@@ -32,29 +32,6 @@ export function createDeferred<T = void>(): Deferred<T> {
   return { promise, resolve, reject }
 }
 
-export function splitDelegationRosterRuntimeContext(
-  input: string,
-): DelegationRosterRuntimeContext {
-  const marker = '\n\n[delegationRoster] '
-  const markerIndex = input.indexOf(marker)
-  if (markerIndex < 0) {
-    throw new Error('Expected manager runtime input to include a delegation roster context.')
-  }
-
-  const valueStart = markerIndex + marker.length
-  const lineEnd = input.indexOf('\n', valueStart)
-  const serialized = input.slice(valueStart, lineEnd < 0 ? input.length : lineEnd)
-  const parsed = JSON.parse(serialized) as unknown
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Expected delegation roster context to contain a JSON object.')
-  }
-
-  return {
-    message: `${input.slice(0, markerIndex)}${lineEnd < 0 ? '' : input.slice(lineEnd)}`,
-    roster: parsed as Record<string, unknown>,
-  }
-}
-
 export interface AgentDescriptorFixtureOptions extends Partial<AgentDescriptor> {
   agentId: string
   role?: AgentDescriptor['role']

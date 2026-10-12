@@ -518,7 +518,6 @@ export function createCommandService(sink: EventSink, options: ControlCoreOption
               title: launch.title,
               cwd: prepared.cwd,
               model: prepared.model,
-              ...(launch.delegation ? { delegation: launch.delegation } : {}),
               ...(launch.cli ? { cli: launch.cli } : {}),
             },
           },

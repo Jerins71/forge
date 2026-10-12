@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
-import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type TierConfig, type InstructionBundle, type InstructionSource } from "@forge/protocol";
+import { isRepoProjectAgentSource, type PromptPreviewResponse, type PromptPreviewSection, type InstructionBundle, type InstructionSource } from "@forge/protocol";
 import { assembleRuntimeInstructionBundle, discoverAgentsMd } from "./runtime-prompt-assembler.js";
 import { appendInstructionParts, createInstructionBundle, instructionSource, renderInstructionBundle, reviseInstructionBundle } from "./runtime/instruction-bundle.js";
 import { isSessionAgentDescriptor } from "./agent-directory.js";
@@ -44,8 +44,14 @@ import {
   isEnoentError,
   normalizeOptionalAgentId,
 } from "./swarm-manager-utils.js";
-import { composeBuiltinModeSystemPrompt, isBuiltinModePromptId, WORKER_MODE_SYSTEM_PROMPT_CORE } from "./worker-mode-prompt.js";
-import { buildManagerPostureBlock } from "./prompts/manager-posture.js";
+import { WORKER_MODE_SYSTEM_PROMPT_CORE } from "./worker-mode-prompt.js";
+import {
+  formatWorkerPresetBlock,
+  mergeWorkerPresets,
+  readWorkerPresetSettings,
+  specialistsToWorkerPresets,
+  type SpecialistPresetSource,
+} from "./specialists/worker-presets.js";
 
 const CURSOR_SDK_RUNTIME_GUIDANCE_BLOCK = `## Cursor SDK Runtime
 
@@ -64,13 +70,13 @@ You are a Forge Project Agent: a thoughtful, capable, and candid collaborator an
 
 \${MODEL_SPECIFIC_INSTRUCTIONS}
 
-\${MANAGER_POSTURE}
+Do the work yourself by default. Spawn a worker when the user asks for one, or when it clearly helps: separable work that can run alongside yours, a task better suited to a different model, or an independent check of a consequential result. Task size, ambiguity, or an available preset alone is not a reason. A worker sees nothing of this conversation, so brief it with the outcome, the context and findings it needs, constraints, the files it owns, and the evidence that shows it is done. Keep working meanwhile; results come back on their own as [workerResult], so do not poll or read worker transcripts. When one arrives, run the smallest check that would catch a wrong answer, then integrate it, send one focused follow-up, or take the work over (stop the worker first if it owns files). Never send thanks or acknowledgments: any message to a finished worker starts a new assignment. You own the final result either way.
 
-Use one accountable owner per outcome and the simplest adequate coordination lane: Direct for one cohesive outcome or bounded worker, Checklist for visible manager-owned sequencing, and Graph only for multiple independently acceptable outcomes with real scheduling value.
+Use the simplest adequate coordination lane: Direct for one cohesive outcome or bounded worker, Checklist for visible manager-owned sequencing, and Graph only for multiple independently acceptable outcomes with real scheduling value.
 
-\${SPECIALIST_ROSTER}
+\${WORKER_PRESETS}
 
-Give workers one bounded outcome and require a secure runtime for secret-dependent work. Treat [workerResult] as evidence requiring same-turn disposition, not an automatic update. Complete proportionate checks, then finish. Ask only for required missing permission, after authorized preparation; do not ask twice. Task-local notes may be maintained when available; durable memory changes require an explicit user memory request. Never store secrets in either. Follow the planning, goal, and delivery tool contracts for mechanics.`;
+Require a secure runtime for secret-dependent work. Complete proportionate checks, then finish. Ask only for required missing permission, after authorized preparation; do not ask twice. Task-local notes may be maintained when available; durable memory changes require an explicit user memory request. Never store secrets in either. Follow the planning, goal, and delivery tool contracts for mechanics.`;
 const USER_FACING_VISUALIZATION_GUIDANCE = `# User-Facing Visualizations
 - Use a visualization only when it makes an important relationship materially clearer than prose or a short list.
 - Prefer one readable abstraction level, short labels, and the smallest useful view. Split dense subjects instead of returning an unreadable canvas.`;
@@ -110,8 +116,6 @@ interface ResolvedSpecialistDefinitionLike {
 
 interface SpecialistRegistryModuleLike {
   resolveRoster(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
-  generateRosterBlock(roster: ResolvedSpecialistDefinitionLike[], tierConfigs?: readonly TierConfig[]): string;
-  resolveTierConfigs(): Promise<TierConfig[]>;
 }
 
 interface MemoryRuntimeResources {
@@ -256,7 +260,7 @@ export class SwarmPromptService {
       ? await this.resolveProjectAgentPromptComposition(descriptor, options)
       : undefined;
     const normalizedSessionSystemPrompt = normalizeOptionalAgentId(descriptor.sessionSystemPrompt)?.trim();
-    const [promptTemplate, roster, tierConfigs] = await Promise.all([
+    const [promptTemplate, roster, presetSettings] = await Promise.all([
       projectAgentComposition
         ? Promise.resolve(projectAgentComposition.content)
         : normalizedSessionSystemPrompt
@@ -267,7 +271,7 @@ export class SwarmPromptService {
               return entry?.content ?? this.options.promptRegistry.resolve("archetype", managerArchetypeId, profileId);
             }),
       this.resolveSpecialistRosterForDescriptor(descriptor, specialistRegistry),
-      specialistRegistry.resolveTierConfigs(),
+      readWorkerPresetSettings(this.options.config.paths.dataDir),
     ]);
 
     if (projectAgentComposition) {
@@ -276,9 +280,12 @@ export class SwarmPromptService {
     } else if (normalizedSessionSystemPrompt) {
       sources?.push(instructionSource("session_prompt", descriptor.agentId, normalizedSessionSystemPrompt));
     }
-    const delegationBlock = specialistRegistry.generateRosterBlock(roster, tierConfigs);
-    for (const specialist of roster) sources?.push(instructionSource("specialist", specialist.specialistId, specialist.promptBody ?? "", specialist.sourcePath));
-    sources?.push(instructionSource("specialist_roster", profileId, delegationBlock));
+    // Specialist files are presets too; a file wins a name collision with the global list.
+    const delegationBlock = formatWorkerPresetBlock(mergeWorkerPresets(
+      presetSettings.presets,
+      specialistsToWorkerPresets(roster as SpecialistPresetSource[], descriptor.model),
+    ));
+    sources?.push(instructionSource("worker_presets", profileId, delegationBlock));
     const projectAgentDirectoryEntries = await this.resolveProjectAgentDirectoryEntries(
       profileId,
       descriptor,
@@ -292,10 +299,7 @@ export class SwarmPromptService {
         : "";
     const delegationContextBlock = `${delegationBlock}\n\n${projectAgentDirectoryBlock}${createSessionCapabilityNote}`;
     let prompt = resolvePromptVariables(promptTemplate, this.buildStandardPromptVariables(descriptor));
-    const managerPostureBlock = buildManagerPostureBlock(descriptor.managerPosture);
-    sources?.push(instructionSource("manager_posture", descriptor.agentId, managerPostureBlock));
     sources?.push(instructionSource("project_agent_directory", profileId, projectAgentDirectoryBlock));
-    prompt = composeManagerPosture(prompt, managerPostureBlock);
 
     const projectAgentReferenceDocs = await this.resolveProjectAgentReferenceDocs(descriptor, profileId);
     for (const doc of projectAgentReferenceDocs) sources?.push(instructionSource("project_agent_reference", doc.path, doc.content,
@@ -304,10 +308,14 @@ export class SwarmPromptService {
       prompt = `${prompt.trimEnd()}\n\n<agent_reference_docs>\n${projectAgentReferenceDocs.map((doc) => `## ${doc.path}\n${doc.content}`).join("\n\n")}\n</agent_reference_docs>`;
     }
 
+    // User-customised prompt overrides written before worker presets still carry the old
+    // placeholders. Their files are never rewritten, so read them as the new slot.
     // eslint-disable-next-line no-template-curly-in-string
-    if (prompt.includes("${SPECIALIST_ROSTER}")) {
+    prompt = prompt.replaceAll("${SPECIALIST_ROSTER}", "${WORKER_PRESETS}").replaceAll("${MANAGER_POSTURE}", "");
+    // eslint-disable-next-line no-template-curly-in-string
+    if (prompt.includes("${WORKER_PRESETS}")) {
       // eslint-disable-next-line no-template-curly-in-string
-      prompt = prompt.replaceAll("${SPECIALIST_ROSTER}", delegationContextBlock);
+      prompt = prompt.replaceAll("${WORKER_PRESETS}", delegationContextBlock);
     } else {
       prompt = `${prompt.trimEnd()}\n\n${delegationContextBlock}`;
     }
@@ -471,14 +479,8 @@ export class SwarmPromptService {
       return this.buildResolvedManagerPrompt(descriptor, undefined, sources);
     }
 
-    const requiredBehaviorPromptId = normalizeOptionalAgentId(descriptor.specialistLens)?.toLowerCase();
-    const specialistId = requiredBehaviorPromptId ?? (
-      descriptor.specialistTier || descriptor.delegationRouteId
-        ? undefined
-        : normalizeOptionalAgentId(
-            descriptor.specialistId?.split(":")[1] ?? descriptor.specialistId
-          )?.toLowerCase()
-    );
+    // A preset backed by a specialist file runs on that file's instructions.
+    const specialistId = normalizeOptionalAgentId(descriptor.specialistId)?.toLowerCase();
     if (specialistId) {
       try {
         const specialistRegistry = await this.options.loadSpecialistRegistryModule();
@@ -486,12 +488,8 @@ export class SwarmPromptService {
         const specialist = roster.find((entry) => entry.specialistId === specialistId);
         const specialistPrompt = specialist?.promptBody?.trim();
         if (specialistPrompt) {
-          if (isBuiltinModePromptId(specialistId)) sources?.push(instructionSource("builtin_guidance", "worker_core", WORKER_MODE_SYSTEM_PROMPT_CORE));
           sources?.push(instructionSource("specialist", specialistId, specialist!.promptBody!, specialist!.sourcePath));
-          return this.appendRepositoryReferenceInventory(
-            composeBuiltinModeSystemPrompt(specialistId, specialistPrompt),
-            descriptor, sources,
-          );
+          return this.appendRepositoryReferenceInventory(specialistPrompt, descriptor, sources);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -501,17 +499,6 @@ export class SwarmPromptService {
           specialistId,
           message,
         });
-        if (requiredBehaviorPromptId) {
-          throw new Error(
-            `Required worker behavior prompt "${requiredBehaviorPromptId}" could not be resolved: ${message}`,
-          );
-        }
-      }
-
-      if (requiredBehaviorPromptId) {
-        throw new Error(
-          `Required worker behavior prompt "${requiredBehaviorPromptId}" is missing or empty.`,
-        );
       }
     }
 
@@ -1083,46 +1070,6 @@ export class SwarmPromptService {
   }
 }
 
-// Copied legacy prompts may still contain these wrappers; composition removes only the markers.
-const MANAGER_COORDINATION_START = "<!-- forge:manager-coordination:start -->";
-const MANAGER_COORDINATION_END = "<!-- forge:manager-coordination:end -->";
-
-function composeManagerPosture(
-  prompt: string,
-  managerPostureBlock: string,
-): string {
-  let composed: string;
-  // eslint-disable-next-line no-template-curly-in-string
-  if (prompt.includes("${MANAGER_POSTURE}")) {
-    // eslint-disable-next-line no-template-curly-in-string
-    composed = prompt.replaceAll("${MANAGER_POSTURE}", managerPostureBlock);
-  } else {
-    const isLegacyManagerPrompt = (
-      prompt.includes("Delegation remains the default for project-file mutations")
-      && prompt.includes("Manager direct project work is read-only")
-    );
-    const legacyHeading = isLegacyManagerPrompt
-      ? /^# Work routing[ \t]*$/m.exec(prompt)
-      : null;
-    if (!legacyHeading) {
-      composed = `${prompt.trimEnd()}\n\n${managerPostureBlock}`;
-    } else {
-      const sectionStart = legacyHeading.index;
-      const afterHeading = sectionStart + legacyHeading[0].length;
-      const nextHeading = /\r?\n# [^\r\n]+/.exec(prompt.slice(afterHeading));
-      const sectionEnd = nextHeading
-        ? afterHeading + nextHeading.index
-        : prompt.length;
-      const before = prompt.slice(0, sectionStart).trimEnd();
-      const after = prompt.slice(sectionEnd).trimStart();
-      composed = [before, managerPostureBlock, after].filter(Boolean).join("\n\n");
-    }
-  }
-
-  return composed
-    .replaceAll(MANAGER_COORDINATION_START, "")
-    .replaceAll(MANAGER_COORDINATION_END, "");
-}
 
 function hasOnboardingPreferenceValue(value: string | null | undefined): boolean {
   return typeof value === "string" && value.trim().length > 0;
