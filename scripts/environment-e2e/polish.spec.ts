@@ -421,6 +421,8 @@ test('a message sent while a reply is streaming is answered below the reply it c
     ]
     expect(order).toEqual([...order].sort((left, right) => left - right))
     expect(new Set(order).size).toBe(4)
+    // Placed once: the send record never shows beside its consumption entry.
+    await expect(transcript(page).getByText('stop and reply DONE', { exact: true })).toHaveCount(1)
   }
   await check()
   await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('idle')

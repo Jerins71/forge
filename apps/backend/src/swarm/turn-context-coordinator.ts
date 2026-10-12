@@ -231,6 +231,7 @@ export class TurnContextCoordinator<TCodexGate=unknown,TCodexDelegation=unknown,
     const activeRunId=this.core?.read(agentId).activeRunId;
     return Boolean(activeRunId && this.contexts.get(agentId)?.get(activeRunId)?.internalDeliveryKind);
   }
+  isRunQueued(agentId:string,runId:string):boolean { return this.core?.read(agentId).pendingRunIds.includes(runId) ?? false; }
   getPendingContextCount(agentId:string):number { return this.core?.read(agentId).pendingRunIds.length ?? 0; }
   getActiveWorkerParentContext(agentId:string):ActiveWorkerParentContext|undefined {
     const context=this.activeTurnByAgentId.get(agentId)?.parentContext;

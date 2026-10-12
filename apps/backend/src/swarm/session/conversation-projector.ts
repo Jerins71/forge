@@ -105,6 +105,8 @@ interface ConversationProjectorDependencies {
   getPinnedMessageIds?: (agentId: string) => ReadonlySet<string> | undefined;
   /** True while the agent runs a turn the user is not shown, such as project onboarding. */
   isHiddenTurn?: (agentId: string) => boolean;
+  /** Whether this run is still waiting for its own turn (queued, or a steer held back as a follow-up). */
+  isRunQueued?: (agentId: string, runId: string) => boolean;
 }
 
 function resolveManagerContextId(descriptor: AgentDescriptor | undefined, fallbackAgentId: string): string {
@@ -135,6 +137,7 @@ export class ConversationProjector {
   private readonly nextTimelineSequenceBySource = new Map<string, number>();
   private readonly canonicalPrefixMayExistByAgentId = new Set<string>();
   private readonly pendingReplyMarkers = new Map<string, () => void>();
+  private readonly placedTurnByAgentId = new Map<string, string>();
   private readonly activity = new ActivityTimelineTracker(item =>
     this.deps.emitServerEvent("timeline_activity", { type: "timeline_activity", sessionAgentId: item.sessionId, item }));
 
@@ -561,7 +564,15 @@ export class ConversationProjector {
   }
 
   captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void {
-    if (event.type === "input_consumed") return this.placeConsumedSteer(agentId);
+    // Only a steer the provider took into the running turn moves to its consumption point; input waiting
+    // for a later turn, and the running turn's own input, are not it.
+    if (event.type === "input_consumed") return this.placeSteeredInput(agentId, entry =>
+      entry.turnId !== options?.turnId && !(entry.turnId && this.deps.isRunQueued?.(agentId, entry.turnId)));
+    // Input held for a later turn (never steered, or held back while a choice was open) takes its place when that turn starts.
+    if (options?.turnId && this.placedTurnByAgentId.get(agentId) !== options.turnId) {
+      this.placedTurnByAgentId.set(agentId, options.turnId);
+      this.placeSteeredInput(agentId, entry => entry.turnId === options.turnId);
+    }
     // A manager's failed model reply is the turn's failed status row: a readable line, the raw text in its details.
     if (this.deps.descriptors.get(agentId)?.role === "manager") {
       const failure = managerReplyFailure(event);
@@ -591,14 +602,15 @@ export class ConversationProjector {
   }
 
   /**
-   * The oldest steered input not yet placed takes its transcript place now, below any reply the runtime
+   * The oldest eligible held input not yet placed takes its transcript place now, below any reply the runtime
    * already closed. The send record stays durable; this entry is what the transcript shows.
    */
-  private placeConsumedSteer(agentId: string): void {
+  private placeSteeredInput(agentId: string, eligible: (entry: ConversationMessageEvent) => boolean): void {
     const history = this.getConversationHistory(agentId);
+    // An input is placed once, whichever path reaches it first.
     const placed = new Set(history.flatMap(entry => entry.type === "conversation_message" && entry.consumedFrom ? [entry.consumedFrom] : []));
     const pending = history.find((entry): entry is ConversationMessageEvent =>
-      entry.type === "conversation_message" && entry.steerPending === true && !!entry.id && !placed.has(entry.id));
+      entry.type === "conversation_message" && entry.steerPending === true && !!entry.id && !placed.has(entry.id) && eligible(entry));
     if (!pending) return;
     const { steerPending: _pending, timelineEntryId: _entry, timelineSequence: _sequence, ...message } = pending;
     this.emitConversationMessage({ ...message, id: `${pending.id}:consumed`, consumedFrom: pending.id, timestamp: this.deps.now() });
