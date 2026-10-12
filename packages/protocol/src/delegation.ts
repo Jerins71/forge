@@ -20,9 +20,14 @@ export interface WorkerPresetSettings {
   presets: WorkerPreset[]
 }
 
-/** A preset as the Settings API answers it: whether its provider is signed in on this environment. */
+/** A preset as the Settings API answers it, judged by the same rule spawn uses on this environment. */
 export interface WorkerPresetStatus extends WorkerPreset {
+  /** False when spawn would refuse this preset's model now. */
   available: boolean
+  /** Why spawn would refuse it: sign-in, a pooled-credential cooldown or a rate limit. */
+  unavailableReason?: string
+  /** The provider's most recent worker run refusal (auth, account, CLI version). A warning only. */
+  lastRunFailure?: { message: string; at: string }
 }
 
 /** GET and PUT `/api/settings/worker-presets` answer; PUT still takes plain `WorkerPresetSettings`. */

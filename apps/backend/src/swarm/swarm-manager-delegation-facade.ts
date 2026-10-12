@@ -22,6 +22,11 @@ export abstract class SwarmManagerDelegationFacade extends SwarmManagerSecureSes
     return this.configuration.getWorkerPresetSettings();
   }
 
+  /** Each preset judged by the same rule spawn uses, so Settings never shows a preset spawn would refuse. */
+  describeWorkerPresetModels(presets: readonly { provider: string; modelId: string }[]) {
+    return this.getFacadeServices().agents.describeWorkerModels(presets);
+  }
+
   saveWorkerPresetSettings(input: unknown) {
     return this.configuration.saveWorkerPresetSettings(input);
   }

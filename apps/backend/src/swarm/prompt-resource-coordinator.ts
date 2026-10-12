@@ -70,9 +70,20 @@ export interface PromptResourceCoordinatorOptions {
   logDebug(message: string, details?: unknown): void;
 }
 
+/** A worker run refused by its provider for a reason other than capacity (auth, account, CLI version). */
+export interface WorkerRunFailure {
+  message: string;
+  at: string;
+}
+
+/** Status codes and words that mark a provider, sign-in or version refusal rather than a task error. */
+const PROVIDER_FAILURE_PATTERN = /\b(401|402|403|426)\b|unauthori[sz]ed|forbidden|authenticat|credential|api key|outdated|upgrade required|unsupported (cli|client)|version/i;
+
 /** Resolves project-scoped prompt resources and owns transient model-capacity policy state. */
 export class PromptResourceCoordinator {
   readonly modelCapacityBlocks = new Map<string, ModelCapacityBlock>();
+  /** Latest provider refusal of a worker run, keyed by provider. Shown as a warning; spawn does not read it. */
+  readonly workerRunFailures = new Map<string, WorkerRunFailure>();
   private specialistRegistryModulePromise: Promise<SpecialistRegistryModule> | null = null;
 
   constructor(private readonly options: PromptResourceCoordinatorOptions) {}
@@ -88,6 +99,10 @@ export class PromptResourceCoordinator {
 
     const classification = classifyRuntimeCapacityError(formatRuntimeErrorForCapacityClassification(error));
     if (!classification.isQuotaOrRateLimit) {
+      const failedProvider = normalizeOptionalAgentId(descriptor.model.provider)?.toLowerCase();
+      if (failedProvider && PROVIDER_FAILURE_PATTERN.test(error.message)) {
+        this.workerRunFailures.set(failedProvider, { message: error.message, at: this.options.now() });
+      }
       return;
     }
 

@@ -9,6 +9,8 @@ import {
 } from "../../swarm-agent-lifecycle-service.js";
 import type { AgentDescriptor } from "../../types.js";
 import { saveWorkerPresetSettings } from "../worker-presets.js";
+import { buildModelCapacityBlockKey } from "../../swarm-manager-utils.js";
+import { pooledAvailabilityKey } from "../../secrets-env-service.js";
 
 const NOW = "2026-10-11T00:00:00.000Z";
 const catalogModels = Object.values(FORGE_MODEL_CATALOG.models);
@@ -20,7 +22,7 @@ interface SpecialistFile {
   provider?: string; modelId?: string; reasoningLevel?: string; promptBody: string; available: boolean;
 }
 
-async function harness(specialists: SpecialistFile[] = [], unavailableProviders: string[] = []) {
+async function harness(specialists: SpecialistFile[] = [], unavailableProviders: string[] = [], state: { modelCapacityBlocks?: Map<string, unknown>; workerRunFailures?: Map<string, unknown> } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), "forge-spawn-preset-"));
   await saveWorkerPresetSettings(dataDir, {
     version: 2,
@@ -37,7 +39,8 @@ async function harness(specialists: SpecialistFile[] = [], unavailableProviders:
   const service = new SwarmAgentLifecycleService({
     dataDir,
     descriptors,
-    modelCapacityBlocks: new Map(),
+    modelCapacityBlocks: state.modelCapacityBlocks ?? new Map(),
+    workerRunFailures: state.workerRunFailures,
     getManagedModelProviderAvailability: async () => ({ get: (provider: string) => !unavailableProviders.includes(provider) }),
     descriptorMutations: {
       upsertDescriptor: (descriptor: AgentDescriptor) => void descriptors.set(descriptor.agentId, descriptor),
@@ -146,4 +149,21 @@ it("fails a no-preset spawn fast when the manager's own model is not available t
   await expect(service.spawnAgent("manager", { agentId: "w1", initialMessage: "x" }))
     .rejects.toThrow(`Worker model is not available: ${managerModel.provider}/${managerModel.modelId}.`);
   expect([...descriptors.keys()]).toEqual(["manager"]);
+});
+
+it("judges presets for Settings by the rule spawn uses: a capacity block or an exhausted pool refuses both", async () => {
+  const until = Date.now() + 3_600_000; // Blocks expire against the real clock.
+  const blocked = new Map([[buildModelCapacityBlockKey(presetModel.provider, presetModel.modelId)!, { provider: presetModel.provider, modelId: presetModel.modelId, blockedUntilMs: until }]]);
+  const failure = { message: "426 CLI outdated", at: NOW };
+  const capacity = await harness([], [], { modelCapacityBlocks: blocked, workerRunFailures: new Map([[presetModel.provider, failure]]) });
+  expect(await capacity.service.describeWorkerModels([presetModel])).toEqual([{ available: false, blockedUntil: new Date(until).toISOString(), lastRunFailure: failure }]);
+  await expect(capacity.service.spawnAgent("manager", { agentId: "w1", preset: "builder", initialMessage: "x" })).rejects.toThrow("not available");
+
+  const pooled = await harness([], [pooledAvailabilityKey(presetModel.provider)]);
+  expect(await pooled.service.describeWorkerModels([presetModel])).toEqual([{ available: false }]);
+  await expect(pooled.service.spawnAgent("manager", { agentId: "w1", preset: "builder", initialMessage: "x" })).rejects.toThrow("not available");
+
+  // A recorded failure alone warns; it never refuses.
+  const warned = await harness([], [], { workerRunFailures: new Map([[presetModel.provider, failure]]) });
+  expect(await warned.service.describeWorkerModels([presetModel])).toEqual([{ available: true, lastRunFailure: failure }]);
 });

@@ -4,7 +4,8 @@ export const PROVIDER_LABELS: Record<string, string> = {
   'codex-native': 'Codex native',
   'claude-native': 'Claude native',
   'openai-codex': 'OpenAI Codex',
-  'anthropic': 'Anthropic',
+  // Matches the composer's model picker: the API account, not the Claude subscription CLI.
+  'anthropic': 'Anthropic API',
   'cursor-sdk': 'Cursor SDK',
   xai: 'xAI',
 }

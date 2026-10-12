@@ -497,6 +497,7 @@ export class SwarmManagerRuntimeComposition {
       runtimeRecoveryState: state.runtimeRecoveryState,
       secureWorkers: this.options.secureSessions,
       modelCapacityBlocks: services.configuration.promptResources.modelCapacityBlocks,
+      workerRunFailures: services.configuration.promptResources.workerRunFailures,
       sessionProvisioner: services.provisioner,
       descriptorMutations: descriptors,
       now: state.now,

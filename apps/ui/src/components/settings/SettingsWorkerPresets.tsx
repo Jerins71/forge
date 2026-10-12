@@ -10,6 +10,7 @@ import {
   type WorkerPreset,
   type WorkerPresetSettings,
   type WorkerPresetSettingsResponse,
+  type WorkerPresetStatus,
 } from '@forge/protocol'
 import { useHelpContext } from '@/components/help/help-hooks'
 import { Badge } from '@/components/ui/badge'
@@ -26,13 +27,19 @@ import { ModelIdSelect } from './specialists/ModelIdSelect'
 
 const WORKER_PRESETS_PATH = '/api/settings/worker-presets'
 /** One row per preset once the settings pane fits every column's minimum; stacked fields below it. */
-const ROW_GRID = '@min-[54rem]/settings:grid-cols-[minmax(12rem,1fr)_minmax(12rem,1.5fr)_9rem_minmax(10rem,2.5fr)_2rem]'
+const ROW_GRID = '@min-[54rem]/settings:grid-cols-[minmax(10.5rem,1fr)_minmax(17rem,1.6fr)_8rem_minmax(8rem,1.6fr)_2rem]'
 /** Reasoning levels in words; a catalog label that is only the capitalised id falls back to these. */
 const REASONING_LABEL: Record<string, string> = { none: 'None', low: 'Low', medium: 'Medium', high: 'High', xhigh: 'Extra high', max: 'Max', ultra: 'Ultra' }
 const FIELD_LABEL = 'mb-1 block text-[11px] font-medium uppercase tracking-wide text-subtle-foreground @min-[54rem]/settings:sr-only'
 
-/** `available` is the environment's last answer for the saved model; unknown once the model is changed. */
-interface Row extends WorkerPreset { key: number; available?: boolean }
+/** The environment's last answer for the saved model (see `WorkerPresetStatus`); unknown once the model is changed. */
+interface Row extends WorkerPreset, Partial<Pick<WorkerPresetStatus, 'available' | 'unavailableReason' | 'lastRunFailure'>> { key: number }
+
+/** First line of a provider error, short enough for one row. */
+function shortReason(message: string): string {
+  const line = message.split('\n', 1)[0]!.trim()
+  return line.length > 90 ? `${line.slice(0, 87)}…` : line
+}
 
 function toPresets(rows: Row[]): WorkerPreset[] {
   return rows.map(({ name, provider, modelId, reasoningLevel, note }) => ({
@@ -200,15 +207,19 @@ export function SettingsWorkerPresets({ apiClient, modelConfigChangeKey }: {
                       onValueChange={(next) => {
                         const model = findCatalogModel(catalog, next.provider, next.modelId)
                         const keep = !model || model.reasoningOptions.some((option) => option.id === row.reasoningLevel)
-                        update(row.key, { ...next, available: undefined, ...(keep ? {} : { reasoningLevel: model.defaultReasoningId }) })
+                        update(row.key, { ...next, available: undefined, unavailableReason: undefined, lastRunFailure: undefined, ...(keep ? {} : { reasoningLevel: model.defaultReasoningId }) })
                       }}
                     />
                     {showErrors && errors.model ? <p role="alert" className="mt-1 text-[11.5px] text-danger">{errors.model}</p> : null}
                     {row.available === false ? (
-                      <Badge variant="outline" className="mt-1.5 border-attention/30 bg-attention-surface text-[11px] font-normal text-attention"
-                        title={`Sign in to ${row.provider} in Settings → Authentication to use this preset.`} data-testid="worker-preset-unavailable">
-                        Unavailable — sign in
+                      <Badge variant="outline" className="mt-1.5 max-w-full whitespace-normal border-attention/30 bg-attention-surface text-left text-[11px] font-normal text-attention"
+                        title={row.unavailableReason} data-testid="worker-preset-unavailable">
+                        {!row.unavailableReason || row.unavailableReason.startsWith('Sign in') ? 'Unavailable — sign in' : `Unavailable — ${shortReason(row.unavailableReason)}`}
                       </Badge>
+                    ) : row.lastRunFailure ? (
+                      <p className="mt-1.5 text-[11.5px] leading-snug text-attention" title={row.lastRunFailure.message} data-testid="worker-preset-last-failure">
+                        Last run failed: {shortReason(row.lastRunFailure.message)}
+                      </p>
                     ) : null}
                   </div>
                   <div role="cell" className="min-w-0">
