@@ -259,7 +259,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.providerOutcome = "cancelled";
     this.turnOpen = false;
     this.status = "idle";
-    for (const event of this.mapper.finish(false, undefined, true)) await this.emit(event);
+    for (const event of this.mapper.finish(undefined, true)) await this.emit(event);
     if (hadTurn) {
       // A turn the host stopped did not complete; say so before its end is judged for visible output.
       await this.emit({ type: "turn_end", toolResults: [], meta: { outcome: "cancelled" } });
@@ -367,7 +367,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     }
     const success = !frame.is_error;
     this.providerOutcome = success ? "completed" : "failed";
-    for (const event of this.mapper.finish(success, success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);
+    for (const event of this.mapper.finish(success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);
     const cost = Math.max(0, frame.total_cost_usd - this.previousCost); this.previousCost = frame.total_cost_usd;
     this.options.providerSession?.usage(frame, cost);
     await this.emit({ type: "turn_end", toolResults: [], meta: { provider: this.descriptor.model.provider, modelId: this.descriptor.model.modelId,
@@ -431,11 +431,14 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     this.status = "error";
     let message = SECURE_RUNTIME_GUARD_FAILURE_MESSAGE;
     try { message = this.guard(error instanceof Error ? error.message : String(error)); } catch { /* Never echo rejected guard input. */ }
+    // Close what was streaming first, so the reply cut off by this failure stays above its failed row.
+    for (const event of this.mapper.finish()) await this.emit(event);
     this.options.providerSession?.failure(message);
     this.turnCompaction?.reject(new Error(message));
     for (const input of this.sent.values()) input.compact?.reject(new Error(message));
     await this.options.callbacks.onRuntimeError?.(this.descriptor.agentId, { phase: "runtime_exit", message });
-    await this.publishStatus();
+    // The error handler may already have settled the session; a status it refuses must not take the backend down.
+    await this.publishStatus().catch(() => undefined);
   }
   private serialize<T>(work: () => Promise<T>): Promise<T> { const result = this.operations.then(work); this.operations = result.catch(() => undefined); return result; }
   private assertOpen(): void { if (this.getProviderDrainStatus() !== "open") throw new Error("Claude native is stopped or unavailable. Settle the previous runtime before continuing."); }

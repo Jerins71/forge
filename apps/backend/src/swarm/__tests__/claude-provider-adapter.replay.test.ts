@@ -224,7 +224,8 @@ describe("Claude frozen provider contract through real SDK transport", () => {
   });
   // Failure modes written before implementation: the user stops a reply while its text is still streaming.
   // The text already shown must stay as the reply, and a stopped turn is not a turn that completed silently.
-  it.each([["stop-mid-stream", ["Streaming answer"]], ["stop-before-text", []]] as const)("keeps the streamed text as the reply and adds no empty-completion notice when stopped (%s)", async (scenario, streamed) => {
+  // A reply cut off by a failure is the same: the text stays, and the failure is reported by the error path.
+  it.each([["stop-mid-stream", ["Streaming answer"]], ["stop-before-text", []], ["fail-mid-stream", ["Streaming answer"]], ["exit-mid-stream", ["Streaming answer"]]] as const)("keeps the streamed text as the reply and adds no empty-completion notice when stopped or failed (%s)", async (scenario, streamed) => {
     const resources = await createProviderBoundaryFixture();
     const f = await fixture(scenario, { root: resources.root, matchAnyPrompt: true });
     const descriptor = { ...resources.descriptor("claude-native"), model: f.descriptor.model };
@@ -245,14 +246,15 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       isModelCacheVisualizationEnabled: () => false, emitModelCacheObservation: () => {},
       resolveManagerAssistantFinalOutputTarget: () => ({ kind: "session_transcript", channel: "web" }),
       resolveManagerAssistantFinalOutputRoute: () => ({ target: { kind: "session_transcript", channel: "web" }, requiresVisibleResponse: true, decision: { reasonCode: "render:user_web" } }) } as never);
-    const prepared = vi.fn();
+    const prepared = vi.fn(); const onRuntimeError = vi.fn();
+    const failed = scenario === "fail-mid-stream" || scenario === "exit-mid-stream";
     let runtime: SwarmAgentRuntime | undefined;
     nativeSetup.env = f.runtimeOptions.env; nativeSetup.executable = f.runtimeOptions.executable;
     try {
       const instructionBundle = await resources.service.buildInstructionBundle(descriptor);
       runtime = await new ClaudeRuntimeCreator({ ...resources.deps, host: { ...f.host, searchHistory: vi.fn(), readHistory: vi.fn() } } as never).create({ descriptor,
         systemPrompt: renderInstructionBundle(instructionBundle), runtimeToken: 3,
-        callbacks: { onStatusChange: () => {}, onAgentEnd: () => {},
+        callbacks: { onStatusChange: () => {}, onAgentEnd: () => {}, onRuntimeError,
           onSessionEvent: async (agentId, event) => { events.push(event); await projector.projectEvent({ agentId, event }); } },
         creationOptions: { instructionBundle, providerScope: kernelScope, onProviderPrepared: prepared } });
       runtimes.set(descriptor.agentId, runtime);
@@ -261,12 +263,20 @@ describe("Claude frozen provider contract through real SDK transport", () => {
       const inputs = prepared.mock.calls[0]![0];
       const binding = await adapter.open({ scope: kernelScope, model: descriptor.model, instructions: inputs.instructionBundle, toolHost: inputs.toolHostBinding });
       const dispatched = adapter.start({ binding, runId, attemptId: "kernel-attempt", input: { text: "work" } });
-      await f.release("partial"); await dispatched;
-      await vi.waitFor(() => expect(events.some(event => event.type === (streamed.length ? "message_update" : "turn_start"))).toBe(true));
+      const read = async () => (await readFile(descriptor.sessionFile, "utf8")).trim().split("\n").map(line => JSON.parse(line))
+        .filter(entry => entry.customType === "swarm_conversation_entry" && entry.data.type === "conversation_message").map(entry => entry.data);
+      if (failed) {
+        await dispatched; await f.release("failed");
+        await vi.waitFor(() => expect(onRuntimeError).toHaveBeenCalled());
+        // Already there when the failure is reported, not only once the session is later stopped.
+        expect((await read()).filter(entry => entry.role === "assistant")).toEqual(streamed.map(text => expect.objectContaining({ text, turnId: runId, source: "assistant_output" })));
+      } else {
+        await f.release("partial"); await dispatched;
+        await vi.waitFor(() => expect(events.some(event => event.type === (streamed.length ? "message_update" : "turn_start"))).toBe(true));
+      }
       // Stop is a release of the provider binding: the process is closed, with no interrupt and no result frame.
       await runtime.terminate({ abort: true });
-      const entries = (await readFile(descriptor.sessionFile, "utf8")).trim().split("\n").map(line => JSON.parse(line))
-        .filter(entry => entry.customType === "swarm_conversation_entry" && entry.data.type === "conversation_message").map(entry => entry.data);
+      const entries = await read();
       expect(entries.filter(entry => entry.role === "assistant")).toEqual(streamed.map(text => expect.objectContaining({ text, turnId: runId, source: "assistant_output" })));
       expect(entries.filter(entry => entry.role === "system")).toEqual([]);
       expect(events.filter(event => event.type === "agent_end")).toHaveLength(1);
