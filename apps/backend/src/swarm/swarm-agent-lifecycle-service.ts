@@ -2294,7 +2294,14 @@ export class SwarmAgentLifecycleService {
 
     const contextUsage = runtime.getContextUsage();
     attachDescriptor.contextUsage = contextUsage;
-    this.upsertDescriptor(attachDescriptor);
+    // attachDescriptor carries the lifecycle projection, which already reads "streaming" when a
+    // replacement runtime is acquired for a run in progress (model or credential switch, resume after
+    // Stop). Persist the live descriptor instead, from where the outgoing runtime left it, so the new
+    // runtime's own idle -> streaming report is a real transition, as it is for the first runtime.
+    const live = this.options.descriptors.get(descriptor.agentId) ?? attachDescriptor;
+    if (live.status === "terminated" || live.status === "stopped") live.status = transitionAgentStatus(live.status, "idle");
+    live.contextUsage = contextUsage;
+    this.upsertDescriptor(live);
 
     if (attachDescriptor.role === "manager") {
       await this.options.captureSessionRuntimePromptMeta(attachDescriptor, persistedSystemPrompt);
