@@ -157,13 +157,15 @@ test('a plan card sits on the transcript column edge within the shared width', a
   await expect(plan).toBeVisible({ timeout: 30_000 })
   const column = (await transcript(page).locator('.content-column').first().boundingBox())!
   const box = (await plan.boundingBox())!
-  expect(Math.abs(box.x - column.x)).toBeLessThanOrEqual(1)
-  expect(box.width).toBeLessThanOrEqual(column.width + 1)
+  // Transcript blocks share one left edge: the column plus --transcript-inset.
+  const inset = await transcript(page).locator('.content-column').first().evaluate(element => parseFloat(getComputedStyle(element).getPropertyValue('--transcript-inset')) * parseFloat(getComputedStyle(document.documentElement).fontSize))
+  expect(Math.abs(box.x - column.x - inset)).toBeLessThanOrEqual(1)
+  expect(box.width).toBeLessThanOrEqual(column.width - inset + 1)
   // The checklist keeps the form measure (68rem) however wide the column is.
   expect(box.width).toBeLessThanOrEqual(68 * 16 + 1)
   await page.setViewportSize({ width: 2560, height: 1200 })
   const wide = (await plan.boundingBox())!, wideColumn = (await transcript(page).locator('.content-column').first().boundingBox())!
-  expect(Math.abs(wide.x - wideColumn.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs(wide.x - wideColumn.x - inset)).toBeLessThanOrEqual(1)
   expect(wide.width).toBeLessThanOrEqual(68 * 16 + 1)
   expect(wide.width).toBeGreaterThan(48 * 16)
   await shot(page, 'plan-card-2560')

@@ -9,7 +9,6 @@ import type {
 import {
   MANAGER_MODEL_PRESETS,
   MANAGER_REASONING_LEVELS,
-  getCatalogModel,
   getCatalogModelsByFamily,
   getSpecialistFamilies,
   inferCatalogFamily,
@@ -185,37 +184,6 @@ export function getModelDisplayLabel(modelId: string, presets: ModelPresetInfo[]
     }
   }
   return modelId
-}
-
-/**
- * Look up the supported reasoning levels for a given modelId.
- * Checks both primary preset modelIds and variant modelIds (using variant metadata when present).
- * Falls back to all levels if the modelId is unknown.
- */
-export function getSupportedReasoningLevelsForModelId(
-  modelId: string,
-  presets: ModelPresetInfo[],
-  provider?: string,
-): ManagerReasoningLevel[] {
-  // Try catalog first for per-model accuracy
-  const catalogModel = getCatalogModel(modelId, provider)
-  if (catalogModel) {
-    return catalogModel.supportedReasoningLevels as ManagerReasoningLevel[]
-  }
-  // Fall back to preset-level data
-  for (const preset of presets) {
-    if (preset.modelId === modelId) {
-      return preset.supportedReasoningLevels
-    }
-    if (preset.variants) {
-      for (const variant of preset.variants) {
-        if (variant.modelId === modelId) {
-          return variant.supportedReasoningLevels ?? preset.supportedReasoningLevels
-        }
-      }
-    }
-  }
-  return [...MANAGER_REASONING_LEVELS]
 }
 
 export interface SelectableModel {

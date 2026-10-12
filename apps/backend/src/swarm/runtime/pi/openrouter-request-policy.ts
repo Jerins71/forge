@@ -70,15 +70,3 @@ export function installOpenRouterRequestPolicy(session: AgentSession): void {
   session.agent.streamFn = withOpenRouterRequestPolicy(session.agent.streamFn.bind(session.agent));
 }
 
-/** Forge fallback has no equivalent-policy contract across models/providers. Fail closed for hard filters. */
-export function blocksOpenRouterFallback(model: { provider: string; modelId: string }): boolean {
-  if (model.provider.trim().toLowerCase() !== "openrouter") return false;
-  try {
-    const policy = resolveRouting(model.modelId);
-    return policy.zdr === true || policy.data_collection === "deny" ||
-      policy.only !== undefined || policy.ignore !== undefined || policy.max_price !== undefined ||
-      policy.quantizations !== undefined || policy.require_parameters === true || policy.allow_fallbacks === false;
-  } catch {
-    return true;
-  }
-}

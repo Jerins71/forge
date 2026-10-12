@@ -127,10 +127,13 @@ test('a new thread starts from its composer', async ({ page }) => {
 
 test('a worker preset added in Settings is still there after a reload', async ({ page }) => {
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=presets`)
-  await expect(page.getByTestId('worker-presets-empty')).toContainText("manager's own model")
+  // The fleet seeds one preset (fixture-worker); a new one is added after it.
+  const rows = page.getByTestId('worker-preset-row')
+  await expect(rows.first()).toBeVisible()
+  const before = await rows.count()
   await page.getByTestId('worker-preset-add').click()
-  const row = page.getByTestId('worker-preset-row')
-  await expect(row).toHaveCount(1)
+  await expect(rows).toHaveCount(before + 1)
+  const row = rows.nth(before)
   // An invalid name is rejected inline before anything is saved.
   await row.getByRole('textbox', { name: 'Name' }).fill('Fast Worker')
   await expect(row.getByRole('alert')).toContainText('lowercase')
@@ -148,7 +151,7 @@ test('a worker preset added in Settings is still there after a reload', async ({
   const chosenModel = await model.innerText()
 
   await page.reload()
-  await expect(row).toHaveCount(1)
+  await expect(rows).toHaveCount(before + 1)
   await expect(row.getByRole('textbox', { name: 'Name' })).toHaveValue('fast-worker')
   await expect(row.getByRole('textbox', { name: 'Note' })).toHaveValue('Quick edits and searches')
   await expect(row.getByRole('combobox').first()).toHaveText(chosenModel)
