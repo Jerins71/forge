@@ -237,6 +237,52 @@ test('a new thread starts on a paired machine', async ({ page }) => {
   assertions.launchRemote = { environmentId: b.environmentId, ...launched }
 })
 
+test('files a session on a paired machine made open in the artifact panel without "Change settings", live and after reload', async ({ page }) => {
+  const { b } = fleet
+  // B was paired above with the default permissions, which leave out "Change settings".
+  const session = await bootstrap(b)
+  const projectId = (await shellSession(b, b.sessionId))!.projectId
+  const receipt = await fixtureRpcOnce(b.baseUrl, session, 'session.launch', { commandId: randomUUID(), projectId, title: 'Remote artifacts', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: '[fixture:artifact] Make the action card', artifactIds: [] } })
+  const sessionId = receipt.sessionId as string
+  await until(async () => (await shellSession(b, sessionId))?.status, status => status === 'idle', 30_000)
+  const panel = (name: string) => page.getByRole('dialog', { name: new RegExp(`^Artifact: .*${name}$`) })
+  const open = async (link: string, name: string) => {
+    await transcript(page).getByRole('button', { name: new RegExp(`^${link} /tmp/`) }).click()
+    await expect(panel(name)).toBeVisible()
+  }
+  const close = async (name: string) => {
+    await panel(name).getByRole('button', { name: 'Close artifact panel' }).click()
+    await expect(panel(name)).toHaveCount(0)
+  }
+  const results: Record<string, unknown> = {}
+  await page.goto(fleet.uiUrl)
+  await page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).click()
+  for (const phase of ['live', 'reloaded'] as const) {
+    if (phase === 'reloaded') await page.reload()
+    await expect(transcript(page)).toContainText(':artifacts', { timeout: 30_000 })
+
+    await open('action card', 'card.png')
+    const image = panel('card.png').locator('img')
+    await expect(image).toBeVisible({ timeout: 15_000 })
+    await expect.poll(() => image.evaluate(node => (node as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect(panel('card.png')).not.toContainText('not allowed')
+    // Another machine's file is never opened in a local editor; only its path is offered to copy.
+    await expect(panel('card.png').getByRole('link', { name: /^Open in / })).toHaveCount(0)
+    await expect(panel('card.png').getByRole('button', { name: 'Copy path' })).toBeVisible()
+    await shot(page, `remote-artifact-image-${phase}`)
+    await close('card.png')
+
+    await open('notes', 'notes.md')
+    await expect(panel('notes.md')).toContainText(':artifact text', { timeout: 15_000 })
+    await expect(panel('notes.md')).not.toContainText('not allowed')
+    await shot(page, `remote-artifact-text-${phase}`)
+    await close('notes.md')
+    results[phase] = { image: 'shown', text: 'shown' }
+  }
+  assertions.remoteArtifacts = { environmentId: b.environmentId, sessionId, ...results }
+  expect(renderErrors).toEqual([])
+})
+
 test('a session on a paired machine is archived and deleted from its row, live and after reload', async ({ page }) => {
   const { b } = fleet
   const session = await bootstrap(b)

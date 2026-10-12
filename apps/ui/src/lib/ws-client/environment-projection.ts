@@ -2,6 +2,7 @@ import type { SessionAttention } from '@forge/protocol'
 import {
   ACTIVITY_SUMMARY_SCHEMA_VERSION,
   isUserStoppedWorkerResult,
+  isUserVisibleAssistantConversationSource,
   type AgentDescriptor,
   type ConversationAttachmentMetadata,
   type ConversationMessageEvent,
@@ -167,7 +168,8 @@ export function projectItems(
         : i.kind === 'assistant' && i.source && i.source in MARKER_SOURCES
           ? { role: 'system', source: 'system', systemNoticeKind: MARKER_SOURCES[i.source as keyof typeof MARKER_SOURCES] } : {
         role: i.kind === 'user' ? 'user' : i.kind === 'worker_result' ? 'system' : 'assistant',
-        source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : 'assistant',
+        // The reply keeps its own source: it is what lets the reader open the files the reply presented.
+        source: i.kind === 'user' ? 'user_input' : i.kind === 'worker_result' ? 'worker_report' : isUserVisibleAssistantConversationSource(i.source) ? i.source : 'assistant',
       }),
       text: i.kind === 'worker_result' && isUserStoppedWorkerResult(i.text) ? `${i.actorId} · Stopped by you` : i.text,
       timestamp: i.timestamp,
