@@ -29,6 +29,7 @@ import type {
 import { SidebarSearch } from './agent-sidebar/SidebarSearch'
 import { ProjectViewSwitcher, type SidebarProjectViewOption } from './agent-sidebar/ProjectViewSwitcher'
 import { SidebarFooter } from './agent-sidebar/SidebarFooter'
+import { SidebarResizeHandle } from './agent-sidebar/SidebarResizeHandle'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
 import { RemoteProjectGroup } from './agent-sidebar/LogicalProjectGroup'
 import { useRemoteOnlyProjectKeys } from './agent-sidebar/hooks/useLogicalProjects'
@@ -831,7 +832,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       data-sidebar-layout={sidebarLayout}
       className={cn(
         'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
-        'max-md:w-full md:w-[clamp(16rem,20vw,26rem)] md:shrink-0',
+        'max-md:w-full md:w-[min(var(--forge-sidebar-width,clamp(16rem,20vw,26rem)),60vw)] md:shrink-0',
       )}
     >
       {roomsV2 ? (
@@ -1042,8 +1043,9 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     <>
       {/* The sidebar is mounted once: a hidden second copy would repeat every update's work. */}
       {isDesktopViewport ? (
-        <div className="hidden md:flex md:shrink-0">
+        <div className="relative hidden md:flex md:shrink-0">
           {sidebarContent}
+          <SidebarResizeHandle />
         </div>
       ) : (
         <div
