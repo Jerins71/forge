@@ -2,7 +2,7 @@ As a conversation grows, it uses more of the model's context window. **Summary**
 
 ## Context management
 
-Choose the project default in **Project Settings → Context management**. Eligible local Builder managers can inherit that default or override it from **Context management** beside Send. Saving a mode does not clear the current conversation; it applies at the next context transition.
+Choose the project default in **Project Settings → Context management**. Eligible Pi-backed Builder managers can inherit that default or override it from **Context management** beside Send. Native Claude and Codex sessions use their own harness compaction and don't show this control. Saving a mode does not clear the current conversation; it applies at the next context transition.
 
 The session control shows the policy the current runtime can use. If a saved Context v2 preference is unsupported, it shows **Summary**, keeps your saved preference, and explains the restriction. Context v2 requires a supported ordinary Pi Builder manager and an eligible model. System profiles, Cursor SDK, plugin/external threads, and workers use Summary. **Settings → General → Compaction** controls the Summary compaction model, reasoning, and timeout; it does not select Summary or Context v2.
 

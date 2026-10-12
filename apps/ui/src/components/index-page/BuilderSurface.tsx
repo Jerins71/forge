@@ -146,6 +146,7 @@ import { Archive, BarChart3, FolderPlus, MessageSquarePlus, Settings2, SunMoon }
 import { applyAppearanceConfig, applyThemePreference, readStoredAppearanceConfig } from '@/lib/theme'
 import { CommandPalette, type CommandPaletteCommand, type CommandPaletteSession } from './CommandPalette'
 import {
+  isCompactionProviderSupported,
   type AgentDescriptor,
   type ProjectAgentExternalDirectoryEntry,
   type RemoteUpdateAwarenessProjectSnapshot,
@@ -1877,10 +1878,12 @@ export function BuilderSurface({
         }
       : undefined
 
+  // Native Claude/Codex sessions use their harness's own compaction, so the
+  // context-mode choice only applies to Pi-backed sessions.
   const sessionContextModePicker =
     isActiveManager
-    && true
     && isSessionModelPickerEligible(activeAgent, activeAgentProfile)
+    && isCompactionProviderSupported(activeAgent.model.provider)
       ? {
           originId: selectedEnvironmentId ?? '',
           httpClientRef,
