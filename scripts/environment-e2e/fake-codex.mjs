@@ -196,7 +196,9 @@ async function runTurn(turn, text) {
       }
       return;
     }
-    if (text.includes('[fixture:activity')) await activity(turn, text.includes('[fixture:activity-hold]'));
+    // A real onboarding turn reads the repository before it says anything.
+    const onboardingWork = text.includes('Your first job is to orient to THIS project.') && existsSync(join(checkout, '.fixture-onboarding-activity'));
+    if (text.includes('[fixture:activity') || onboardingWork) await activity(turn, text.includes('[fixture:activity-hold]'));
     if (turn.done) return;
     write(join(checkout, 'fixture-provider-marker.txt'), `${fixture.instanceId}:turns=${counters.turnStarts}\n`);
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };

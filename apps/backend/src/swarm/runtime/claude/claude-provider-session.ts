@@ -178,6 +178,21 @@ export class ClaudeProviderSession {
     pending.resolve(input.response as ChoiceAnswer[]);
   }
 
+  private accept(id: string): void {
+    const entry = this.inputs.get(id);
+    if (!entry || !this.current) return;
+    const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
+    // A steered input has its own consumption UUID but remains inside the
+    // accepted root. Keep that root identity for tool ancestry and Stop.
+    const root = !this.current.accepted || this.current.turn.nativeId === id;
+    if (root) this.current = { attemptId: entry.attemptId, turn, accepted: true, managed: entry.managed };
+    if (!entry.accepted) {
+      entry.accepted = true;
+      const pending = entry.dispatch; entry.dispatch = undefined;
+      if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "accepted", turn: this.current.turn }); }
+      if (root) this.publish({ type: "accepted", origin: this.origin(), turn });
+    }
+  }
   frame(frame: SDKMessage): void {
     if (!this.current) return; // Native startup is not an app attempt.
     const parent = "parent_tool_use_id" in frame ? frame.parent_tool_use_id : undefined;
@@ -185,21 +200,7 @@ export class ClaudeProviderSession {
     if (!parent) {
       const ids = "user_message_uuids" in frame && frame.user_message_uuids ? frame.user_message_uuids
         : "user_message_uuid" in frame && frame.user_message_uuid ? [frame.user_message_uuid] : [];
-      for (const id of ids) {
-        const entry = this.inputs.get(id);
-        if (!entry) continue;
-        const turn: ProviderTurnRef = { ...this.binding.scope, kind: "turn", conversationId: this.binding.conversation.nativeId, nativeId: id };
-        // A steered input has its own consumption UUID but remains inside the
-        // accepted root. Keep that root identity for tool ancestry and Stop.
-        const root = !this.current.accepted || this.current.turn.nativeId === id;
-        if (root) this.current = { attemptId: entry.attemptId, turn, accepted: true, managed: entry.managed };
-        if (!entry.accepted) {
-          entry.accepted = true;
-          const pending = entry.dispatch; entry.dispatch = undefined;
-          if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "accepted", turn: this.current.turn }); }
-          if (root) this.publish({ type: "accepted", origin: this.origin(), turn });
-        }
-      }
+      for (const id of ids) this.accept(id);
     }
     const currentOrigin = parent ? origin : this.origin();
     const turn = currentOrigin.kind === "child" ? currentOrigin.parentTurn : this.current.turn;
@@ -263,6 +264,9 @@ export class ClaudeProviderSession {
         if (frame.error_status === 401 || frame.error_status === 403) {
           // The CLI retries a refused key ten times with a growing delay; no retry can make it work, so the turn ends now.
           this.refused = message;
+          // The CLI only calls the endpoint for input it has taken, so the refusal is an answer for the root
+          // input: its delivery is known and the turn fails. Unknown delivery would ask for restart recovery.
+          this.accept(this.current.turn.nativeId);
           this.failure(message);
           this.onRefused?.();
         } else this.publish({ type: "retry", origin: currentOrigin, attempt: Math.max(1, frame.attempt), maxAttempts: Math.max(1, frame.max_retries), delayMs: frame.retry_delay_ms, message });

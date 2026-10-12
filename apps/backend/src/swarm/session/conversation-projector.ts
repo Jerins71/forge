@@ -103,6 +103,8 @@ interface ConversationProjectorDependencies {
   perf?: SidebarPerfRecorder;
   onEntryPersisted?: (agentId: string) => void;
   getPinnedMessageIds?: (agentId: string) => ReadonlySet<string> | undefined;
+  /** True while the agent runs a turn the user is not shown, such as project onboarding. */
+  isHiddenTurn?: (agentId: string) => boolean;
 }
 
 function resolveManagerContextId(descriptor: AgentDescriptor | undefined, fallbackAgentId: string): string {
@@ -455,6 +457,8 @@ export class ConversationProjector {
    * reply text is live only, because the canonical message is written by its own path.
    */
   observeProviderText(fact: Omit<ProviderTextFact, "sessionId" | "timestamp">): void {
+    // A hidden turn's reply is never shown, so its reasoning and reply text get no rows either.
+    if (this.deps.isHiddenTurn?.(fact.actorId)) return;
     const sessionId = resolveManagerContextId(this.deps.descriptors.get(fact.actorId), fact.actorId);
     const finished = this.activity.observeText({ ...fact, sessionId, timestamp: this.deps.now() });
     if (finished) this.emitActivitySummary(buildTimelineSummary(finished));
@@ -501,6 +505,12 @@ export class ConversationProjector {
   }
 
   emitAgentToolCall(event: AgentToolCallEvent): void {
+    // The tool calls of a hidden turn stay in the audit log and get no row, live or in the transcript.
+    if (this.deps.isHiddenTurn?.(event.actorAgentId)) {
+      this.emitConversationEntry(event);
+      this.deps.emitServerEvent("agent_tool_call", event satisfies ServerEvent);
+      return;
+    }
     // The live row updates before the canonical entry, so a finished row is ready for its summary.
     const activity = this.activity.observeTool(event);
     this.emitConversationEntry(event);
