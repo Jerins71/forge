@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline';
-import { mkdirSync, readFileSync, writeFileSync, realpathSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, realpathSync, existsSync } from 'node:fs';
 import { dirname, join, relative, isAbsolute, sep } from 'node:path';
 
 // Real app-server boundary: one JSON-RPC message per line, bidirectional requests.
@@ -43,7 +43,10 @@ function write(path, value) {
     return !isAbsolute(local) && local !== '..' && !local.startsWith(`..${sep}`);
   });
   if (!owned) throw new Error('Fixture write outside checkout');
-  writeFileSync(path, value, { mode: 0o600 });
+  // Write then rename, so a test reading the file never sees it half-written.
+  const temporary = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporary, value, { mode: 0o600 });
+  renameSync(temporary, path);
 }
 function count(name) { counters[name]++; write(counterPath, `${JSON.stringify(counters)}\n`); }
 write(counterPath, `${JSON.stringify(counters)}\n`);

@@ -6,7 +6,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it } from 'vitest'
 import type { ShellState } from '@forge/client-runtime'
 import { projectSessionWorkers } from '@/lib/ws-client/environment-projection'
-import { WorkerRow, workerTooltipLines } from './WorkerRow'
+import { WorkerRow } from './WorkerRow'
+import { workerTooltipLines } from './worker-tooltip'
 
 const shell = { sessions: new Map([['session', { projectId: 'project', updatedAt: '2026-10-11T00:00:00.000Z', workspace: { cwd: '/repo' } }]]) } as unknown as ShellState
 const summary = { agentId: 'reviewer', title: 'reviewer', status: 'idle' as const, model: { provider: 'openai-codex', modelId: 'gpt-6-sol', thinkingLevel: 'high' } }

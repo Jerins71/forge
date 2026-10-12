@@ -3,21 +3,12 @@ import React from 'react'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { isCodexAppServerExternalThreadDescriptor, type AgentDescriptor } from '@forge/protocol'
+import { isCodexAppServerExternalThreadDescriptor } from '@forge/protocol'
 import { CodexExternalThreadIcon, HighlightedText } from './shared'
 import { WorkerHighlightOutline } from '../WorkGraphWorkerHighlight'
 import { DeleteSessionDialog } from './dialogs/DeleteSessionDialog'
 import type { WorkerRowProps } from './types'
-
-/** The worker's name, then `preset · provider/model · reasoning`, or the model alone for a worker started without a preset. */
-export function workerTooltipLines(agent: Pick<AgentDescriptor, 'agentId' | 'displayName' | 'model' | 'specialistId' | 'specialistDisplayName'>): string[] {
-  const preset = agent.specialistDisplayName ?? agent.specialistId
-  const model = agent.model.modelId ? `${agent.model.provider}/${agent.model.modelId}` : ''
-  return [
-    agent.displayName || agent.agentId,
-    ...(preset ? [[preset, model, agent.model.thinkingLevel].filter(Boolean).join(' · ')] : model ? [model] : []),
-  ]
-}
+import { workerTooltipLines } from './worker-tooltip'
 
 export const WorkerRow = React.memo(function WorkerRow({
   agent,
