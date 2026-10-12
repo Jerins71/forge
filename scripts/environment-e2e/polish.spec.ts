@@ -518,6 +518,16 @@ test('the header meter shows the provider\'s context usage, and /compact compact
   const remoteAdmin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[1]!.name, 'bootstrap')
   const results: Record<string, unknown> = {}
   for (const [environment, session] of [[fleet.a, admin], [fleet.b, remoteAdmin]] as const) {
+    if (environment === fleet.b) {
+      // The browser reaches B once it is paired.
+      await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
+      const link = await fleet.mintGrant(fleet.b, 'link')
+      await page.getByRole('button', { name: 'Add environment' }).click()
+      await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
+      await page.getByRole('button', { name: 'Pair', exact: true }).click()
+      await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
+      await page.getByRole('button', { name: 'Done' }).click()
+    }
     const commandId = randomUUID()
     const launched = await fixtureRpcOnce(environment.baseUrl, session, 'session.launch', { commandId, projectId: environment.sessionId, title: 'Polish meter',
       workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Say hello', artifactIds: [] } })
@@ -544,15 +554,6 @@ test('the header meter shows the provider\'s context usage, and /compact compact
     await page.keyboard.press('Enter')
     await expect(page.getByText(/Codex compacts with its own prompt/).first()).toBeVisible({ timeout: 15_000 })
 
-    // Compacting while a turn runs says the session is still working.
-    await send(page, '[fixture:hold] Hold this turn open')
-    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 15_000 }).toBe('running')
-    await composer(page).fill('/compact')
-    await page.keyboard.press('Enter')
-    await expect(page.getByText(/still working/i).first()).toBeVisible({ timeout: 15_000 })
-    await page.getByRole('button', { name: 'Stop', exact: true }).click()
-    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 30_000 }).not.toBe('running')
-
     // Bare /compact compacts; the provider's next report drops the meter to 5%.
     await composer(page).fill('/compact')
     await page.keyboard.press('Enter')
@@ -561,6 +562,15 @@ test('the header meter shows the provider\'s context usage, and /compact compact
     await expect(transcript(page)).not.toContainText('/compact')
     await page.reload()
     await expect(meter).toHaveAttribute('aria-label', /^Context window 5% full/, { timeout: 30_000 })
+
+    // Compacting while a turn runs says the session is still working.
+    await send(page, '[fixture:hold] Hold this turn open')
+    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 15_000 }).toBe('running')
+    await composer(page).fill('/compact')
+    await page.keyboard.press('Enter')
+    await expect(page.getByText(/still working/i).first()).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 30_000 }).not.toBe('running')
     await shot(page, `context-meter-${environment === fleet.a ? 'local' : 'remote'}`)
     results[environment.environmentId] = { sessionId, before: '25%', after: '5%' }
   }
