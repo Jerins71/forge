@@ -51,7 +51,8 @@ import {
   resolveNextCapacityFallbackModelId
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
-import { resolveModelCredentialProvider } from "./secrets-env-service.js";
+import type { WorkerRunFailure } from "./prompt-resource-coordinator.js";
+import { pooledAvailabilityKey, resolveModelCredentialProvider } from "./secrets-env-service.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
 import {
   assertForgeRuntimeEligibleDescriptor,
@@ -151,6 +152,7 @@ export interface SwarmAgentLifecycleServiceOptions {
   >;
   secureWorkers: SecureWorkerLifecyclePort;
   modelCapacityBlocks: Map<string, ModelCapacityBlockLike>;
+  workerRunFailures?: ReadonlyMap<string, WorkerRunFailure>;
   sessionProvisioner: SessionProvisioner;
   descriptorMutations: AgentLifecycleDescriptorMutations;
   now: () => string;
@@ -281,6 +283,12 @@ export interface SwarmAgentLifecycleServiceOptions {
     descriptor: AgentDescriptor;
     specialistId?: string;
   }) => void | Promise<void>;
+}
+
+export interface WorkerModelStatus {
+  available: boolean;
+  blockedUntil?: string;
+  lastRunFailure?: WorkerRunFailure;
 }
 
 export class SwarmAgentLifecycleService {
@@ -1615,8 +1623,24 @@ export class SwarmAgentLifecycleService {
 
   /** The one worker-model admission rule: spawn checks it up front so assignment never refuses a worker it created. */
   private isWorkerModelAvailable(model: Pick<AgentModelDescriptor, "provider" | "modelId">, availability: ReadonlyMap<string, boolean>, requiresSecureRuntime: boolean): boolean {
-    return availability.get(resolveModelCredentialProvider(model)) === true && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
+    return availability.get(resolveModelCredentialProvider(model)) === true
+      && availability.get(pooledAvailabilityKey(model.provider.trim().toLowerCase())) !== false
+      && !this.getActiveModelCapacityBlock(model.provider, model.modelId)
       && (!requiresSecureRuntime || supportsSecureRuntimeProvider(model.provider));
+  }
+
+  /** Each model judged by the spawn admission rule, with the capacity block and last provider failure behind it. */
+  async describeWorkerModels(models: readonly Pick<AgentModelDescriptor, "provider" | "modelId">[]): Promise<WorkerModelStatus[]> {
+    const availability = await this.options.getManagedModelProviderAvailability();
+    return models.map((model) => {
+      const block = this.getActiveModelCapacityBlock(model.provider, model.modelId);
+      const lastRunFailure = this.options.workerRunFailures?.get(model.provider.trim().toLowerCase());
+      return {
+        available: this.isWorkerModelAvailable(model, availability, false),
+        ...(block ? { blockedUntil: new Date(block.blockedUntilMs).toISOString() } : {}),
+        ...(lastRunFailure ? { lastRunFailure } : {}),
+      };
+    });
   }
 
   private async assertWorkerModelAvailable(manager: AgentDescriptor, model: AgentModelDescriptor, input: SpawnAgentInput, preset: ResolvedWorkerPreset | undefined): Promise<void> {

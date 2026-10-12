@@ -452,7 +452,39 @@ export async function getManagedModelProviderCredentialAvailability(
   }
   // Claude native signs in with its own CLI login, never Forge's Anthropic credentials; only a missing API key stops it here.
   availability.set("claude-native", !(await missingNativeApiKey(config, "claude-native")));
+  // Pi runtimes on a pooled provider take a credential from the pool; a pool with none usable refuses them.
+  for (const provider of POOLED_SETTINGS_AUTH_PROVIDERS) {
+    if (options.credentialPoolService && await describePooledCredentialBlock(options.credentialPoolService, provider)) {
+      availability.set(pooledAvailabilityKey(provider), false);
+    }
+  }
   return availability;
+}
+
+/** Availability-map key for a pooled provider's pool, read only for models whose own provider is pooled. */
+export function pooledAvailabilityKey(provider: string): string {
+  return `pooled:${provider}`;
+}
+
+/**
+ * Why the Pi runtime would refuse every pooled credential for a provider (see `selectPooledCredential`):
+ * all paused, or more than one credential and none healthy. Undefined when the pool can serve.
+ */
+export async function describePooledCredentialBlock(poolService: CredentialPoolService, provider: string): Promise<string | undefined> {
+  if (!POOLED_SETTINGS_AUTH_PROVIDERS.has(provider)) return undefined;
+  let credentials;
+  try {
+    credentials = (await poolService.listPool(provider)).credentials;
+  } catch {
+    return undefined;
+  }
+  const enabled = credentials.filter((entry) => entry.enabled !== false);
+  if (credentials.length > 0 && enabled.length === 0) return `All pooled ${provider} credentials are paused`;
+  if (credentials.length <= 1 || enabled.some((entry) => entry.health === "healthy")) return undefined;
+  const until = enabled.flatMap((entry) => (entry.health === "cooldown" && entry.cooldownUntil ? [entry.cooldownUntil] : [])).sort((a, b) => a - b)[0];
+  return until
+    ? `All pooled ${provider} credentials are cooling down until ${new Date(until).toISOString()}`
+    : `All pooled ${provider} credentials have sign-in errors`;
 }
 
 export async function getManagedModelProviderCredentialSummaries(

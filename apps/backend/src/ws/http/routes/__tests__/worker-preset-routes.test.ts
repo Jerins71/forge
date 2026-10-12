@@ -5,11 +5,11 @@ import { join } from "node:path";
 import { FORGE_MODEL_CATALOG } from "@forge/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 
-// Credentials are the secrets service's concern; here only the model's own provider is signed in.
+// Credentials are the secrets service's concern; here only the first catalog model's provider is signed in.
 const SIGNED_IN = Object.values(FORGE_MODEL_CATALOG.models)[0]!.provider;
 vi.mock("../../../../swarm/secrets-env-service.js", () => ({
   getManagedModelProviderCredentialAvailability: async () => new Map([[SIGNED_IN, true]]),
-  resolveModelCredentialProvider: (model: { provider: string }) => model.provider,
+  describePooledCredentialBlock: async () => undefined,
 }));
 import { modelCatalogService } from "../../../../swarm/catalog/model-catalog-service.js";
 import { readWorkerPresetSettings, saveWorkerPresetSettings } from "../../../../swarm/specialists/worker-presets.js";
@@ -26,6 +26,8 @@ async function start(): Promise<{ url: string; dataDir: string }> {
   // The production settings service does exactly this, plus recycling managers.
   const swarmManager = {
     getConfig: () => ({}),
+    // The lifecycle service's spawn rule, reduced to "the signed-in provider's models are usable".
+    describeWorkerPresetModels: async (presets: { provider: string }[]) => presets.map((preset) => ({ available: preset.provider === SIGNED_IN })),
     getWorkerPresetSettings: () => readWorkerPresetSettings(dataDir),
     saveWorkerPresetSettings: (input: unknown) =>
       saveWorkerPresetSettings(dataDir, input, (modelId, provider) => modelCatalogService.isKnownModelId(modelId, provider)),
@@ -56,7 +58,7 @@ it("reads an empty list, saves a valid one, and reads it back marked by provider
     { name: "builder", provider: model.provider, modelId: model.modelId, reasoningLevel: "high", note: "Bounded work." },
     { name: "independent-reviewer", provider: other.provider, modelId: other.modelId, reasoningLevel: "high" },
   ] };
-  const answered = { version: 2, presets: [{ ...settings.presets[0], available: true }, { ...settings.presets[1], available: false }] };
+  const answered = { version: 2, presets: [{ ...settings.presets[0], available: true }, { ...settings.presets[1], available: false, unavailableReason: `Sign in to ${other.provider}` }] };
 
   expect(await (await fetch(url)).json()).toEqual({ version: 2, presets: [] });
   const saved = await put(url, settings);

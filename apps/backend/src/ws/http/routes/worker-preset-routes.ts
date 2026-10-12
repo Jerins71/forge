@@ -8,7 +8,7 @@ import {
   type WorkerPresetSettingsResponse,
 } from "@forge/protocol";
 import { modelCatalogService } from "../../../swarm/catalog/model-catalog-service.js";
-import { getManagedModelProviderCredentialAvailability, resolveModelCredentialProvider } from "../../../swarm/secrets-env-service.js";
+import { describePooledCredentialBlock, getManagedModelProviderCredentialAvailability } from "../../../swarm/secrets-env-service.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import {
   applyCorsHeaders,
@@ -86,13 +86,23 @@ async function getProviderAvailability(swarmManager: SwarmManager): Promise<Map<
   return getManagedModelProviderCredentialAvailability(swarmManager.getConfig(), { credentialPoolService });
 }
 
-/** Same credential rule the worker spawn path uses: a preset is usable when its provider is signed in. */
+/** Each preset judged by the spawn admission rule, with the reason it would be refused. */
 async function withAvailability(swarmManager: SwarmManager, settings: WorkerPresetSettings): Promise<WorkerPresetSettingsResponse> {
-  const availability = await getProviderAvailability(swarmManager);
-  return {
-    version: settings.version,
-    presets: settings.presets.map((preset) => ({ ...preset, available: availability.get(resolveModelCredentialProvider(preset)) === true })),
-  };
+  const statuses = await swarmManager.describeWorkerPresetModels(settings.presets);
+  const pool = typeof swarmManager.getCredentialPoolService === "function" ? swarmManager.getCredentialPoolService() : undefined;
+  const presets = await Promise.all(settings.presets.map(async (preset, index) => {
+    const status = statuses[index]!;
+    const unavailableReason = status.available ? undefined
+      : status.blockedUntil ? `Rate limited until ${status.blockedUntil}`
+        : (pool && await describePooledCredentialBlock(pool, preset.provider.trim().toLowerCase())) || `Sign in to ${preset.provider}`;
+    return {
+      ...preset,
+      available: status.available,
+      ...(unavailableReason ? { unavailableReason } : {}),
+      ...(status.lastRunFailure ? { lastRunFailure: status.lastRunFailure } : {}),
+    };
+  }));
+  return { version: settings.version, presets };
 }
 
 async function handleSettingsModelsRequest(
