@@ -215,8 +215,8 @@ export interface SpawnAgentInput {
   requiresSecureRuntime?: boolean;
   archetypeId?: AgentArchetypeId;
   systemPrompt?: string;
-  model?: SwarmModelPreset;
-  modelId?: string;
+  /** Exact catalog `provider/modelId`, only when the user asked for that model. Omitted means the preset's or manager's. */
+  model?: string;
   reasoningLevel?: SwarmReasoningLevel;
   cwd?: string;
   initialMessage?: string;

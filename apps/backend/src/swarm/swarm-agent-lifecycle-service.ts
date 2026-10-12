@@ -2,7 +2,7 @@ import type { AssignmentSelection } from "../environment/control/orchestration/a
 import type { CoreAgentMessagePort } from "./core-agent-message-port.js";
 import type { ManagerExactModelSelection } from "@forge/protocol";
 import { getSessionFilePath, getWorkerSessionFilePath } from "./data-paths.js";
-import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, parseSwarmModelPreset, parseSwarmReasoningLevel, assertSwarmModelIdNotRetired } from "./catalog/model-presets.js";
+import { normalizeThinkingLevelForModelDescriptor, resolveModelDescriptorFromPreset, parseSwarmModelPreset, parseSwarmReasoningLevel } from "./catalog/model-presets.js";
 import {
   DEFAULT_RUNTIME_SHUTDOWN_TIMEOUT_MS,
   type RuntimeAcquisitionRequirements,
@@ -51,6 +51,7 @@ import {
   resolveNextCapacityFallbackModelId
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
+import { buildManagerSelectionCatalog } from "./catalog/manager-selection-catalog.js";
 import type { WorkerRunFailure } from "./prompt-resource-coordinator.js";
 import { pooledAvailabilityKey, resolveModelCredentialProvider } from "./secrets-env-service.js";
 import { modelCatalogService } from "./catalog/model-catalog-service.js";
@@ -577,7 +578,6 @@ export class SwarmAgentLifecycleService {
       preset &&
       (
         input.model !== undefined ||
-        input.modelId !== undefined ||
         input.systemPrompt !== undefined ||
         input.archetypeId !== undefined
       )
@@ -610,8 +610,7 @@ export class SwarmAgentLifecycleService {
       }
       webSearch = preset.webSearch === true;
     } else {
-      const requestedModel = this.resolveSpawnModel(input, manager.model);
-      model = this.resolveSpawnModelWithCapacityFallback(requestedModel);
+      model = await this.resolveSpawnModel(input, manager.model);
       archetypeId = await this.options.resolveSpawnWorkerArchetypeId(input, agentId, managerProfileId);
       explicitSystemPrompt = input.systemPrompt?.trim();
       webSearch = input.webSearch === true;
@@ -1575,35 +1574,40 @@ export class SwarmAgentLifecycleService {
     }
   }
 
-  resolveSpawnModel(input: SpawnAgentInput, fallback: AgentModelDescriptor): AgentModelDescriptor {
-    const requestedPreset = parseSwarmModelPreset(input.model, "spawn_agent.model");
-    const requestedReasoningLevel = parseSwarmReasoningLevel(
-      input.reasoningLevel,
-      "spawn_agent.reasoningLevel"
-    );
-
-    const descriptor = requestedPreset
-      ? resolveModelDescriptorFromPreset(requestedPreset)
-      : {
-          ...fallback,
-          modelId: normalizeOptionalModelId(fallback.modelId) ?? fallback.modelId,
-          provider: normalizeOptionalAgentId(fallback.provider) ?? fallback.provider,
-          thinkingLevel: fallback.thinkingLevel
-        };
-
-    const requestedModelId = normalizeOptionalModelId(input.modelId);
-    if (requestedModelId) {
-      assertSwarmModelIdNotRetired(descriptor.provider, requestedModelId, "spawn_agent.modelId");
-      descriptor.modelId = requestedModelId;
+  /** Without a model the worker runs on the manager's. A named model must be an exact catalog `provider/modelId` that workers can use here. */
+  private async resolveSpawnModel(input: SpawnAgentInput, fallback: AgentModelDescriptor): Promise<AgentModelDescriptor> {
+    const requestedReasoningLevel = parseSwarmReasoningLevel(input.reasoningLevel, "spawn_agent.reasoningLevel");
+    const requested = input.model?.trim();
+    if (!requested) {
+      const descriptor = {
+        ...fallback,
+        modelId: normalizeOptionalModelId(fallback.modelId) ?? fallback.modelId,
+        provider: normalizeOptionalAgentId(fallback.provider) ?? fallback.provider,
+        thinkingLevel: requestedReasoningLevel ?? fallback.thinkingLevel,
+      };
+      descriptor.thinkingLevel = normalizeThinkingLevelForModelDescriptor(descriptor);
+      return this.resolveSpawnModelWithCapacityFallback(descriptor);
     }
 
-    if (requestedReasoningLevel) {
-      descriptor.thinkingLevel = requestedReasoningLevel;
+    const availability = await this.options.getManagedModelProviderAvailability();
+    const secure = input.requiresSecureRuntime === true;
+    const models = buildManagerSelectionCatalog(availability).models;
+    const usable = models.filter((entry) => this.isWorkerModelAvailable(entry, availability, secure));
+    const choices = usable.length > 0
+      ? `Available models: ${usable.map((entry) => `${entry.provider}/${entry.modelId}`).join(", ")}.`
+      : "No model is available; sign in to a provider in Settings > Authentication.";
+    const option = models.find((entry) => `${entry.provider}/${entry.modelId}` === requested);
+    if (!option) {
+      throw new Error(`Unknown model "${requested}". ${choices}`);
     }
-
-    descriptor.thinkingLevel = normalizeThinkingLevelForModelDescriptor(descriptor);
-
-    return descriptor;
+    if (!usable.includes(option)) {
+      throw new Error(`Model "${requested}" is not available on this machine. ${choices}`);
+    }
+    const validLevels = option.reasoningOptions.map((entry) => entry.id);
+    if (requestedReasoningLevel && !validLevels.includes(requestedReasoningLevel)) {
+      throw new Error(`Reasoning level "${requestedReasoningLevel}" is not valid for ${requested}. Valid levels: ${validLevels.join(", ")}.`);
+    }
+    return { provider: option.provider, modelId: option.modelId, thinkingLevel: requestedReasoningLevel ?? option.defaultReasoningId };
   }
 
   async resolveWorkerAssignmentSelection(worker: AgentDescriptor, requiresSecureRuntime: boolean, maxConcurrent?: number): Promise<AssignmentSelection> {
