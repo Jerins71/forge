@@ -198,6 +198,7 @@ function mapNonManagerRuntimeEvent(
         }
       ];
 
+    case "input_consumed":
     case "agent_start":
     case "agent_end":
     case "turn_start":

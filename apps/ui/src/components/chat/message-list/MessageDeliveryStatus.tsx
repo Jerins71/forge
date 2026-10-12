@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 const LABELS: Record<MessageCommandStatus['state'], string> = {
   sending: 'Sending…',
   accepted: 'Accepted',
+  queued: 'Queued, applies after the current step',
   not_confirmed: 'Not confirmed',
   failed: 'Failed',
   interrupted: 'Interrupted',

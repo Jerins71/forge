@@ -157,7 +157,7 @@ export class ManagerWsClient {
       this.outbox = new EnvironmentOutbox(client, () => this.refreshEnvironmentCommands())
       this.environmentDetach.push(
         client.receipts.subscribe((receipts) => receipts, () => {
-          this.outbox?.settle()
+          this.outbox?.settle(projectedCommandIds(this.environmentProjection))
           this.refreshEnvironmentCommands()
         }),
       )
@@ -957,6 +957,7 @@ export class ManagerWsClient {
       if (detail.projection !== projection) {
         projection = detail.projection
         this.environmentProjection = projection
+        this.outbox?.settle(projectedCommandIds(projection))
         this.keepViewedSessionRead()
         if (projection?.plan) this.handleServerEvent({ type: 'session_plan_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.plan })
         if (projection?.goal) this.handleServerEvent({ type: 'session_goal_snapshot', sessionAgentId: sessionId, profileId: projection.session.projectId, ...projection.goal })

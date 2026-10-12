@@ -337,6 +337,10 @@ export interface ConversationMessageEvent extends ConversationTimelineEntryMetad
   clientRequestId?: string;
   controlCommandId?: string;
   controlInputHash?: string;
+  /** Sent into a running turn and not yet consumed by the provider: kept durable, shown as queued, not as a bubble. */
+  steerPending?: true;
+  /** The steered input this entry places in the transcript, where the provider consumed it. */
+  consumedFrom?: string;
   projectAgentContext?: ProjectAgentMessageContext;
   externalThreadContext?: ExternalThreadMessageContext;
   terminal?: boolean;

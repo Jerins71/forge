@@ -98,6 +98,8 @@ export class EnvironmentOutbox {
       if (status) result[receipt.commandId] = status
     }
     for (const entry of this.entries.values()) {
+      // Delivered but not yet in the transcript: a steer the provider has not consumed.
+      if (receipts.get(entry.commandId)?.state === 'succeeded') result[entry.commandId] = { state: 'queued', detail: null, action: null }
       if (receipts.has(entry.commandId)) continue
       result[entry.commandId] = entry.error
         ? { state: 'not_confirmed', detail: entry.error.message, action: entry.error.retryable && !entry.inFlight ? 'retry' : null }
@@ -125,10 +127,10 @@ export class EnvironmentOutbox {
     return messages
   }
 
-  /** Forgets submits whose receipts show they were delivered. */
-  settle(): void {
+  /** Forgets submits that were delivered and are in the transcript; a delivered steer stays queued until consumed. */
+  settle(projectedCommandIds: ReadonlySet<string>): void {
     for (const receipt of this.client.receipts.getSnapshot().values())
-      if (receipt.state === 'succeeded') this.entries.delete(receipt.commandId)
+      if (receipt.state === 'succeeded' && projectedCommandIds.has(receipt.commandId)) this.entries.delete(receipt.commandId)
   }
 
   private async deliver(entry: OutboxEntry): Promise<void> {

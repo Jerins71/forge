@@ -18,8 +18,11 @@ export class CodexRuntimeEvents {
     const id = String(item?.id ?? params.itemId ?? "");
     if (!id || this.completed.has(id)) return [];
     // Input steered into the turn abandons the reply being streamed: Codex never completes that item.
-    // End it here, before the answer, so the turn's last message is the answer.
-    if (item?.type === "userMessage") return this.abandonedReplies().map(open => this.messageEvent("message_end", open));
+    // End it here, before the answer, so the turn's last message is the answer. The input is consumed here.
+    if (item?.type === "userMessage") {
+      this.completed.add(id);
+      return [...this.abandonedReplies().map(open => this.messageEvent("message_end", open)), { type: "input_consumed" }];
+    }
     if (item?.type === "fileChange" && Array.isArray(item.changes)) {
       const changes = JSON.stringify(item.changes, null, 2);
       // Never offer approval for a truncated or unavailable diff.
