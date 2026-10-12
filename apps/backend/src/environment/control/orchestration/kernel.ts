@@ -139,7 +139,8 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       advance(owner.threadId);
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") { emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } }); advance(owner.threadId); }
-    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome,true); advance(owner.threadId); }
+    // A provider that answers a user Stop's interrupt before the drain is recorded settles the run as that same stop.
+    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome === "interrupted" && owner.desired === "stopped" ? "cancelled" : observation.outcome,true); advance(owner.threadId); }
     else if (observation.type === "error") {
       if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
       else { finish(state.runs[run.runId], "failed",observation.delivery === "accepted"); advance(owner.threadId); }

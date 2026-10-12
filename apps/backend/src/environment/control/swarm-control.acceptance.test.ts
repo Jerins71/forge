@@ -844,7 +844,7 @@ it("Stop's interrupted run is never failure attention", async () => {
   await f.core.effectWorker.drain(); await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
   await f.core.controlService.execute(f.paired.principal, "session.stop", { commandId: randomUUID(), sessionId: f.sessionId }); await f.core.effectWorker.drain();
   expect(loadState(f.database).runs[`run-${commandId}`].state).toBe("terminal");
-  expect(["interrupted", "cancelled"]).toContain(loadState(f.database).runs[`run-${commandId}`].outcome);
+  expect(loadState(f.database).runs[`run-${commandId}`].outcome).toBe("cancelled");
   expect(f.manager.getSessionAttentionSnapshot().attentions.some(row => row.sessionAgentId === f.sessionId && row.reason === "work_failed")).toBe(false);
 });
 

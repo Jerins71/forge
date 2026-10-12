@@ -142,6 +142,27 @@ describe("authoritative run decisions", () => {
     f.run({ type: "thread.resume", commandId: "resume", now, threadId: "manager" });
     expect(f.state().threads.manager.generation).toBe(1);
   });
+  it.each([
+    ["the provider acknowledges the stop's interrupt first", "interrupted", "cancelled"],
+    ["the provider says nothing before the drain", null, "cancelled"],
+    ["the turn finished on its own before the drain", "completed", "completed"],
+  ] as const)("a user Stop settles its run the same way whether %s", (_name, reported, outcome) => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 0, "accepted");
+    f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });
+    const conversation = { threadId: "manager", bindingId: "binding", generation: 0, kind: "conversation" as const, nativeId: "native" };
+    if (reported) f.run({ type: "provider.observe", commandId: "obs-terminal", now, observation: { scope: { threadId: "manager", bindingId: "binding", generation: 0 }, attemptId: "attempt-one", sequence: 1,
+      origin: { kind: "root", conversation }, type: "terminal", outcome: reported, terminalAuthority: "root_attempt" } });
+    f.run({ type: "binding.drained", commandId: "clean", now, threadId: "manager", bindingId: "binding", status: "clean" });
+    expect(f.state().runs["run-one"]).toMatchObject({ state: "terminal", outcome });
+    expect(f.state().threads.manager).toMatchObject({ desired: "stopped", shutdown: "clean" }); expect(f.state().threads.manager.activeRunId).toBeUndefined();
+  });
+  it("keeps a provider's own interruption distinct from a user Stop", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 0, "accepted");
+    const conversation = { threadId: "manager", bindingId: "binding", generation: 0, kind: "conversation" as const, nativeId: "native" };
+    f.run({ type: "provider.observe", commandId: "obs-terminal", now, observation: { scope: { threadId: "manager", bindingId: "binding", generation: 0 }, attemptId: "attempt-one", sequence: 1,
+      origin: { kind: "root", conversation }, type: "terminal", outcome: "interrupted", terminalAuthority: "root_attempt" } });
+    expect(f.state().runs["run-one"]).toMatchObject({ state: "terminal", outcome: "interrupted" });
+  });
   it.each(["pending", "quarantined"] as const)("settles a stopped thread's stuck run at the process boundary when its drain was %s", shutdown => {
     const f = fixture(); f.submit("one"); f.record("one"); f.acquire(); f.dispatch("one"); f.observe("attempt-one", 0, "accepted");
     f.run({ type: "thread.stop", commandId: "stop", now, threadId: "manager" });
