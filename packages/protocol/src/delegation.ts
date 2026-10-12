@@ -20,6 +20,17 @@ export interface WorkerPresetSettings {
   presets: WorkerPreset[]
 }
 
+/** A preset as the Settings API answers it: whether its provider is signed in on this environment. */
+export interface WorkerPresetStatus extends WorkerPreset {
+  available: boolean
+}
+
+/** GET and PUT `/api/settings/worker-presets` answer; PUT still takes plain `WorkerPresetSettings`. */
+export interface WorkerPresetSettingsResponse {
+  version: 2
+  presets: WorkerPresetStatus[]
+}
+
 export const WORKER_PRESET_NAME_MAX_LENGTH = 64
 export const WORKER_PRESET_NOTE_MAX_LENGTH = 300
 

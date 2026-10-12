@@ -35,7 +35,7 @@ export function SettingsSection({
  */
 export function SettingsSectionGrid({ children }: { children: React.ReactNode }) {
   return (
-    <div className="columns-[34rem] gap-5 [&>*]:break-inside-avoid">
+    <div className="columns-[29rem] gap-5 [&>*]:break-inside-avoid">
       {children}
     </div>
   )

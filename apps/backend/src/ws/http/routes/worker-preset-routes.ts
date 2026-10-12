@@ -4,9 +4,11 @@ import {
   MANAGER_REASONING_LEVELS,
   type ManagerReasoningLevel,
   type ModelPresetInfo,
+  type WorkerPresetSettings,
+  type WorkerPresetSettingsResponse,
 } from "@forge/protocol";
 import { modelCatalogService } from "../../../swarm/catalog/model-catalog-service.js";
-import { getManagedModelProviderCredentialAvailability } from "../../../swarm/secrets-env-service.js";
+import { getManagedModelProviderCredentialAvailability, resolveModelCredentialProvider } from "../../../swarm/secrets-env-service.js";
 import type { SwarmManager } from "../../../swarm/swarm-manager.js";
 import {
   applyCorsHeaders,
@@ -55,7 +57,7 @@ async function handleWorkerPresetsRequest(
   applyCorsHeaders(request, response, ENABLED_METHODS);
   if (request.method === "GET") {
     try {
-      sendJson(response, 200, { ...await swarmManager.getWorkerPresetSettings() });
+      sendJson(response, 200, { ...await withAvailability(swarmManager, await swarmManager.getWorkerPresetSettings()) });
     } catch (error) {
       sendJson(response, 500, {
         error: error instanceof Error ? error.message : String(error),
@@ -66,7 +68,7 @@ async function handleWorkerPresetsRequest(
   if (request.method === "PUT") {
     try {
       const saved = await swarmManager.saveWorkerPresetSettings(await readJsonBody(request));
-      sendJson(response, 200, { ...saved });
+      sendJson(response, 200, { ...await withAvailability(swarmManager, saved) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       sendJson(response, getErrorStatusCode(message), { error: message });
@@ -75,6 +77,22 @@ async function handleWorkerPresetsRequest(
   }
   response.setHeader("Allow", ENABLED_METHODS);
   sendJson(response, 405, { error: "Method Not Allowed" });
+}
+
+async function getProviderAvailability(swarmManager: SwarmManager): Promise<Map<string, boolean>> {
+  const credentialPoolService = typeof swarmManager.getCredentialPoolService === "function"
+    ? swarmManager.getCredentialPoolService()
+    : undefined;
+  return getManagedModelProviderCredentialAvailability(swarmManager.getConfig(), { credentialPoolService });
+}
+
+/** Same credential rule the worker spawn path uses: a preset is usable when its provider is signed in. */
+async function withAvailability(swarmManager: SwarmManager, settings: WorkerPresetSettings): Promise<WorkerPresetSettingsResponse> {
+  const availability = await getProviderAvailability(swarmManager);
+  return {
+    version: settings.version,
+    presets: settings.presets.map((preset) => ({ ...preset, available: availability.get(resolveModelCredentialProvider(preset)) === true })),
+  };
 }
 
 async function handleSettingsModelsRequest(
@@ -94,13 +112,7 @@ async function handleSettingsModelsRequest(
 
   if (request.method === "GET" && requestUrl.pathname === SETTINGS_MODELS_ENDPOINT_PATH) {
     await swarmManager.reloadModelCatalogOverridesAndProjection();
-    const credentialPoolService = typeof swarmManager.getCredentialPoolService === "function"
-      ? swarmManager.getCredentialPoolService()
-      : undefined;
-    const providerAvailability = await getManagedModelProviderCredentialAvailability(
-      swarmManager.getConfig(),
-      { credentialPoolService }
-    );
+    const providerAvailability = await getProviderAvailability(swarmManager);
     const models = [
       ...modelCatalogService.getSpecialistModelPresetInfoList(),
       ...buildOpenRouterSelectableModels(),

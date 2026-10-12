@@ -2,12 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PendingAttachment } from '@/lib/file-attachments'
 import { useLatestRef } from '@/hooks/useLatestRef'
 import {
-  loadDrafts,
+  sharedTextDrafts,
   persistDrafts,
-  loadAttachmentDrafts,
+  sharedAttachmentDrafts,
   persistAttachmentDrafts,
-  isEnvironmentDraftKey,
-  subscribeEnvironmentDraftPurge,
+  subscribeDraftRemoval,
 } from '../draft-storage'
 
 interface UseDraftOptions {
@@ -30,12 +29,12 @@ export function useDraft({ draftKey }: UseDraftOptions): UseDraftReturn {
   const [input, setInput] = useState('')
   const [attachedFiles, setAttachedFiles] = useState<PendingAttachment[]>([])
 
-  const draftsRef = useRef<Record<string, string>>(loadDrafts())
+  const draftsRef = useRef<Record<string, string>>(sharedTextDrafts())
   const prevDraftKeyRef = useRef<string | undefined>(undefined)
   const inputRef = useLatestRef(input)
 
   const attachedFilesRef = useLatestRef(attachedFiles)
-  const attachmentDraftsRef = useRef<Record<string, PendingAttachment[]>>(loadAttachmentDrafts())
+  const attachmentDraftsRef = useRef<Record<string, PendingAttachment[]>>(sharedAttachmentDrafts())
 
   // Save current draft and restore the next draft whenever the storage key changes.
   useEffect(() => {
@@ -66,13 +65,8 @@ export function useDraft({ draftKey }: UseDraftOptions): UseDraftReturn {
     prevDraftKeyRef.current = draftKey
   }, [attachedFilesRef, draftKey, inputRef])
 
-  useEffect(() => subscribeEnvironmentDraftPurge((environmentId) => {
-    for (const drafts of [draftsRef.current, attachmentDraftsRef.current]) {
-      for (const key of Object.keys(drafts)) {
-        if (isEnvironmentDraftKey(key, environmentId)) delete drafts[key]
-      }
-    }
-    if (draftKey && isEnvironmentDraftKey(draftKey, environmentId)) {
+  useEffect(() => subscribeDraftRemoval((matches) => {
+    if (draftKey && matches(draftKey)) {
       setInput('')
       setAttachedFiles([])
     }

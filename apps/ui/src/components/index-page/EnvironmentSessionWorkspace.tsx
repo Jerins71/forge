@@ -18,8 +18,10 @@ import { originRegistry, useOriginSlice } from '@/lib/origin-store'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { SessionModelPicker } from '@/components/chat/message-input/SessionModelPicker'
+import { clearDraft } from '@/components/chat/message-input/draft-storage'
 
 const LAST_MACHINE_KEY = (groupKey: string) => `forge.runOn.lastEnvironment.${groupKey}`
+const launchDraftKey = (groupKey: string) => `launch:${groupKey}`
 const SETUP_PHASE_LABEL: Record<string, string> = {
   validating: 'Checking the destination', cloning: 'Cloning', publishing: 'Finishing the checkout',
   creating_project: 'Registering the project',
@@ -42,6 +44,8 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
   const [choice, setChoiceState] = useState<RunOnChoice | null>(() => initialChoice(group, primaryEnvironmentId, groupKey))
   const handleLaunched = useCallback((target: ProjectRef, receipt: CommandReceipt) => {
     try { window.localStorage.setItem(LAST_MACHINE_KEY(groupKey), target.environmentId) } catch { /* Preference only. */ }
+    // The first message now lives in the session; the next new thread starts empty.
+    if (receipt.sessionId) clearDraft(launchDraftKey(groupKey))
     if (receipt.sessionId) onLaunched({ environmentId: target.environmentId, sessionId: receipt.sessionId })
   }, [groupKey, onLaunched])
   const launch = useLaunchSession(choice?.kind === 'checkout' ? choice.target : null, handleLaunched)
@@ -100,7 +104,7 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
           </div>
         </div>
         <MessageInput
-          draftKey={`launch:${groupKey}`}
+          draftKey={launchDraftKey(groupKey)}
           isLoading={launch.submitting}
           disabled={!launch.target}
           placeholderOverride={launch.target ? undefined : setupEnvironmentId ? 'Set this machine up first, then send' : 'Choose where to run this thread first'}
