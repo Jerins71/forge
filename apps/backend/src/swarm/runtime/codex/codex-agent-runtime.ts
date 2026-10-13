@@ -276,10 +276,9 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.legacyStart = { runId: deliveryId, message };
     let submitted = false;
     try {
-      const text = [this.pinned ? `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>` : undefined, message.text].filter(Boolean).join("\n\n");
       submitted = true;
       const response = await this.providerAdapter.start({ binding: this.providerBinding, runId: deliveryId,
-        attemptId: deliveryId, input: { ...message, text } });
+        attemptId: deliveryId, input: message });
       if (response.status !== "accepted") throw new Error("Codex did not acknowledge a turn identity");
       if (this.active?.attemptId === deliveryId) this.active.id = response.turn.nativeId;
       this.markThreadStarted();
@@ -307,6 +306,8 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
     this.assertOpen();
     if (this.active) throw new ProviderDispatchRejectedError("busy");
     const legacy = this.legacyStart?.runId === input.runId;
+    // Both controlled and legacy dispatch resume with the current pinned context.
+    if (this.pinned) input.input = { ...input.input, text: `<forge_pinned_context>\n${this.pinned}\n</forge_pinned_context>\n\n${input.input.text}` };
     this.beginTurn(input.attemptId, input.runId, legacy);
     try {
       await this.publishStatus();

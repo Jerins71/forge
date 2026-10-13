@@ -59,6 +59,7 @@ export class SwarmCompactionCoordinator {
     const customInstructions = await this.resolveInstructions(
       descriptor,
       options?.customInstructions,
+      runtime,
     );
 
     this.options.logDebug("manager:compact:start", {
@@ -110,9 +111,13 @@ export class SwarmCompactionCoordinator {
 
   private async resolveInstructions(
     descriptor: ManagerDescriptor,
-    customInstructions?: string,
+    customInstructions: string | undefined,
+    runtime: SwarmAgentRuntime,
   ): Promise<string | undefined> {
     const registry = await this.options.syncPinnedContent(descriptor);
+    // Codex cannot take summary hints. Its next native input receives fresh plan,
+    // goal, and pinned context through their existing input owners.
+    if (runtime.runtimeType === "codex") return customInstructions?.trim() || undefined;
     const instructionsWithPins = combineCompactionCustomInstructions(
       customInstructions?.trim() || undefined,
       registry,
