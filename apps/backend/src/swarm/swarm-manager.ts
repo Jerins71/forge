@@ -210,8 +210,9 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private terminalArchiveHooks: TerminalArchiveHooks | undefined;
   private readonly observabilityCoordinator: SwarmObservabilityCoordinator;
   private readonly historySearchService: HistorySearchService;
+  private readonly browserEngine?: import("./browser-automation/browser-engine.js").BrowserEngine;
   private readonly browserAutomationService: BrowserAutomationService;
-  readonly invokeBrowserAutomation = createBrowserAutomationManagerInvoker({ getDescriptor: (id) => this.descriptors.get(id), getService: () => this.browserAutomationService });
+  readonly invokeBrowserAutomation = createBrowserAutomationManagerInvoker({ getDescriptor: (id) => this.descriptors.get(id), getService: () => this.browserEngine ?? this.browserAutomationService });
   constructor(config: SwarmConfig, options?: SwarmManagerOptions) {
     super();
     this.now = options?.now ?? nowIso;
@@ -260,7 +261,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     this.skillMetadataService = foundation.skillMetadataService;
     this.skillFileService = foundation.skillFileService;
     this.secretsEnvService = foundation.secretsEnvService;
-    this.observabilityCoordinator = foundation.observabilityCoordinator; this.browserAutomationService = options?.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.config.paths.dataDir, now: this.now });
+    this.browserEngine = options?.browserEngine; this.observabilityCoordinator = foundation.observabilityCoordinator; this.browserAutomationService = options?.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.config.paths.dataDir, now: this.now });
     this.agentDirectory = this.createAgentDirectory();
     this.secureSecretSettingsService = new SecureSecretSettingsService({
       dataDir: this.config.paths.dataDir,

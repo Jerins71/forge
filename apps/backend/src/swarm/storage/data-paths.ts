@@ -683,3 +683,8 @@ function canonicalInstallationPath(value: string): string {
     return resolve(value);
   }
 }
+
+/** Browser binaries are shareable cache; project profiles never leave the owning machine. */
+export function getBrowserRuntimeDir(dataDir: string): string { return join(getManagedRuntimesDir(dataDir), "browser"); }
+export function getBrowserProfileDir(dataDir: string, profileId: string): string { return join(getProfileDir(dataDir, profileId), "browser", "profile"); }
+export function getBrowserCookieAuditPath(dataDir: string, profileId: string): string { return join(getProfileDir(dataDir, profileId), "browser", "imported-sites.json"); }

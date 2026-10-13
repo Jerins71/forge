@@ -20,6 +20,8 @@ import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { acquireRuntimeLock } from "./runtime-lock.js";
 import { FeedbackService } from "./swarm/feedback-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
+import { BrowserEngine } from "./swarm/browser-automation/browser-engine.js";
+import { DesktopBrowserChannel } from "./swarm/browser-automation/desktop-browser-channel.js";
 import { BrowserAutomationService } from "./swarm/browser-automation/index.js";
 import { seedBuiltins } from "./swarm/agents/specialists/specialist-registry.js";
 import { UnreadTracker } from "./swarm/session/unread-tracker.js";
@@ -46,6 +48,7 @@ export interface ServerReadyInfo {
 }
 
 export interface StartServerOptions {
+  desktopBrowserParent?: boolean;
   config?: SwarmConfig;
   logger?: Partial<ServerLogger>;
   onReady?: (info: ServerReadyInfo) => Promise<void> | void;
@@ -94,6 +97,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let swarmManager: SwarmManager | undefined;
   let wsServer: SwarmWebSocketServer | undefined;
   let environment: EnvironmentService | undefined;
+  const browserEngine = new BrowserEngine({ dataDir: config.paths.dataDir,
+    desktop: new DesktopBrowserChannel(options.desktopBrowserParent === true),
+    resolveSession: id => { const descriptor = swarmManager?.getAgent(id); return descriptor?.role === "manager" ? descriptor.profileId : undefined; },
+  });
   const browserAutomationService = new BrowserAutomationService({
     dataDir: config.paths.dataDir,
     onSessionChanged: (snapshot, reason) => wsServer?.broadcastBrowserSessionChanged(snapshot, reason),
@@ -108,6 +115,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
     swarmManager = new SwarmManager(config, {
       observability: observabilityService,
       browserAutomationService,
+      browserEngine,
     });
   } catch (error) {
     await Promise.allSettled([
@@ -371,6 +379,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       observabilityService,
       feedbackService,
       browserAutomationService,
+      browserEngine,
       secureControlToken: options.secureControlToken,
     });
 
@@ -393,6 +402,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       handleTerminalSessionLifecycle,
       handleTerminalAgentsSnapshot,
       releaseRuntimeLock,
+      browserEngine,
     });
 
     activeServer = server;
@@ -434,6 +444,7 @@ class BackendServer implements StartedServer {
   readonly environment: EnvironmentDescriptor;
   private readonly environmentService: EnvironmentService;
 
+  private readonly browserEngine: BrowserEngine;
   private readonly swarmManager: SwarmManager;
   private readonly observabilityService: ObservabilityFacade;
   private readonly wsServer: SwarmWebSocketServer;
@@ -448,6 +459,7 @@ class BackendServer implements StartedServer {
 
   constructor(options: {
     config: SwarmConfig;
+    browserEngine: BrowserEngine;
     environment: EnvironmentService;
     port: number;
     swarmManager: SwarmManager;
@@ -460,6 +472,7 @@ class BackendServer implements StartedServer {
     handleTerminalAgentsSnapshot: () => void;
     releaseRuntimeLock: () => void;
   }) {
+    this.browserEngine = options.browserEngine;
     this.host = options.config.host;
     this.port = options.port;
     this.config = options.config;
@@ -501,6 +514,7 @@ class BackendServer implements StartedServer {
       await this.environmentService.stop();
     } finally {
       await Promise.allSettled([
+        this.browserEngine.shutdown(),
         this.queueSchedulerSync(new Set<string>()),
         this.swarmManager.closeSecureSessions(),
         this.swarmManager.disposeHistoryRecall(),

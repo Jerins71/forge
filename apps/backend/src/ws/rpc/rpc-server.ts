@@ -135,6 +135,12 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
           const id = randomUUID();
           let stream: AsyncIterable<unknown>;
           switch (streamMethod) {
+            case 'browser.tabs.subscribe':
+              if (!deps.browserEngine) throw new StreamFault('UNAVAILABLE', 'Browser engine is unavailable');
+              stream = deps.browserEngine.tabs(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
+            case 'browser.screencast.subscribe':
+              if (!deps.browserEngine) throw new StreamFault('UNAVAILABLE', 'Browser engine is unavailable');
+              stream = deps.browserEngine.screencast(principal, input as RpcInput<typeof streamMethod>, controller.signal, id); break;
             case "shell.subscribe": stream = deps.shellStream.shell(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
             case "session.subscribe": stream = deps.detailStream.detail(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
             case "session.features.subscribe":

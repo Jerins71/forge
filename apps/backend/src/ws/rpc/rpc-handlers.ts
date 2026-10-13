@@ -7,6 +7,7 @@ import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
+  browserEngine?: ReturnType<typeof import('./browser-engine-rpc.js').createBrowserEngineRpc>;
   lifecycle?: ReturnType<typeof import("./session-lifecycle-rpc.js").createSessionLifecycleRpc>;
   browser?: ReturnType<typeof import('./browser-workspace-rpc.js').createBrowserWorkspaceRpc>;
   sessionState?: ReturnType<typeof import("./session-state-rpc.js").createSessionStateRpc>;
@@ -22,6 +23,10 @@ export interface RpcDependencies {
 }
 
 export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, _signal: AbortSignal): Promise<unknown> | unknown {
+  if (method.startsWith('browser.tabs.') || method.startsWith('browser.screencast.') || method.startsWith('browser.cookies.') || method === 'browser.engine.setup') {
+    if (!deps.browserEngine) throw new StreamFault('UNAVAILABLE', 'Browser engine is unavailable');
+    return deps.browserEngine.execute(principal, method as import('./browser-engine-rpc.js').BrowserEngineMethod, input as RpcInput<import('./browser-engine-rpc.js').BrowserEngineMethod>);
+  }
   if ((lifecycleMethods as readonly string[]).includes(method)) {
     if (!deps.lifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle service is unavailable");
     return deps.lifecycle.execute(principal, method as SessionLifecycleMethod, input);

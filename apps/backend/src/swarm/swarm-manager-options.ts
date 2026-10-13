@@ -19,5 +19,6 @@ export interface SwarmManagerOptions {
   /** Kill/delete cleanup-only seam. Distinct from stop interrupts; defaults to Codex cleanup. */
   terminateExternalThreadSidecarTurn?: ExternalThreadTerminateCleanupCallback;
   compactionRuntimeSettingsProvider?: CompactionRuntimeSettingsProvider;
+  browserEngine?: import("./browser-automation/browser-engine.js").BrowserEngine;
   browserAutomationService?: BrowserAutomationService;
 }

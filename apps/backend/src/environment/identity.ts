@@ -42,6 +42,7 @@ export class EnvironmentIdentityMismatch extends Error {
 const descriptorValidator = TypeCompiler.Compile(EnvironmentDescriptorSchema);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const capabilities: EnvironmentCapabilities = {
+  browserEngine: true,
   projectAgentMetadata: true,
   sessionState: true,
   shellResume: true,
