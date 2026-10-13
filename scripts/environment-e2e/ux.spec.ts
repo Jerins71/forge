@@ -229,6 +229,9 @@ test('a new thread starts on a paired machine', async ({ page }) => {
   await page.keyboard.press('Enter')
   await page.getByRole('option').filter({ hasText: b.label }).first().click()
   await expect(runOn).toContainText(b.label)
+  // The picker hands focus back to its trigger a task after it closes; typing before then lets that
+  // late focus take the Enter meant for the composer and reopen the picker.
+  await expect(runOn).toBeFocused()
   const launched = await launchThread(page, b, 'Start a plain thread remotely')
   await expect(page).toHaveURL(new RegExp(`env=${b.environmentId}`))
   // Secure Sessions can't run on a paired machine, so its composer carries no "Unavailable" chip.
