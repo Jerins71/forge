@@ -146,6 +146,15 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
           });
         }
         return {};
+      }] }], UserPromptSubmit: [{ hooks: [async event => {
+        if (event.hook_event_name === "UserPromptSubmit" && event.source === "schedule_wakeup" && !event.agent_id) {
+          await runtime.serialize(async () => {
+            if (runtime.stopping) return;
+            // A fired prompt ends the one-shot wait even if the reported schedule is later.
+            for (const activity of runtime.mapper.syncScheduledWakeups([])) await runtime.emit(activity);
+          });
+        }
+        return {};
       }] }], PreToolUse: [{ hooks: [claudeCommandWaitHook] }], PostToolUse: [{ hooks: [async event => event.hook_event_name === "PostToolUse"
         ? { hookSpecificOutput: { hookEventName: "PostToolUse", updatedToolOutput: runtime.guard(event.tool_response) } } : {}] }] },
       spawnClaudeCodeProcess(spawnOptions) {

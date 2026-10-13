@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { ChevronDown } from 'lucide-react'
@@ -573,6 +574,13 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
   // current row count without re-creating on every message append.
   const rowCountRef = useRef(0)
 
+  // The schedule row finished when it was created; countdown follows the actual native wait,
+  // which can end before its estimated date. Its stable date scopes the countdown to that wait.
+  const waitingWakeAt = useSyncExternalStore(
+    liveActivity?.subscribe ?? (() => () => {}),
+    () => liveActivity?.getSnapshot().find(item => item.actorId === activeAgentId && item.toolName === 'ScheduleWakeup' && item.status === 'running')?.wakeAt,
+    () => undefined,
+  )
   const displayEntries = useMemo(() => buildDisplayEntries(messages), [messages])
   // The newest turn: where the live rows continue, and whether its timer is already on screen.
   const liveTurn = useMemo(() => {
@@ -1464,6 +1472,7 @@ export const MessageList = forwardRef<MessageListHandle, MessageListProps>(funct
           expandedIds={expandedActivityIds}
           onToggle={toggleActivity}
           loadContent={loadActivityContent}
+          waitingWakeAt={waitingWakeAt}
           turn={entry.turn ? { startedAt: entry.turn.startedAt, ...(inLiveTurn ? {} : { endedAt: entry.turn.endedAt }) } : undefined}
         />
       )

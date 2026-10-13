@@ -40,6 +40,22 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
 }
 
 describe("Claude native lifecycle", () => {
+  it("settles a scheduled wait as soon as its fired prompt arrives", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-wake-fire-")); const f = await fixture(root);
+    try {
+      await f.runtime.sendMessage("Work"); await f.input.next();
+      const callHook = async (name: string, event: unknown) => {
+        const hooks = f.setup.hooks as Record<string, Array<{ hooks: Array<(...args: any[]) => Promise<unknown>> }>>;
+        expect(hooks[name]?.[0]?.hooks[0]).toBeTypeOf("function");
+        await hooks[name]![0]!.hooks[0]!(event, undefined, { signal: new AbortController().signal });
+      };
+      await callHook("Stop", { hook_event_name: "Stop", session_crons: [{ id: "next", recurring: false, schedule: "0 0 1 1 *", prompt: "Check" }] });
+      const before = f.events.length;
+      await callHook("UserPromptSubmit", { hook_event_name: "UserPromptSubmit", source: "schedule_wakeup", prompt: "Check" });
+      expect(f.events.slice(before)).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolCallId: "claude-wakeup:next" }));
+    } finally { await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("keeps the shown reply while native interruption is still pending", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-freeze-")); const f = await fixture(root);
     let release!: () => void;

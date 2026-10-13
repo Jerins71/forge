@@ -34,6 +34,7 @@ export interface ActivityGroupProps {
   expandedIds: ReadonlySet<string>
   onToggle: (id: string) => void
   loadContent?: ActivityContentLoader
+  waitingWakeAt?: string
   /** Set on the first activity of a turn. */
   turn?: { startedAt: string; endedAt?: string }
 }
@@ -42,7 +43,7 @@ export interface ActivityGroupProps {
  * A run of consecutive rows, folded into one line such as "Ran 2 commands". The fold is keyed by the
  * run's first row, so it survives the run moving from the live rows into the durable timeline.
  */
-export const ActivityGroup = memo(function ActivityGroup({ rows, open, live = false, expandedIds, onToggle, loadContent, turn }: ActivityGroupProps) {
+export const ActivityGroup = memo(function ActivityGroup({ rows, open, live = false, expandedIds, onToggle, loadContent, turn, waitingWakeAt }: ActivityGroupProps) {
   const listId = useId()
   const groupId = `group:${rows[0]?.itemId}`
   const expanded = open || expandedIds.has(groupId)
@@ -75,7 +76,7 @@ export const ActivityGroup = memo(function ActivityGroup({ rows, open, live = fa
       {listed.length ? (
         <div id={listId} className={cn('flex min-w-0 flex-col', !open && 'ml-2 border-l border-border/50 pl-2')}>
           {listed.map((row) => (
-            <ActivityRow key={row.itemId} row={row} expanded={expandedIds.has(row.itemId)} onToggle={onToggle} loadContent={loadContent} />
+            <ActivityRow key={row.itemId} row={row} expanded={expandedIds.has(row.itemId)} onToggle={onToggle} loadContent={loadContent} waitingWakeAt={waitingWakeAt} />
           ))}
         </div>
       ) : null}
