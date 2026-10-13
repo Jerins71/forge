@@ -68,7 +68,7 @@ async function send(environment: UiEnvironment, text: string) {
 async function pairB(page: Page) {
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
   const link = await fleet.mintGrant(fleet.b, 'link')
-  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
