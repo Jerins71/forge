@@ -5,7 +5,8 @@
  * renderer (a renderer capture alone cannot see it) into .internal/browser-panel/.
  *   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build && pnpm --filter @forge/electron build
  *   pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/browser-desktop-smoke.ts
- * Set FORGE_E2E_ELECTRON_BINARY to an Electron binary already trusted by the login keychain. */
+ * Run pnpm --filter @forge/electron prepare:dev-native before this smoke. OS credential storage
+ * is replaced by an ephemeral encrypted fixture; no login keychain access is needed. */
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
 import { createServer } from 'node:http'
 import { once } from 'node:events'
@@ -17,14 +18,20 @@ import { launchFleet, controlEnvironment, repositoryRoot, sanitizedEnvironment, 
 import { seedUiEnvironment, serveBuiltUi } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
 
+const electronDir = join(repositoryRoot, 'apps/electron')
+const electronRequire = createRequire(join(electronDir, 'package.json'))
+const { resolveDevBetterSqlite3Binding } = electronRequire('./src/dev-native-binding.ts') as typeof import('../../apps/electron/src/dev-native-binding.js')
+// Main otherwise opens a synchronous native error dialog before creating its
+// first window, so neither Playwright's timeout nor the capture IPC can finish.
+resolveDevBetterSqlite3Binding({ electronDir, electronVersion: electronRequire('electron/package.json').version, platform: process.platform, arch: process.arch })
 const backendRequire = createRequire(join(repositoryRoot, 'apps/backend/package.json'))
 type Sharp = (input: Buffer) => { resize(width: number, height: number): { toBuffer(): Promise<Buffer> }; composite(layers: Array<{ input: Buffer; left: number; top: number }>): { png(): { toFile(path: string): Promise<unknown> } } }
 const sharp = backendRequire('sharp') as Sharp
 const evidenceRoot = join(repositoryRoot, '.internal/browser-panel')
 const fleet = await launchFleet({ environments: 1, out: join(repositoryRoot, '.internal/forge-v2-remote/browser-desktop-manifest.json') })
-const report: Record<string, unknown> = { passed: false, platform: process.platform, testedCommit: fleet.manifest.testedCommit }
+const report: Record<string, unknown> = { passed: false, platform: process.platform, testedCommit: fleet.manifest.testedCommit, credentialStorage: 'ephemeral encrypted fixture; OS keychain untouched' }
 const server = createServer((_request, response) => {
-  response.setHeader('content-type', 'text/html')
+  response.setHeader('content-type', 'text/html; charset=utf-8')
   response.end('<!doctype html><title>Native Fixture</title><style>body{margin:0;font:15px system-ui;background:#fff;color:#121216}header{padding:16px 28px;background:#f6f7fb;border-bottom:1px solid #e4e6ef;font-weight:600}main{padding:40px 28px}h1{margin:0 0 8px;font-size:30px}</style><header>Native Fixture</header><main><h1>Rendered by Electron</h1><p id="size"></p><script>const f=()=>document.getElementById("size").textContent=innerWidth+" × "+innerHeight;addEventListener("resize",f);f()</script></main>')
 })
 server.listen(0, '127.0.0.1'); await once(server, 'listening')
@@ -38,14 +45,16 @@ const step = (name: string) => { steps.push(`${new Date().toISOString()} ${name}
 const HARD_TIMEOUT_MS = 180_000
 const watchdog = setTimeout(() => {
   report.failure = `Hard timeout after ${HARD_TIMEOUT_MS / 1000}s; last step: ${steps.at(-1) ?? 'none'}`
+  // Arm the hard exit before any IPC: a native modal can block every main-process call.
+  setTimeout(() => { try { application?.process().kill('SIGKILL') } catch { /* owned child already gone */ }; process.exit(1) }, 5000)
   void (async () => {
+    await writeFile(join(evidenceRoot, 'browser-desktop-smoke.json'), `${JSON.stringify(report, null, 2)}\n`).catch(() => undefined)
     if (application) await shot(application, 'native-timeout').catch(() => undefined)
     const page = application?.windows()[0]
     if (page) report.page = await page.locator('body').innerText().catch(() => 'Unavailable')
     await writeFile(join(evidenceRoot, 'browser-desktop-smoke.json'), `${JSON.stringify(report, null, 2)}\n`).catch(() => undefined)
     console.error(report.failure)
     try { application?.process().kill('SIGKILL') } catch { /* already gone */ }
-    setTimeout(() => process.exit(1), 10_000).unref()
     await fleet.stop(true).catch(() => undefined)
     process.exit(1)
   })()
@@ -105,13 +114,11 @@ try {
   await controlEnvironment(fleet.manifest, environment.name, 'stop')
   step('serve built UI'); ui = await serveBuiltUi(join(repositoryRoot, 'apps/ui/.output/public'), '', { port: fleet.manifest.uiPort })
   step('launch Electron'); application = await electron.launch({
-    // An Electron binary that already holds this user's Safe Storage keychain access; a freshly
-    // downloaded one makes macOS ask, which blocks the main process on a system prompt.
     ...(process.env.FORGE_E2E_ELECTRON_BINARY ? { executablePath: process.env.FORGE_E2E_ELECTRON_BINARY } : {}),
-    args: [join(repositoryRoot, 'apps/electron/dist/main.js')], cwd: join(repositoryRoot, 'apps/electron'), timeout: 60_000,
+    args: [join(repositoryRoot, 'scripts/environment-e2e/fixtures/browser-desktop-main.cjs')], cwd: join(repositoryRoot, 'apps/electron'), timeout: 60_000,
     env: { ...sanitizedEnvironment(), FORGE_DATA_DIR: environment.dataDir, FORGE_INSTALLATION_STATE_DIR: environment.installationStateDir,
       FORGE_ELECTRON_USER_DATA_DIR: join(fleet.manifest.root, 'desktop-user-data'), FORGE_ELECTRON_DEV_SERVER_URL: ui.url, FORGE_HOST: '127.0.0.1',
-      FORGE_PORT: String(environment.port), FORGE_CWD_ALLOWLIST_ROOTS: environment.checkout, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs'),
+      FORGE_PORT: String(environment.port), FORGE_CWD_ALLOWLIST_ROOTS: environment.checkout, FORGE_E2E_CHECKOUT: environment.checkout, FORGE_E2E_DESKTOP_ENTRY: join(electronDir, 'dist/main.js'), FORGE_E2E_DESKTOP_HOME: join(fleet.manifest.root, 'desktop-home'), CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs'),
       FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), FORGE_TELEMETRY: 'false', OTEL_SDK_DISABLED: 'true' },
   })
   const electronLog: string[] = []
@@ -119,8 +126,11 @@ try {
   for (const stream of [application.process().stdout, application.process().stderr]) stream?.on('data', chunk => { if (electronLog.length < 400) electronLog.push(String(chunk).slice(0, 2000)) })
   step('first window'); const page = await application.firstWindow({ timeout: 60_000 })
   step(`window ${page.url()}`)
+  report.isolation = await application.evaluate(({ app }) => ({ home: app.getPath('home'), userData: app.getPath('userData'), sessionData: app.getPath('sessionData') }))
+  expect(report.isolation).toMatchObject({ home: join(fleet.manifest.root, 'desktop-home'), userData: join(fleet.manifest.root, 'desktop-user-data') })
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
-  step('size window'); await application.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]!; window.setContentSize(1440, 900); window.center() })
+  step('size window'); await application.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]!; window.setContentSize(1440, 900); window.center(); window.showInactive() })
+  expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true)
   step('wait for the app shell')
   const panel = page.locator('[data-browser-panel]')
   const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
@@ -151,8 +161,10 @@ try {
   step('dialog'); await page.keyboard.press(process.platform === 'darwin' ? 'Meta+K' : 'Control+K')
   await expect(page.getByRole('dialog')).toBeVisible()
   await expect.poll(async () => (await nativeViews(application!)).length).toBe(0)
+  await shot(application, 'native-dialog-hidden')
   await page.keyboard.press('Escape')
   await expectPresentedUnderSlot(application, page)
+  await shot(application, 'native-presented-again')
   report.dialog = 'hidden while open, presented after'
 
   // Another session has its own (empty) browser: the view leaves with this session and comes back with it.
@@ -193,6 +205,7 @@ try {
   if (application) await shot(application, 'native-failure').catch(() => undefined)
   throw error
 } finally {
+  clearTimeout(watchdog)
   await application?.close(); await ui?.stop()
   server.closeAllConnections(); server.close()
   await writeFile(join(evidenceRoot, 'browser-desktop-smoke.json'), `${JSON.stringify(report, null, 2)}\n`)
