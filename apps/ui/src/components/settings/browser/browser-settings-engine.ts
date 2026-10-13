@@ -27,8 +27,8 @@ export interface BrowserImportResult { sites: BrowserSite[]; skipped: BrowserSki
  * here except inside a one-time transfer, which callers hold only for the duration of one send.
  */
 export interface BrowserSettingsEngine {
-  /** The machine's setup state; `sessionId` is a fallback for engines without a session-free read. */
-  status(sessionId: string | null): Promise<BrowserSetupStatus | null>
+  /** The machine's setup state. */
+  status(): Promise<BrowserSetupStatus>
   setup(): Promise<BrowserSetupStatus>
   audit(sessionId: string): Promise<BrowserSite[]>
   forget(sessionId: string, domain: string): Promise<BrowserSite[]>
@@ -44,22 +44,14 @@ type AuditOutput = { domains: BrowserSite[]; skipped?: BrowserSkippedSite[] }
 /** The engine over an environment-v2 client. Fields the contract adds later are read when present. */
 export function createBrowserSettingsEngine(client: EnvironmentClient): BrowserSettingsEngine {
   const engine = client.features.browserEngine
-  // Methods newer than this build's contract (browser.engine.status) go through an untyped call.
-  const untyped = engine.request as unknown as (method: string, input: unknown) => Promise<unknown>
   const result = (output: AuditOutput, requested: string[]): BrowserImportResult => ({
     sites: sortSites(output.domains),
     skipped: output.skipped ?? requested.filter((domain) => !output.domains.some((site) => site.domain === domain)).map((domain) => ({ domain, reason: 'failed' as const })),
   })
   return {
-    async status(sessionId) {
-      try {
-        const status = await untyped('browser.engine.status', {}) as { state: BrowserSetupStatus['state']; message?: string }
-        return { state: status.state, ...(status.message ? { message: status.message } : {}) }
-      } catch {
-        if (!sessionId) return null
-        const snapshot = await engine.request('browser.tabs.get', { sessionId })
-        return { state: snapshot.browserEngineState ?? 'ready', ...(snapshot.browserEngineMessage ? { message: snapshot.browserEngineMessage } : {}) }
-      }
+    async status() {
+      const status = await engine.request('browser.engine.status', {})
+      return { state: status.state, ...(status.message ? { message: status.message } : {}) }
     },
     async setup() {
       const status = await engine.request('browser.engine.setup', {})
