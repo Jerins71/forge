@@ -187,6 +187,9 @@ export async function createEnvironmentService(options: {
     const source = mirror;
     const auth = access;
     let stopped = false;
+    // Archived sessions' last-used times come from scanning their transcripts: not needed to serve.
+    const archiveHydration = new AbortController();
+    let archiveHydrated: Promise<unknown> = Promise.resolve();
     let localPairing: Awaited<ReturnType<typeof startLocalPairingChannel>> | undefined;
     return {
       database,
@@ -199,7 +202,6 @@ export async function createEnvironmentService(options: {
         await descriptorPersistence.load();
         await unreadTracker.load();
         await owner.reconcileOnBoot();
-        await swarmManager.hydrateArchivedLastUsed();
         await source.reconcileBeforeReady();
       },
       composeTransport(sessionFeatures: SessionFeaturePublisher, terminalService: TerminalService | null, sessionTitles?: RpcDependencies["sessionTitles"]) {
@@ -249,6 +251,9 @@ export async function createEnvironmentService(options: {
       },
       start() {
         owner.effectWorker.start();
+        archiveHydrated = swarmManager.hydrateArchivedLastUsed(archiveHydration.signal).catch((error: unknown) => {
+          console.warn(`[environment] Archived session last-used scan failed: ${error instanceof Error ? error.message : String(error)}`);
+        });
       },
       async listenLocalPairing() {
         if (stopped || localPairing) return;
@@ -257,6 +262,8 @@ export async function createEnvironmentService(options: {
       async stop() {
         if (stopped) return;
         stopped = true;
+        archiveHydration.abort();
+        await archiveHydrated;
         await localPairing?.close().catch(() => {});
         await owner.controlService.close();
         await owner.effectWorker.stop();

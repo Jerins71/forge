@@ -33,7 +33,7 @@ it("uses the cursor's canonical window with current rows and tails, across parti
       getAgentForInternalUse: id => actors.find(actor => actor.agentId === id), listProfiles: () => [],
       listWorkersForSession: () => actors.slice(1), getPinnedMessageIds: () => new Set(),
       getPendingChoiceRequestsForSession: () => [], getSessionAttentionSnapshot: () => ({ type: "session_attention_snapshot", attentions: [] }),
-      observeCatalogDirty: () => () => {}, isSessionShutdownSafe: () => true,
+      observeCatalogDirty: () => () => {}, isSessionShutdownSafe: () => true, withWorkerIndex: <T>(read: () => T) => read(),
     } as Parameters<typeof createSwarmEventMirror>[0]["swarmManager"],
     wireProjection: { unread: () => 0, project: async () => { throw new Error("No projects in history fixture"); }, prepareArtifacts: async () => { prepare(); } },
   });

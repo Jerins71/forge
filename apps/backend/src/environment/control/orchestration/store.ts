@@ -1,4 +1,4 @@
-import type { Database } from "better-sqlite3";
+import type { Database, Statement } from "better-sqlite3";
 import { emptyState, evolve } from "./kernel.js";
 import type { CoreState, LifecycleEvent } from "./types.js";
 import { projectRequestChoice } from "./request-projection.js";
@@ -18,6 +18,30 @@ export function loadState(database: Database): CoreState {
   state.recovery = recovery ? JSON.parse(recovery.snapshot_json) : null;
   return state;
 }
+
+/** The one thread's row, runs and requests: enough for its lifecycle projection without reading every thread. */
+export function loadThreadState(database: Database, threadId: string): CoreState {
+  let statements = threadStatements.get(database);
+  if (!statements) {
+    statements = {
+      thread: database.prepare("SELECT state_json FROM orchestration_threads WHERE thread_id=?"),
+      runs: database.prepare("SELECT run_id AS id,state_json FROM orchestration_runs WHERE thread_id=?"),
+      requests: database.prepare("SELECT request_id AS id,state_json FROM orchestration_requests WHERE thread_id=?"),
+    };
+    threadStatements.set(database, statements);
+  }
+  const state = emptyState();
+  const thread = statements.thread.get(threadId) as { state_json: string } | undefined;
+  if (!thread) return state;
+  state.threads[threadId] = JSON.parse(thread.state_json);
+  for (const key of ["runs", "requests"] as const) {
+    for (const row of statements[key].all(threadId) as { id: string; state_json: string }[]) {
+      (state[key] as Record<string, unknown>)[row.id] = JSON.parse(row.state_json);
+    }
+  }
+  return state;
+}
+const threadStatements = new WeakMap<Database, Record<"thread" | "runs" | "requests", Statement>>();
 
 export function projectLifecycle(database: Database, event: LifecycleEvent): void {
   if ("thread" in event) database.prepare("INSERT INTO orchestration_threads VALUES (?,?) ON CONFLICT(thread_id) DO UPDATE SET state_json=excluded.state_json").run(event.thread.threadId, JSON.stringify(event.thread));

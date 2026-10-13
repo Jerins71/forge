@@ -144,15 +144,17 @@ export class ProjectExecutableTrustCoordinator {
   }
 
   schedulePromptsForAllManagers(): void {
+    // Sessions sharing a project and working directory share one workspace resolution (a Git subprocess).
+    const resolutions = new Map<string, Promise<ProjectWorkspaceResolution>>();
     for (const descriptor of this.options.host.listDescriptors()) {
       if (descriptor.role === "manager") {
-        this.schedulePrompt(descriptor as ProjectExecutableTrustManager);
+        this.schedulePrompt(descriptor as ProjectExecutableTrustManager, resolutions);
       }
     }
   }
 
-  schedulePrompt(descriptor: ProjectExecutableTrustManager): void {
-    void this.maybePrompt(descriptor).catch((error) => {
+  schedulePrompt(descriptor: ProjectExecutableTrustManager, resolutions?: Map<string, Promise<ProjectWorkspaceResolution>>): void {
+    void this.maybePrompt(descriptor, resolutions).catch((error) => {
       this.options.host.logDebug("project_resources:trust_prompt:error", {
         agentId: descriptor.agentId,
         message: error instanceof Error ? error.message : String(error),
@@ -160,9 +162,16 @@ export class ProjectExecutableTrustCoordinator {
     });
   }
 
-  async maybePrompt(descriptor: ProjectExecutableTrustManager): Promise<void> {
+  async maybePrompt(descriptor: ProjectExecutableTrustManager, resolutions?: Map<string, Promise<ProjectWorkspaceResolution>>): Promise<void> {
     const resources = this.createResourceAccess();
-    const resolution = await resources.resolver.resolve(toWorkspaceResolveOptions(descriptor));
+    const options = toWorkspaceResolveOptions(descriptor);
+    const key = `${options.profileId}\0${options.cwd}`;
+    let shared = resolutions?.get(key);
+    if (!shared) {
+      shared = resources.resolver.resolve(options);
+      resolutions?.set(key, shared);
+    }
+    const resolution = { ...(await shared), sessionAgentId: descriptor.agentId };
     const trustKey = resolution.trust.key;
     if (!trustKey || resolution.trust.state !== "untrusted") return;
     if (!hasExistingExecutableSurface(resolution, this.pathExists)) return;

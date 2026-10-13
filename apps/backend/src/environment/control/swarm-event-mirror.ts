@@ -4,7 +4,9 @@ import { projectLifecycleStatus, projectWorkerStatus, workerCreatedAt } from "./
 import { requestForChoice, requestAttention, withChoiceTimes } from "./orchestration/request-projection.js";
 import { formatActivityContent, projectAgentMetadata } from "@forge/protocol";
 import { createHash, randomUUID } from "node:crypto";
-import { closeSync, createReadStream, openSync, readSync, statSync } from "node:fs";
+import { closeSync, createReadStream, fstatSync, open as openCallback, openSync, read as readCallback, readSync, statSync, type Stats } from "node:fs";
+import { promisify } from "node:util";
+import { forEachConcurrently } from "../../utils/concurrency.js";
 import { createInterface } from "node:readline";
 import type { Database } from "better-sqlite3";
 import { decodeEnvironmentValue, PlanSnapshotV2Schema, GoalSnapshotV2Schema } from "@forge/protocol/environment-v2";
@@ -51,6 +53,9 @@ export interface SwarmEventMirror {
 interface HistoryState { sessionId: string; sources: { agentId: string; cursor: string | null }[] }
 interface CanonicalRow { actor: AgentDescriptor; entry: ConversationEntryEvent; projected: DetailItem }
 interface Source { generation: string; size: number }
+interface FirstSeenSource { file: string; evidence: Source }
+const openAsync = promisify(openCallback);
+const readAsync = promisify(readCallback);
 interface Checkpoint { file_generation: string; byte_offset: number; last_entry_id: string | null }
 /** Row metadata for the wire; the bounded content stays behind the item's content reference. */
 function activityMetadata(entry: ActivitySummaryEvent, sessionId: string): NonNullable<DetailItem["activity"]> {
@@ -76,12 +81,29 @@ function source(file: string): Source {
   try {
     const info = statSync(file); const fd = openSync(file, "r"); const buffer = Buffer.alloc(Math.min(info.size, 4096));
     try { readSync(fd, buffer, 0, buffer.length, 0); } finally { closeSync(fd); }
-    const header = buffer.toString("utf8").split("\n")[0] ?? "";
-    return { generation: `${info.dev}:${info.ino}:${createHash("sha256").update(header).digest("hex").slice(0, 16)}`, size: info.size };
+    return sourceEvidence(info, buffer);
   } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { generation: "missing", size: 0 }; throw error; }
 }
+/**
+ * The same evidence as `source`, without blocking. Only the open and the read (the cold disk work) go
+ * to the shared I/O thread pool; fstat and close of an open descriptor are cheap.
+ */
+async function readSource(file: string): Promise<Source> {
+  let fd: number;
+  try { fd = await openAsync(file, "r"); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { generation: "missing", size: 0 }; throw error; }
+  try {
+    const info = fstatSync(fd); const buffer = Buffer.alloc(Math.min(info.size, 4096));
+    await readAsync(fd, buffer, 0, buffer.length, 0);
+    return sourceEvidence(info, buffer);
+  } finally { closeSync(fd); }
+}
+function sourceEvidence(info: Stats, head: Buffer): Source {
+  const header = head.toString("utf8").split("\n")[0] ?? "";
+  return { generation: `${info.dev}:${info.ino}:${createHash("sha256").update(header).digest("hex").slice(0, 16)}`, size: info.size };
+}
 export function createSwarmEventMirror({ swarmManager, database, eventSink, wireProjection }: {
-  swarmManager: Pick<SwarmManager, "getRestartRecoverySnapshot" | "getSessionPlanSnapshot" | "getSessionGoalSnapshot" | "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "getPinnedMessageIds" | "observeCatalogDirty" | "isSessionShutdownSafe">;
+  swarmManager: Pick<SwarmManager, "getRestartRecoverySnapshot" | "getSessionPlanSnapshot" | "getSessionGoalSnapshot" | "on" | "off" | "listAgentsForInternalUse" | "getAgentForInternalUse" | "listProfiles" | "listWorkersForSession" | "getConversationHistoryPage" | "getPendingChoiceRequestsForSession" | "getSessionAttentionSnapshot" | "getPinnedMessageIds" | "observeCatalogDirty" | "isSessionShutdownSafe" | "withWorkerIndex">;
   database: Database; eventSink: EventSink; wireProjection: MirrorWireProjection;
 }): SwarmEventMirror {
   if (eventSink.database !== database) throw new Error("Mirror requires the shared environment database.");
@@ -95,11 +117,13 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   const removers: (() => void)[] = [];
   let attached = false; let ready = false; let disposed = false; let catalogQueued = false; let fullCatalogDirty = false; let profilesDirty = false;
   let catalogWork = Promise.resolve();
-  function checkpoint(key: string): Checkpoint | undefined { return database.prepare("SELECT file_generation,byte_offset,last_entry_id FROM mirror_sources WHERE source_key=?").get(key) as Checkpoint | undefined; }
+  // Prepared once: boot reads and records a checkpoint for every agent.
+  const readCheckpoint = database.prepare("SELECT file_generation,byte_offset,last_entry_id FROM mirror_sources WHERE source_key=?");
+  const writeCheckpoint = database.prepare(`INSERT INTO mirror_sources (source_key,file_generation,byte_offset,last_entry_id,updated_at) VALUES (?,?,?,?,?)
+      ON CONFLICT(source_key) DO UPDATE SET file_generation=excluded.file_generation,byte_offset=excluded.byte_offset,last_entry_id=excluded.last_entry_id,updated_at=excluded.updated_at`);
+  function checkpoint(key: string): Checkpoint | undefined { return readCheckpoint.get(key) as Checkpoint | undefined; }
   function recordSource(key: string, evidence: Source, lastId: string | null = null) {
-    database.prepare(`INSERT INTO mirror_sources (source_key,file_generation,byte_offset,last_entry_id,updated_at) VALUES (?,?,?,?,?)
-      ON CONFLICT(source_key) DO UPDATE SET file_generation=excluded.file_generation,byte_offset=excluded.byte_offset,last_entry_id=excluded.last_entry_id,updated_at=excluded.updated_at`)
-      .run(key, evidence.generation, evidence.size, lastId, Date.now());
+    writeCheckpoint.run(key, evidence.generation, evidence.size, lastId, Date.now());
   }
   function indexDescriptor(descriptor: AgentDescriptor) {
     const sessionId = descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId;
@@ -118,6 +142,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const model=state.threads[descriptor.agentId]?.model ?? descriptor.model;
     const nativeBinding=Object.values(state.bindings).filter(b=>b.scope.threadId===descriptor.agentId && b.capabilities.provider===runtimeProviderCapabilities(model.provider).provider).sort((a,b)=>b.scope.generation-a.scope.generation)[0];
     const lineage=state.threads[descriptor.agentId]?.lineage;
+    const workers = swarmManager.listWorkersForSession(descriptor.agentId);
     const occurrence = requestAttention(database, state, descriptor.agentId) ?? (attention ? { attentionId: attention.attentionId, reason: attention.reason, raisedAt: attention.raisedAt } : undefined);
     const lifecycle = projectLifecycleStatus(state, descriptor.agentId);
     const status = lifecycle ? lifecycle.sessionStatus : row?.desired_state === "stopped" ? swarmManager.isSessionShutdownSafe(descriptor.agentId) ? "stopped" : "stopping"
@@ -128,8 +153,8 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       attention: pending ? "choice" : descriptor.status === "error" ? "error" : attention ? "result" : "none",
       unread: wireProjection.unread(descriptor.agentId, descriptor.profileId ?? descriptor.agentId),
       pendingCount: prior?.pendingCount ?? 0,
-      workerCount: descriptor.workerCount ?? swarmManager.listWorkersForSession(descriptor.agentId).length,
-      activeWorkerCount: swarmManager.listWorkersForSession(descriptor.agentId).filter(worker => (projectLifecycleStatus(state, worker.agentId)?.agentStatus ?? worker.status) === "streaming").length,
+      workerCount: descriptor.workerCount ?? workers.length,
+      activeWorkerCount: workers.filter(worker => (projectLifecycleStatus(state, worker.agentId)?.agentStatus ?? worker.status) === "streaming").length,
       createdAt: descriptor.createdAt, pinnedAt: descriptor.pinnedAt ?? null, lastUsedAt: descriptor.lastUserMessageAt ?? null,
       updatedAt: descriptor.updatedAt, sortKey: descriptor.createdAt, archived: Boolean(descriptor.archivedAt),
       workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd },
@@ -319,15 +344,17 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       catalogWork = catalogWork.then(async () => {
         if (disposed) return;
         const full = fullCatalogDirty; fullCatalogDirty = false; const projectChanges = profilesDirty; profilesDirty = false;
-        const ids = full ? swarmManager.listAgentsForInternalUse().filter(agent => agent.role === "manager").map(agent => agent.agentId) : [...dirty]; dirty.clear();
-        if (full) for (const descriptor of swarmManager.listAgentsForInternalUse()) indexDescriptor(descriptor);
+        const agents = full ? swarmManager.listAgentsForInternalUse() : [];
+        const ids = full ? agents.filter(agent => agent.role === "manager").map(agent => agent.agentId) : [...dirty]; dirty.clear();
+        for (const descriptor of agents) indexDescriptor(descriptor);
         const projects = projectChanges ? await Promise.all(swarmManager.listProfiles().filter(profile => profile.profileType !== "system").map(profile => wireProjection.project(profile))) : [];
         eventSink.transaction(tx => {
           for (const project of projects) {
             const prior = database.prepare("SELECT summary_json FROM control_projects WHERE project_id=?").get(project.projectId) as { summary_json: string } | undefined;
             if (JSON.stringify(project) !== prior?.summary_json) eventSink.append(tx, { topic: "shell", sessionId: null, event: { type: "project.upsert", project } });
           }
-          for (const id of ids) upsertSession(tx, id);
+          // Read-only over every session: group workers once rather than per session.
+          swarmManager.withWorkerIndex(() => { for (const id of ids) upsertSession(tx, id); });
           if (full) {
             const active = new Set(ids);
             for (const id of sessions.keys()) if (!active.has(id)) {
@@ -404,8 +431,16 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       if (wireProjection.observeUnread) removers.push(wireProjection.observeUnread(sessionId => { if (!ready) return; eventSink.transaction(tx => upsertSession(tx, sessionId)); }));
     },
     async reconcileBeforeReady() {
+      // A first boot (an imported registry) has no checkpoint for any transcript. Their evidence is read
+      // concurrently before events are accepted: one blocking cold read per file takes seconds.
+      const firstSeen = new Map<string, FirstSeenSource>();
+      const unseen = swarmManager.listAgentsForInternalUse().filter(descriptor =>
+        !checkpoint(`detail:${descriptor.role === "manager" ? descriptor.agentId : descriptor.managerId}`) && !checkpoint(`source:${descriptor.agentId}`));
+      await forEachConcurrently(unseen, 32, async descriptor => {
+        firstSeen.set(descriptor.agentId, { file: descriptor.sessionFile, evidence: await readSource(descriptor.sessionFile) });
+      });
       ready = true; // Boot events fold from the authoritative catalog and persisted sources below.
-      for (const descriptor of swarmManager.listAgentsForInternalUse()) indexDescriptor(descriptor);
+      // The full catalog pass indexes every descriptor.
       queueCatalog(undefined, true); queueCatalog(); await Promise.resolve(); await catalogWork;
       if (errors.has("catalog")) throw errors.get("catalog");
       const pending = database.prepare("SELECT choice_id,session_id,runtime_generation,choice_json FROM control_choices WHERE state='pending'").all() as { choice_id: string; session_id: string; runtime_generation: string; choice_json: string }[];
@@ -420,11 +455,17 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
         }
         for (const descriptor of sessions.values()) for (const pending of swarmManager.getPendingChoiceRequestsForSession(descriptor.agentId)) choice(tx, pending);
       });
+      const unrecorded: AgentDescriptor[] = [];
       for (const descriptor of swarmManager.listAgentsForInternalUse()) {
         const sessionId = actors.get(descriptor.agentId)!;
         if (checkpoint(`detail:${sessionId}`)) { if (checkpoint(`detail:${sessionId}`)?.byte_offset === 1) initialized.add(sessionId); tail(descriptor); }
-        else if (!checkpoint(`source:${descriptor.agentId}`)) eventSink.transaction(() => recordSource(`source:${descriptor.agentId}`, source(descriptor.sessionFile)));
+        else if (!checkpoint(`source:${descriptor.agentId}`)) unrecorded.push(descriptor);
       }
+      // One commit for every source first seen at this boot, not one per agent.
+      if (unrecorded.length) eventSink.transaction(() => { for (const descriptor of unrecorded) {
+        const read = firstSeen.get(descriptor.agentId);
+        recordSource(`source:${descriptor.agentId}`, read?.file === descriptor.sessionFile ? read.evidence : source(descriptor.sessionFile));
+      } });
       errors.clear();
     },
     launchMaterialized,

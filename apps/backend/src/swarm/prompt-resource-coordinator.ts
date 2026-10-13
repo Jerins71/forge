@@ -193,13 +193,23 @@ export class PromptResourceCoordinator {
     return (await this.loadSpecialistRegistryModule()).resolveRoster(profileId);
   }
 
-  async resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
-    const workspace = await this.resolveProjectWorkspaceForManager(manager);
-    const roster = await this.resolveSpecialistRosterForProfile(
-      manager.profileId ?? manager.agentId,
-      workspace?.repoRootResources.specialistsDir,
-    );
-    return this.options.applySpecialistAvailability(roster, manager.agentId);
+  /**
+   * `workspaceRosters` lets a caller resolving many sessions share one workspace lookup (a Git
+   * subprocess and file reads) per project and working directory; availability stays per manager.
+   */
+  async resolveSpecialistRosterForManager(
+    manager: AgentDescriptor,
+    workspaceRosters?: Map<string, Promise<ResolvedSpecialistDefinitionLike[]>>,
+  ): Promise<ResolvedSpecialistDefinitionLike[]> {
+    const profileId = manager.profileId ?? manager.agentId;
+    const key = `${profileId}\0${manager.cwd}`;
+    let roster = workspaceRosters?.get(key);
+    if (!roster) {
+      roster = this.resolveProjectWorkspaceForManager(manager).then((workspace) =>
+        this.resolveSpecialistRosterForProfile(profileId, workspace?.repoRootResources.specialistsDir));
+      workspaceRosters?.set(key, roster);
+    }
+    return this.options.applySpecialistAvailability(await roster, manager.agentId);
   }
 
   async resolveProjectWorkspaceForManager(manager: AgentDescriptor) {

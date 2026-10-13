@@ -18,6 +18,7 @@ import {
   writeSessionMeta
 } from "./session/session-manifest.js";
 import { normalizeOptionalAgentId } from "./swarm-manager-utils.js";
+import { forEachConcurrently } from "../utils/concurrency.js";
 import type { AgentDescriptor, AgentStatus } from "./types.js";
 
 const MANAGER_ARCHETYPE_ID = "manager";
@@ -61,16 +62,20 @@ type SessionMetaTarget = {
 
 export class SwarmSessionMetaService {
 
+  /** Metas the boot rebuild just wrote, so compaction counts need not read them back. */
+  private rebuiltMetas: Map<string, SessionMeta> | undefined;
+
   constructor(private readonly options: SwarmSessionMetaServiceOptions) {}
 
   async rebuildSessionManifestForBoot(): Promise<void> {
     try {
-      await rebuildSessionMeta({
+      const metas = await rebuildSessionMeta({
         dataDir: this.options.dataDir,
         agentsStoreFile: this.options.agentsStoreFile,
         descriptors: this.options.getSortedDescriptors(),
         now: this.options.now
       });
+      this.rebuiltMetas = new Map(metas.map((meta) => [meta.sessionId, meta]));
     } catch (error) {
       this.options.logDebug("session:meta:rebuild_error", {
         message: error instanceof Error ? error.message : String(error)
@@ -79,18 +84,21 @@ export class SwarmSessionMetaService {
   }
 
   async hydrateCompactionCountsForBoot(): Promise<void> {
-    for (const descriptor of this.options.descriptors.values()) {
-      if (descriptor.role !== "manager") continue;
+    const rebuilt = this.rebuiltMetas;
+    this.rebuiltMetas = undefined;
+    const managers = [...this.options.descriptors.values()].filter((descriptor) => descriptor.role === "manager");
+    await forEachConcurrently(managers, 32, async (descriptor) => {
       const profileId = descriptor.profileId ?? descriptor.agentId;
       try {
-        const meta = await readSessionMeta(this.options.dataDir, profileId, descriptor.agentId);
+        const known = rebuilt?.get(descriptor.agentId);
+        const meta = known?.profileId === profileId ? known : await readSessionMeta(this.options.dataDir, profileId, descriptor.agentId);
         if (meta?.compactionCount) {
           descriptor.compactionCount = meta.compactionCount;
         }
       } catch {
         // Ignore — compactionCount remains undefined
       }
-    }
+    });
   }
 
   startCompactionCountBackfill(): void {

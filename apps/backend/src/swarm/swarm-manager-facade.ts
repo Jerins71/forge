@@ -292,8 +292,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.sessions.restoreSession(agentId);
   }
 
-  hydrateArchivedLastUsed(): Promise<ArchiveLastUsedHydrationResult> {
-    return this.services.sessions.hydrateArchivedLastUsed();
+  hydrateArchivedLastUsed(signal?: AbortSignal): Promise<ArchiveLastUsedHydrationResult> {
+    return this.services.sessions.hydrateArchivedLastUsed(signal);
   }
 
   archiveProfile(profileId: string): ReturnType<SessionLifecycleCoordinator["archiveProfile"]> {
@@ -738,6 +738,15 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
 
   listWorkersForSession(sessionAgentId: string): AgentDescriptor[] {
     return this.services.registry.directory.listWorkersForSession(sessionAgentId);
+  }
+
+  /** A synchronous read-only pass over many sessions groups workers once; see AgentDirectory.withWorkerIndex. */
+  withWorkerIndex<T>(read: () => T): T {
+    return this.services.registry.directory.withWorkerIndex(read);
+  }
+
+  listSessionAgentIdsForProfile(profileId: string): string[] {
+    return this.services.registry.directory.listSessionAgentIdsForProfile(profileId);
   }
 
   listProfiles(): ManagerProfile[] {

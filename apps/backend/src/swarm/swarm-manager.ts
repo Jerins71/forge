@@ -661,8 +661,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           ),
         resolveSpecialistRosterForProfile: (profileId) =>
           this.configurationCoordinator.resolveSpecialistRosterForProfile(profileId),
-        resolveSpecialistRosterForManager: (manager) =>
-          this.configurationCoordinator.resolveSpecialistRosterForManager(manager),
+        resolveSpecialistRosterForManager: (manager, workspaceRosters) =>
+          this.configurationCoordinator.resolveSpecialistRosterForManager(manager, workspaceRosters),
         resolveSpawnWorkerArchetypeId: (input, normalizedAgentId, profileId) =>
           this.configurationCoordinator.resolveSpawnWorkerArchetypeId(
             input,
@@ -1050,8 +1050,10 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
       },
       archive: {
         hydration: {
-          patchDescriptor: (agentId, patch) =>
-            this.descriptorStoreAdapter.patchDescriptor(agentId, patch),
+          patchDescriptors: (patches) =>
+            this.descriptorStoreAdapter.transactionDescriptors((store) => {
+              for (const [agentId, patch] of patches) if (store.getForPersistence(agentId)) store.patchDescriptor(agentId, patch);
+            }),
           warn: (message, details) => this.logDebug(message, details),
         },
         operations: {

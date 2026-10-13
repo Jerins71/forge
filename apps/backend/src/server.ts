@@ -182,22 +182,18 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let handleTerminalSessionLifecycle: (event: SessionLifecycleEvent) => void = () => undefined;
   let handleTerminalAgentsSnapshot: () => void = () => undefined;
   let server: BackendServer | null = null;
+  // Work that is not needed to serve (history indexing) starts once the server is listening.
+  let markListening: () => void = () => undefined;
+  const listening = new Promise<void>((resolve) => { markListening = resolve; });
 
   try {
     const unreadTracker = new UnreadTracker({
       dataDir: config.paths.dataDir,
       getProfileIds: () => swarmManager.listProfiles().map((profile) => profile.profileId),
-      getSessionAgentIds: (profileId) =>
-        swarmManager
-          .listAgents()
-          .filter(
-            (descriptor) =>
-              descriptor.role === "manager" &&
-              (descriptor.profileId ?? descriptor.agentId) === profileId,
-          )
-          .map((descriptor) => descriptor.agentId),
+      getSessionAgentIds: (profileId) => swarmManager.listSessionAgentIdsForProfile(profileId),
     });
     environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity });
+    swarmManager.deferHistoryIndexingUntil(listening);
     await swarmManager.boot();
     await environment.initialize();
     let telemetryService: TelemetryService | null = null;
@@ -398,8 +394,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       environment: environment.descriptor(),
     });
     environment.start();
+    markListening();
     return server;
   } catch (error) {
+    markListening();
     if (server) {
       await server.stop();
     } else {

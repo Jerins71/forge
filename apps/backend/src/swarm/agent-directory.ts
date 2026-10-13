@@ -61,6 +61,7 @@ export class AgentDirectory {
   }
 
   private readonly configuredManagerId: string | undefined;
+  private workerIndex: Map<string, AgentDescriptor[]> | undefined;
 
   constructor(private readonly options: AgentDirectoryOptions) {
     this.configuredManagerId = normalizeOptionalAgentId(options.configuredManagerId);
@@ -116,14 +117,18 @@ export class AgentDirectory {
   }
 
   listWorkersForSession(sessionAgentId: string): AgentDescriptor[] {
-    const grouped = this.buildWorkerVisibilityGroups();
-    return (grouped.workersByManagerId.get(sessionAgentId) ?? []).map((descriptor) =>
+    return this.getWorkersForManager(sessionAgentId).map((descriptor) =>
       cloneDescriptor(this.projectDescriptor(descriptor)),
     );
   }
 
   sortedDescriptors(): AgentDescriptor[] {
-    return Array.from(this.options.descriptors.values()).sort((left, right) => {
+    return this.sortDescriptors(Array.from(this.options.descriptors.values()));
+  }
+
+  /** One total order for every listing, so a sorted subset matches its place in the full list. */
+  private sortDescriptors(descriptors: AgentDescriptor[]): AgentDescriptor[] {
+    return descriptors.sort((left, right) => {
       if (this.configuredManagerId) {
         if (left.agentId === this.configuredManagerId) return -1;
         if (right.agentId === this.configuredManagerId) return 1;
@@ -227,8 +232,37 @@ export class AgentDirectory {
     );
   }
 
+  /** Session ids only: no clone, projection or sort, so per-project callers stay linear. */
+  listSessionAgentIdsForProfile(profileId: string): string[] {
+    const ids: string[] = [];
+    for (const descriptor of this.options.descriptors.values()) {
+      if (descriptor.role === "manager" && (descriptor.profileId ?? descriptor.agentId) === profileId) ids.push(descriptor.agentId);
+    }
+    return ids;
+  }
+
   getWorkersForManager(managerId: string): AgentDescriptor[] {
-    return this.buildWorkerVisibilityGroups().workersByManagerId.get(managerId) ?? [];
+    if (this.workerIndex) return this.workerIndex.get(managerId)?.slice() ?? [];
+    // Sorting only this manager's workers keeps per-session reads linear in the registry size.
+    const workers: AgentDescriptor[] = [];
+    for (const descriptor of this.options.descriptors.values()) {
+      if (descriptor.role !== "manager" && descriptor.managerId === managerId) workers.push(descriptor);
+    }
+    return this.sortDescriptors(workers);
+  }
+
+  /**
+   * Runs a synchronous, read-only pass over many sessions with workers grouped once, instead of
+   * scanning the registry per session. The grouping is dropped when `read` returns.
+   */
+  withWorkerIndex<T>(read: () => T): T {
+    if (this.workerIndex) return read();
+    this.workerIndex = this.buildWorkerVisibilityGroups().workersByManagerId;
+    try {
+      return read();
+    } finally {
+      this.workerIndex = undefined;
+    }
   }
 
   resolvePreferredManagerId(options?: {

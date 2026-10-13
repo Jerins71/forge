@@ -157,7 +157,10 @@ export interface RuntimeCompositionResolution {
     fallback: string,
   ): Promise<string>;
   resolveSpecialistRosterForProfile(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager(
+    manager: AgentDescriptor,
+    workspaceRosters?: Map<string, Promise<ResolvedSpecialistDefinitionLike[]>>,
+  ): Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSpawnWorkerArchetypeId(
     input: SpawnAgentInput,
     normalizedAgentId: string,
@@ -782,7 +785,7 @@ export class SwarmManagerRuntimeComposition {
       secureSessions: this.options.secureSessions,
       runtimes: {
         sortedDescriptors: () => services.directory.sortedDescriptors(),
-        shouldRestore: (descriptor) => this.runtimeController.canRestoreControlledRuntime(descriptor.agentId) && lifecycle.shouldRestoreRuntimeForDescriptor(descriptor),
+        shouldRestore: (descriptor) => lifecycle.shouldRestoreRuntimeForDescriptor(descriptor) && this.runtimeController.canRestoreControlledRuntime(descriptor.agentId),
         restore: async (descriptor) => {
           await runtimeResources.getOrCreateRuntimeForDescriptor(descriptor);
         },

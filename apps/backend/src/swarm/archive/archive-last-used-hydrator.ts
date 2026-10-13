@@ -9,7 +9,8 @@ export interface ArchiveLastUsedHydratorDeps {
   listSessions(): AgentDescriptor[];
   listAgents?: () => AgentDescriptor[];
   listProfiles(): ManagerProfile[];
-  patchDescriptor(agentId: string, patch: Partial<AgentDescriptor>): Promise<AgentDescriptor>;
+  /** Applies every patch and saves once; each patch returns the next descriptor, or the same one to skip. */
+  patchDescriptors(patches: ReadonlyMap<string, (descriptor: AgentDescriptor) => AgentDescriptor>): Promise<void>;
   warn?: (message: string, details?: unknown) => void;
 }
 
@@ -38,7 +39,8 @@ export class ArchiveLastUsedHydrator {
     return this.hydrateSessionsIfMissing(sessions);
   }
 
-  async hydrateArchivedRowsIfMissing(): Promise<ArchiveLastUsedHydrationResult> {
+  /** Scans every archived transcript; an aborted pass keeps what it found and stops before the next session. */
+  async hydrateArchivedRowsIfMissing(signal?: AbortSignal): Promise<ArchiveLastUsedHydrationResult> {
     const archivedProfileIds = new Set(
       this.deps.listProfiles()
         .filter((profile) => Boolean(profile.archivedAt))
@@ -51,35 +53,44 @@ export class ArchiveLastUsedHydrator {
       return Boolean(session.profileId && archivedProfileIds.has(session.profileId));
     });
 
-    return this.hydrateSessionsIfMissing(sessions);
+    return this.hydrateSessionsIfMissing(sessions, signal);
   }
 
-  private async hydrateSessionsIfMissing(sessions: AgentDescriptor[]): Promise<ArchiveLastUsedHydrationResult> {
+  private async hydrateSessionsIfMissing(sessions: AgentDescriptor[], signal?: AbortSignal): Promise<ArchiveLastUsedHydrationResult> {
     let scannedSessionCount = 0;
     let hydratedSessionCount = 0;
+    const hydratable = sessions.filter(isHydratableSession);
+    if (hydratable.length === 0) return emptyResult();
+    const workersBySession = this.workerDescriptorsBySession();
+    const patches = new Map<string, (descriptor: AgentDescriptor) => AgentDescriptor>();
 
-    for (const session of sessions) {
-      if (!isHydratableSession(session)) continue;
+    for (const session of hydratable) {
+      if (signal?.aborted) break;
       scannedSessionCount += 1;
-      const lastUserMessageAt = await this.findLastUserMessageAt(session);
-      if (!lastUserMessageAt) continue;
+      const lastUserMessageAt = await this.findLastUserMessageAt(session, workersBySession.get(session.agentId) ?? [], signal);
+      // A scan cut short by shutdown is incomplete; the next start scans the session again.
+      if (!lastUserMessageAt || signal?.aborted) continue;
 
       const current = this.deps.getAgent(session.agentId);
       if (!isHydratableSession(current)) continue;
       if (current.lastUserMessageAt && current.lastUserMessageAt.localeCompare(lastUserMessageAt) >= 0) continue;
 
-      await this.deps.patchDescriptor(session.agentId, { lastUserMessageAt });
+      // Re-checked when applied: the session may have been used while transcripts were scanned.
+      patches.set(session.agentId, (descriptor) => isHydratableSession(descriptor) ? { ...descriptor, lastUserMessageAt } : descriptor);
       hydratedSessionCount += 1;
     }
 
+    // One save for the whole pass: each save rewrites the full registry snapshot.
+    if (patches.size > 0) await this.deps.patchDescriptors(patches);
     return { scannedSessionCount, hydratedSessionCount };
   }
 
-  private async findLastUserMessageAt(session: AgentDescriptor): Promise<string | undefined> {
-    let lastUserMessageAt = await this.findLastUserMessageAtInDescriptorFile(session);
+  private async findLastUserMessageAt(session: AgentDescriptor, workers: readonly AgentDescriptor[], signal?: AbortSignal): Promise<string | undefined> {
+    let lastUserMessageAt = await this.findLastUserMessageAtInDescriptorFile(session, signal);
 
-    for (const worker of this.workerDescriptorsForSession(session.agentId)) {
-      const workerLastUserMessageAt = await this.findLastUserMessageAtInDescriptorFile(worker);
+    for (const worker of workers) {
+      if (signal?.aborted) break;
+      const workerLastUserMessageAt = await this.findLastUserMessageAtInDescriptorFile(worker, signal);
       if (
         workerLastUserMessageAt &&
         (!lastUserMessageAt || workerLastUserMessageAt.localeCompare(lastUserMessageAt) > 0)
@@ -91,12 +102,18 @@ export class ArchiveLastUsedHydrator {
     return lastUserMessageAt;
   }
 
-  private workerDescriptorsForSession(sessionAgentId: string): AgentDescriptor[] {
-    const agents = this.deps.listAgents?.() ?? this.deps.listSessions();
-    return agents.filter((agent) => agent.role === "worker" && agent.managerId === sessionAgentId && Boolean(agent.sessionFile));
+  private workerDescriptorsBySession(): Map<string, AgentDescriptor[]> {
+    const workersBySession = new Map<string, AgentDescriptor[]>();
+    for (const agent of this.deps.listAgents?.() ?? this.deps.listSessions()) {
+      if (agent.role !== "worker" || !agent.sessionFile) continue;
+      const workers = workersBySession.get(agent.managerId);
+      if (workers) workers.push(agent);
+      else workersBySession.set(agent.managerId, [agent]);
+    }
+    return workersBySession;
   }
 
-  private async findLastUserMessageAtInDescriptorFile(descriptor: AgentDescriptor): Promise<string | undefined> {
+  private async findLastUserMessageAtInDescriptorFile(descriptor: AgentDescriptor, signal?: AbortSignal): Promise<string | undefined> {
     try {
       await access(descriptor.sessionFile);
     } catch {
@@ -104,13 +121,12 @@ export class ArchiveLastUsedHydrator {
     }
 
     let lastUserMessageAt: string | undefined;
-    const reader = createInterface({
-      input: createReadStream(descriptor.sessionFile, { encoding: "utf8" }),
-      crlfDelay: Infinity,
-    });
+    const input = createReadStream(descriptor.sessionFile, { encoding: "utf8" });
+    const reader = createInterface({ input, crlfDelay: Infinity });
 
     try {
       for await (const line of reader) {
+        if (signal?.aborted) break;
         const timestamp = extractUserInputTimestamp(line);
         if (timestamp && (!lastUserMessageAt || timestamp.localeCompare(lastUserMessageAt) > 0)) {
           lastUserMessageAt = timestamp;
@@ -123,6 +139,8 @@ export class ArchiveLastUsedHydrator {
         error: error instanceof Error ? error.message : String(error),
       });
       return undefined;
+    } finally {
+      input.destroy();
     }
 
     return lastUserMessageAt;
@@ -138,6 +156,8 @@ function isHydratableSession(session: AgentDescriptor | undefined): session is A
 }
 
 function extractUserInputTimestamp(line: string): string | undefined {
+  // Every user entry names its role or source as user; skip parsing the rest of a large transcript.
+  if (!line.includes("user")) return undefined;
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);

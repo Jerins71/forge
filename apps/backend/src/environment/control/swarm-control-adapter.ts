@@ -11,7 +11,7 @@ import type { EnvironmentControlService } from "./command-service.js";
 import { createCoreLineagePort } from "./orchestration/lineage-tool-port.js";
 import { createCoreAgentMessagePort } from "./orchestration/agent-message-port.js";
 import { projectLifecycleStatus } from "./orchestration/lifecycle-projection.js";
-import { loadState } from "./orchestration/store.js";
+import { loadState, loadThreadState } from "./orchestration/store.js";
 import { createCoreChoicePort } from "./orchestration/choice-port.js";
 
 export function createSwarmControlAdapter({ swarmManager, database, eventSink, controlService, workspaceService, artifactService }: {
@@ -83,7 +83,8 @@ export function createSwarmControlAdapter({ swarmManager, database, eventSink, c
     },
   });
   swarmManager.installControlledTurnProjection({ read(agentId) {
-    const state = loadState(database);
+    // Read per descriptor by every registry listing, so it must not load the whole orchestration state.
+    const state = loadThreadState(database, agentId);
     return { status:projectLifecycleStatus(state,agentId)?.agentStatus,activeRunId:state.threads[agentId]?.activeRunId,pendingRunIds:Object.values(state.runs).filter(run => run.threadId === agentId && run.state === "queued").sort((a,b)=>a.sequence-b.sequence).map(run=>run.runId) };
   } });
   eventSink.subscribeCommit(terminalRuns => swarmManager.reflectControlledTurns(terminalRuns.flatMap(run =>

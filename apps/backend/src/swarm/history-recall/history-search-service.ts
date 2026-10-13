@@ -104,6 +104,7 @@ export class HistorySearchService {
   private backgroundRunning = false;
   private backgroundWake = false;
   private backgroundRestUntil = 0;
+  private backgroundHold: Promise<void> | undefined;
   private readonly searchSnapshots = new Map<string, SnapshotPage<HistorySearchHit>>();
   private readonly sessionSnapshots = new Map<string, SnapshotPage<HistorySessionHit>>();
   private activeCursor = 0;
@@ -558,12 +559,25 @@ export class HistorySearchService {
     });
   }
 
+  /** Holds background indexing until `ready` settles, so it does not compete with startup for the event loop. */
+  deferBackgroundUntil(ready: Promise<unknown>): void {
+    const hold: Promise<void> = ready.then(() => undefined, () => undefined).then(() => {
+      if (this.backgroundHold !== hold) return;
+      this.backgroundHold = undefined;
+      this.scheduleBackground(0);
+    });
+    this.backgroundHold = hold;
+  }
+
   private scheduleBackground(delayMs = 0): void {
     if (!this.started || this.disposed || this.preferences.paused) {
       return;
     }
     if (delayMs === 0) {
       this.backgroundWake = true;
+    }
+    if (this.backgroundHold) {
+      return;
     }
     if (this.backgroundRunning) {
       return;

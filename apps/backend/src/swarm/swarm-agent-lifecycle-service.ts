@@ -170,7 +170,10 @@ export interface SwarmAgentLifecycleServiceOptions {
     profileId: string
   ) => Promise<string | undefined>;
   resolveSpecialistRosterForProfile: (profileId: string) => Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpecialistRosterForManager?: (manager: AgentDescriptor) => Promise<ResolvedSpecialistDefinitionLike[]>;
+  resolveSpecialistRosterForManager?: (
+    manager: AgentDescriptor,
+    workspaceRosters?: Map<string, Promise<ResolvedSpecialistDefinitionLike[]>>,
+  ) => Promise<ResolvedSpecialistDefinitionLike[]>;
   normalizeSpecialistHandle: (value: string) => Promise<string | undefined>;
   resolveSystemPromptForDescriptor: (descriptor: AgentDescriptor) => Promise<string>;
   injectWorkerIdentityContext: (descriptor: AgentDescriptor, systemPrompt: string) => string;
@@ -1444,10 +1447,19 @@ export class SwarmAgentLifecycleService {
     }
 
     if (this.options.resolveSpecialistRosterForManager) {
-      const sessions = this.options.getSessionsForProfile(profileId);
+      // Only sessions with a preset worker can change; the rest need no roster resolution.
+      const candidatesByManager = new Map<string, string[]>();
+      for (const descriptor of this.options.descriptors.values()) {
+        if (!isSpecialistMetadataCandidate(descriptor, profileId)) continue;
+        const candidates = candidatesByManager.get(descriptor.managerId);
+        if (candidates) candidates.push(descriptor.agentId);
+        else candidatesByManager.set(descriptor.managerId, [descriptor.agentId]);
+      }
+      const sessions = this.options.getSessionsForProfile(profileId).filter((manager) => candidatesByManager.has(manager.agentId));
+      const workspaceRosters = new Map<string, Promise<ResolvedSpecialistDefinitionLike[]>>();
       await Promise.all(sessions.map(async (manager) => {
-        const roster = await this.options.resolveSpecialistRosterForManager!(manager);
-        await this.syncWorkerSpecialistMetadata(profileId, roster, manager.agentId, options);
+        const roster = await this.options.resolveSpecialistRosterForManager!(manager, workspaceRosters);
+        await this.syncWorkerSpecialistMetadata(profileId, roster, manager.agentId, options, candidatesByManager.get(manager.agentId));
       }));
       return;
     }
@@ -1991,16 +2003,17 @@ export class SwarmAgentLifecycleService {
     roster: ResolvedSpecialistDefinitionLike[],
     managerId?: string,
     options?: { persist?: boolean; publish?: boolean },
+    /** Narrows the scan to these agent ids when the caller already grouped this manager's preset workers. */
+    candidateIds?: readonly string[],
   ): Promise<void> {
     const rosterById = new Map(roster.map((entry) => [entry.specialistId, entry]));
     let changed = false;
+    const descriptors = candidateIds
+      ? candidateIds.flatMap((agentId) => this.options.descriptors.get(agentId) ?? [])
+      : this.options.descriptors.values();
 
-    for (const descriptor of this.options.descriptors.values()) {
-      if (descriptor.role !== "worker" || descriptor.profileId !== profileId) {
-        continue;
-      }
-
-      if (isExternalThreadDescriptor(descriptor)) {
+    for (const descriptor of descriptors) {
+      if (!isSpecialistMetadataCandidate(descriptor, profileId)) {
         continue;
       }
 
@@ -2008,10 +2021,7 @@ export class SwarmAgentLifecycleService {
         continue;
       }
 
-      const specialistId = normalizeOptionalAgentId(descriptor.specialistId)?.toLowerCase();
-      if (!specialistId) {
-        continue;
-      }
+      const specialistId = normalizeOptionalAgentId(descriptor.specialistId)!.toLowerCase();
 
       const specialist = rosterById.get(specialistId);
       if (!specialist) {
@@ -2304,4 +2314,10 @@ export class SwarmAgentLifecycleService {
 
     return block;
   }
+}
+
+/** A worker whose preset name and color follow its project's current roster. */
+function isSpecialistMetadataCandidate(descriptor: AgentDescriptor, profileId: string): boolean {
+  return descriptor.role === "worker" && descriptor.profileId === profileId && !isExternalThreadDescriptor(descriptor)
+    && Boolean(normalizeOptionalAgentId(descriptor.specialistId));
 }

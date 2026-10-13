@@ -2,7 +2,8 @@ import { validateChoiceAnswers, type ChoiceRequestEvent } from "@forge/protocol"
 import type { Database } from "better-sqlite3";
 import { ControlError, type EnvironmentControlService } from "../command-service.js";
 import type { CoreChoicePort } from "../../../swarm/swarm-choice-service.js";
-import { loadState } from "./store.js";
+import { loadState, loadThreadState } from "./store.js";
+import type { Request } from "./types.js";
 import { requestChoice, requestForChoice, requestSession } from "./request-projection.js";
 
 /** Existing facade reads and controls delegate to the retained request owner. */
@@ -11,12 +12,15 @@ export function createCoreChoicePort({ database, controlService, clock, random }
 }): CoreChoicePort {
   return {
     pending() {
-      const state = loadState(database);
-      return Object.values(state.requests).flatMap(request => {
+      // Read per session by every listing: only pending requests and their threads, not the whole core state.
+      const rows = database.prepare("SELECT state_json FROM orchestration_requests WHERE json_extract(state_json,'$.state')='pending'").all() as { state_json: string }[];
+      return rows.flatMap(row => {
+        const request = JSON.parse(row.state_json) as Request;
         const choice = requestChoice(request);
         if (request.state !== "pending" || !choice) return [];
+        const thread = loadThreadState(database, request.threadId).threads[request.threadId]!;
         const event = database.prepare("SELECT created_at FROM lifecycle_events WHERE event_type='request.opened' AND json_extract(event_json,'$.request.requestId')=? ORDER BY sequence DESC LIMIT 1").get(request.requestId) as { created_at: number };
-        return [{ type: "choice_request", ...choice, status: "pending" as const, sessionAgentId: requestSession(state.threads[request.threadId]), timestamp: new Date(event.created_at).toISOString() } satisfies ChoiceRequestEvent];
+        return [{ type: "choice_request", ...choice, status: "pending" as const, sessionAgentId: requestSession(thread), timestamp: new Date(event.created_at).toISOString() } satisfies ChoiceRequestEvent];
       });
     },
     respond(choiceId, answers) {

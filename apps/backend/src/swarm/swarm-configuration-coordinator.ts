@@ -569,8 +569,11 @@ export class SwarmConfigurationCoordinator {
     return this.promptResources.resolveSpecialistRosterForProfile(profileId, workspaceSpecialistsDir);
   }
 
-  resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]> {
-    return this.promptResources.resolveSpecialistRosterForManager(manager);
+  resolveSpecialistRosterForManager(
+    manager: AgentDescriptor,
+    workspaceRosters?: Map<string, Promise<ResolvedSpecialistDefinitionLike[]>>,
+  ): Promise<ResolvedSpecialistDefinitionLike[]> {
+    return this.promptResources.resolveSpecialistRosterForManager(manager, workspaceRosters);
   }
 
   resolveSkillRosterForDescriptor(descriptor: AgentDescriptor): Promise<SkillMetadata[] | null> {

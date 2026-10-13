@@ -18,6 +18,7 @@ import {
 import type { AgentDescriptorStore } from "./agents/agent-descriptor-store.js";
 import type { AgentDescriptor, AgentsStoreFile, ManagerProfile, SwarmConfig } from "./types.js";
 import { isEnoentError } from "../utils/fs-errors.js";
+import { forEachConcurrently } from "../utils/concurrency.js";
 
 export const DEFAULT_MEMORY_FILE_CONTENT = `# Swarm Memory
 
@@ -126,12 +127,12 @@ export class PersistenceService {
       await this.ensureProfileDirectories(profileId);
     }
 
-    for (const [memoryFilePath, profileId] of memoryFilePaths.entries()) {
+    await forEachConcurrently(memoryFilePaths.entries(), 32, async ([memoryFilePath, profileId]) => {
       const memoryTemplateContent = options?.resolveMemoryTemplateContent
         ? await options.resolveMemoryTemplateContent(profileId)
         : DEFAULT_MEMORY_FILE_CONTENT;
       await this.ensureAgentMemoryFile(memoryFilePath, memoryTemplateContent);
-    }
+    });
   }
 
   async ensureAgentMemoryFile(memoryFilePath: string, memoryTemplateContent = DEFAULT_MEMORY_FILE_CONTENT): Promise<void> {

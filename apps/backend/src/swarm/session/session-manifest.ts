@@ -47,7 +47,7 @@ interface SessionMetaStatsUpdateOptions {
   now?: () => string;
 }
 
-const SESSION_META_REBUILD_BATCH_SIZE = 10;
+const SESSION_META_REBUILD_BATCH_SIZE = 32;
 
 export async function writeSessionMeta(dataDir: string, meta: SessionMeta): Promise<void> {
   const target = getSessionMetaPath(dataDir, meta.profileId, meta.sessionId);
@@ -59,6 +59,15 @@ export async function readSessionMeta(
   profileId: string,
   sessionAgentId: string
 ): Promise<SessionMeta | undefined> {
+  return (await readSessionMetaFile(dataDir, profileId, sessionAgentId)).meta;
+}
+
+/** The decoded meta and the file text it came from, so a rewrite can be skipped when nothing changed. */
+async function readSessionMetaFile(
+  dataDir: string,
+  profileId: string,
+  sessionAgentId: string
+): Promise<{ meta?: SessionMeta; raw?: string }> {
   const path = getSessionMetaPath(dataDir, profileId, sessionAgentId);
 
   let raw: string;
@@ -66,11 +75,11 @@ export async function readSessionMeta(
     raw = await readFile(path, "utf8");
   } catch (error) {
     if (isEnoentError(error)) {
-      return undefined;
+      return {};
     }
 
     console.warn(`[swarm] Failed to read session meta ${path}: ${errorToMessage(error)}`);
-    return undefined;
+    return {};
   }
 
   try {
@@ -78,12 +87,12 @@ export async function readSessionMeta(
     const meta = coerceSessionMeta(parsed);
     if (!meta) {
       console.warn(`[swarm] Ignoring invalid session meta at ${path}`);
-      return undefined;
+      return { raw };
     }
-    return meta;
+    return { meta, raw };
   } catch (error) {
     console.warn(`[swarm] Failed to parse session meta ${path}: ${errorToMessage(error)}`);
-    return undefined;
+    return { raw };
   }
 }
 
@@ -226,7 +235,7 @@ export async function rebuildSessionMeta(options: RebuildSessionMetaOptions): Pr
       batch.map(async (sessionDescriptor): Promise<SessionMeta | null> => {
         try {
           const profileId = normalizeProfileId(sessionDescriptor);
-          const existingMeta = await readSessionMeta(options.dataDir, profileId, sessionDescriptor.agentId);
+          const { meta: existingMeta, raw: existingRaw } = await readSessionMetaFile(options.dataDir, profileId, sessionDescriptor.agentId);
           const existingWorkersById = new Map((existingMeta?.workers ?? []).map((worker) => [worker.id, worker]));
           const workers = (workerDescriptorsByManager.get(sessionDescriptor.agentId) ?? []).map((worker) =>
             buildWorkerMeta(worker, existingWorkersById.get(worker.agentId))
@@ -287,7 +296,8 @@ export async function rebuildSessionMeta(options: RebuildSessionMetaOptions): Pr
             })
           };
 
-          await writeSessionMeta(options.dataDir, meta);
+          // Every boot rebuilds every session: rewrite only the metas whose content changed.
+          if (existingRaw !== `${JSON.stringify(meta, null, 2)}\n`) await writeSessionMeta(options.dataDir, meta);
           return meta;
         } catch (error) {
           console.warn(

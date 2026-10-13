@@ -325,8 +325,8 @@ export class SessionLifecycleCoordinator {
     return result;
   }
 
-  async hydrateArchivedLastUsed(): Promise<ArchiveLastUsedHydrationResult> {
-    const result = await this.options.archiveHydrator.hydrateArchivedRowsIfMissing();
+  async hydrateArchivedLastUsed(signal?: AbortSignal): Promise<ArchiveLastUsedHydrationResult> {
+    const result = await this.options.archiveHydrator.hydrateArchivedRowsIfMissing(signal);
     if (result.hydratedSessionCount > 0) {
       this.options.events.emitAgentsSnapshot();
     }

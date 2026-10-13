@@ -4,6 +4,11 @@ import { readInitialModelInputForViewer } from "./runtime/initial-model-input-vi
 
 /** Stable boot, session-attention, and initial model-input viewer surface layered into the manager facade. */
 export abstract class SwarmManagerSessionAttentionFacade extends SwarmManagerDelegationFacade {
+  /** Background history indexing waits for `ready` (the server listening) instead of competing with startup. */
+  deferHistoryIndexingUntil(ready: Promise<unknown>): void {
+    this.getFacadeServices().conversation.history.deferBackgroundUntil(ready);
+  }
+
   async boot(): Promise<void> {
     const services = this.getFacadeServices();
     await services.boot.boot();

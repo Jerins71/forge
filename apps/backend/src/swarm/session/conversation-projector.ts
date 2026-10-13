@@ -552,16 +552,8 @@ export class ConversationProjector {
     this.historyCacheStore.clear();
     this.loadedFromDisk.clear();
     this.canonicalPrefixMayExistByAgentId.clear();
-
-    // Seed leaf ids so fallback appends preserve parentId chains even before
-    // the first full history load.
-    for (const descriptor of this.deps.descriptors.values()) {
-      if (descriptor.status !== "idle" && descriptor.status !== "streaming") {
-        continue;
-      }
-
-      this.timeline.hydrateLeafEntryId(descriptor);
-    }
+    // Leaf ids are not seeded here: a fallback append reads its file's leaf on first use
+    // (ConversationTimeline.appendConversationEntry), so boot does not read every transcript.
   }
 
   captureConversationEventFromRuntime(agentId: string, event: RuntimeSessionEvent, options?: { turnId?: string }): void {

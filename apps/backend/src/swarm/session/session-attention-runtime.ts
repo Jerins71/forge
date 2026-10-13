@@ -29,7 +29,7 @@ interface SessionAttentionRuntimeOptions {
   dataDir: string;
   descriptors: ReadonlyMap<string, AgentDescriptor>;
   profiles: ReadonlyMap<string, ManagerProfile>;
-  workers: Pick<AgentDirectory, "getWorkersForManager">;
+  workers: Pick<AgentDirectory, "getWorkersForManager" | "withWorkerIndex">;
   choices: Pick<SwarmChoiceService, "getPendingChoiceIdsForSession">;
   turns: { getProjectedStatus(agentId: string): AgentStatus | undefined; getPendingContextCount(sessionAgentId: string): number; getActiveTurnSource(sessionAgentId: string): ReturnType<NonNullable<ConstructorParameters<typeof SessionAttentionReporter>[0]["getActiveTurnSource"]>> };
   plans: Pick<SessionPlanCoordinator, "getAttentionReason">;
@@ -84,7 +84,7 @@ export class SessionAttentionRuntime implements SessionAttentionRuntimeHooks {
     this.facade = {
       initialize: async () => {
         await this.coordinator.initialize();
-        await this.coordinator.reconcileAfterBoot(this.reporter.listSessionSnapshots());
+        await this.coordinator.reconcileAfterBoot(options.workers.withWorkerIndex(() => this.reporter.listSessionSnapshots()));
       },
       flush: () => this.coordinator.flush(),
       getSnapshot: () => this.coordinator.getSnapshot(),
