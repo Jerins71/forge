@@ -24,7 +24,7 @@ import { BrowserEngine } from '../../apps/backend/src/swarm/browser-automation/b
  * measurements undo explicit agent sizes, or restart loses the chosen policy. */
 for (const host of ['headless', 'desktop'] as const) test(`${host} scales a desktop layout into a narrow panel with correct input`, async ({}, info) => {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-layout-proof-'))
-  const server = createServer((_request, response) => response.end(`<!doctype html><title>Desktop layout proof</title><style>body{margin:0;background:#cef;height:2000px}#target{position:absolute;left:960px;top:480px;width:160px;height:80px}#searchInput{position:absolute;left:950px;top:100px}@media(max-width:899px){#searchInput{display:none}}</style><input id="searchInput"><button id="target" onclick="document.querySelector('output').textContent='clicked'">Scaled target</button><output>waiting</output>`))
+  const server = createServer((_request, response) => response.end(`<!doctype html><title>Desktop layout proof</title><style>body{margin:0;background:#cef;height:2000px}#target{position:absolute;left:960px;top:480px;width:160px;height:80px;background:red}#searchInput{position:absolute;left:950px;top:100px}@media(max-width:899px){#searchInput{display:none}}</style><input id="searchInput"><button id="target" onclick="document.querySelector('output').textContent='clicked'">Scaled target</button><output>waiting</output>`))
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   let application: Awaited<ReturnType<typeof electron.launch>> | undefined
   let engine = host === 'headless' ? new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') }) : undefined
@@ -67,6 +67,12 @@ for (const host of ['headless', 'desktop'] as const) test(`${host} scales a desk
     await evaluate('document.querySelector("output").textContent="waiting"')
     const clicked = await tool('click', { tabId, selector: '#target', timeoutMs: 2000 }); expect(clicked.ok, JSON.stringify(clicked)).toBe(true)
     expect(await evaluate('document.querySelector("output").textContent')).toBe('clicked')
+    const snapshot = await tool('snapshot', { tabId }); expect(snapshot.ok).toBe(true)
+    const screenshot = snapshot.result.screenshot
+    const sharp = createRequire(join(process.cwd(), 'apps/backend/package.json'))('sharp')
+    const pixel = await sharp(Buffer.from(screenshot.data, 'base64')).extract({ left: Math.round(980 / 1280 * screenshot.width), top: Math.round(490 / 800 * screenshot.height), width: 1, height: 1 }).removeAlpha().raw().toBuffer()
+    expect([...pixel]).toEqual([255, 0, 0])
+    await writeFile(join(info.outputDir, 'agent-desktop-snapshot.png'), Buffer.from(screenshot.data, 'base64'))
     expect((await tool('scroll', { tabId, deltaY: 160 })).ok).toBe(true)
     await expect.poll(() => evaluate('scrollY')).toBe(160)
     await rpc('browser.tabs.setViewportMode', { sessionId: 'session', tabId, mode: 'panel' }); expect(await evaluate('innerWidth')).toBe(560)
