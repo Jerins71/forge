@@ -288,7 +288,6 @@ export function createFixtureEnvironmentRegistry(
             sessionId,
             (store = new KeyedSelectorStore<DetailState>({
               projection: seed.details?.[sessionId] ?? null,
-              browser: null,
               cursor: {
                 streamEpoch: seed.descriptor.streamEpoch,
                 afterSequence: 1,

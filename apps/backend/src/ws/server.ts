@@ -20,8 +20,6 @@ import type { Duplex } from "node:stream";
 import {
   isRetiredMessageSource,
   isTerminalAssistantConversationMessage,
-  type BrowserHostConnectionSnapshot,
-  type BrowserSessionSnapshot,
   type ServerEvent,
   type TerminalClosedEvent,
   type TerminalCreatedEvent,
@@ -48,7 +46,6 @@ import { isPidAlive } from "../swarm/platform.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
 import { SessionTitleNamer } from "../swarm/session-titles.js";
 import { createSessionAutoTitlesRoutes } from "./http/routes/session-auto-titles-routes.js";
-import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
 import { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import { createNoopObservabilityFacade } from "../observability/noop-observability.js";
 import type { ObservabilityFacade } from "../observability/observability-types.js";
@@ -310,18 +307,6 @@ export class SwarmWebSocketServer {
     return { profileId: descriptor.profileId ?? descriptor.agentId };
   }
 
-  broadcastBrowserSessionChanged(
-    snapshot: BrowserSessionSnapshot,
-    reason: "host-report" | "automation" | "human-command" | "lifecycle" | "recovery",
-  ): void {
-    this.sessionFeatures.browser?.publish(snapshot);
-    void reason;
-  }
-
-  broadcastBrowserHostChanged(host: BrowserHostConnectionSnapshot): void {
-    this.sessionFeatures.browserHost.publishHost(host);
-  }
-
   constructor(options: {
     swarmManager: SwarmManager;
     environment?: EnvironmentService;
@@ -345,7 +330,7 @@ export class SwarmWebSocketServer {
     observabilityService?: ObservabilityFacade;
     feedbackService?: FeedbackService;
     remoteUpdateAwarenessService?: LocalRemoteUpdateAwarenessService;
-    browserAutomationService?: BrowserAutomationService;
+    browserEngine?: import("../swarm/browser-automation/browser-engine.js").BrowserEngine;
     secureControlToken?: string;
   }) {
     this.swarmManager = options.swarmManager;
@@ -446,7 +431,7 @@ export class SwarmWebSocketServer {
         ? (sessionAgentId) => this.terminalService?.listTerminals(sessionAgentId) ?? []
         : undefined,
 
-      browserAutomationService: options.browserAutomationService,
+      browserEngine: options.browserEngine,
     });
     this.environmentTransport = this.environment?.composeTransport(this.sessionFeatures, this.terminalService);
 

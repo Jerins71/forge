@@ -3,12 +3,11 @@ import type { ProjectAgentRpc, ProjectAgentMethod } from "./project-agent-rpc.js
 import type { EnvironmentDescriptor, Method, RpcInput } from "@forge/protocol/environment-v2";
 import type { ControlService, EnvironmentAccessPort, EnvironmentStreamPort, Principal } from "../../environment/control/control-types.js";
 import type { TerminalRpcTransport } from "../../terminal/terminal-rpc-transport.js";
-import type { BrowserHostRpc } from "./browser-host-rpc.js";
 import { StreamFault } from "../../environment/streams/stream-budget.js";
 
 export interface RpcDependencies {
+  browserEngine?: ReturnType<typeof import('./browser-engine-rpc.js').createBrowserEngineRpc>;
   lifecycle?: ReturnType<typeof import("./session-lifecycle-rpc.js").createSessionLifecycleRpc>;
-  browser?: ReturnType<typeof import('./browser-workspace-rpc.js').createBrowserWorkspaceRpc>;
   sessionState?: ReturnType<typeof import("./session-state-rpc.js").createSessionStateRpc>;
   detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
   featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
@@ -17,11 +16,14 @@ export interface RpcDependencies {
   control: ControlService;
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
   detailStream: Pick<EnvironmentStreamPort, "detail" | "history" | "workers" | "content">;
-  browserHost: Pick<BrowserHostRpc, "attach" | "send" | "execute">;
   terminalTransport: TerminalRpcTransport;
 }
 
 export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, _signal: AbortSignal): Promise<unknown> | unknown {
+  if (method.startsWith('browser.tabs.') || method.startsWith('browser.screencast.') || method.startsWith('browser.cookies.') || method.startsWith('browser.engine.')) {
+    if (!deps.browserEngine) throw new StreamFault('UNAVAILABLE', 'Browser engine is unavailable');
+    return deps.browserEngine.execute(principal, method as import('./browser-engine-rpc.js').BrowserEngineMethod, input as RpcInput<import('./browser-engine-rpc.js').BrowserEngineMethod>);
+  }
   if ((lifecycleMethods as readonly string[]).includes(method)) {
     if (!deps.lifecycle) throw new StreamFault("UNAVAILABLE", "Lifecycle service is unavailable");
     return deps.lifecycle.execute(principal, method as SessionLifecycleMethod, input);
@@ -29,11 +31,6 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
   if (method.startsWith("projectAgent.")) {
     if (!deps.projectAgents) throw new StreamFault("UNAVAILABLE", "Project Agent service is unavailable");
     return deps.projectAgents.execute(principal, method as ProjectAgentMethod, input);
-  }
-  if (method === 'browser.host.register' || method === 'browser.host.hydrate' || method === 'browser.host.focus' || method === 'browser.host.reveal') return deps.browserHost.execute(principal, method, input as RpcInput<typeof method>);
-  if (method === 'browser.get' || method === 'browser.tab.open' || method === 'browser.tab.activate' || method === 'browser.tab.close' || method === 'browser.tab.resize' || method === 'browser.recording.start' || method === 'browser.recording.stop') {
-    if (!deps.browser) throw new StreamFault('UNAVAILABLE', 'Browser workspace is unavailable');
-    return deps.browser.execute(principal, method, input as RpcInput<typeof method>);
   }
   switch (method) {
     case "session.update": case "session.message.pin": case "session.pins.clear": case "session.readState.set": case "project.readState.clear": case "session.attention.dismiss":
@@ -66,7 +63,6 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "access.devices.revoke": return deps.access.revokeDevice(principal, input as RpcInput<typeof method>);
     case "terminal.input": return deps.terminalTransport.input(principal, input as RpcInput<typeof method>);
     case "terminal.resize": return deps.terminalTransport.resize(principal, input as RpcInput<typeof method>);
-    case "browser.host.send": return deps.browserHost.send(principal, input as RpcInput<typeof method>);
 
     default: throw new StreamFault("INVALID_INPUT", "Method requires subscription dispatch.");
   }

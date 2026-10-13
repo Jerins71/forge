@@ -430,8 +430,9 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     method: M,
     input: RpcInput<M>,
     observer: StreamObserver<RpcStreamItem<M>>,
+    onSubscribed?: (id: string) => void,
   ) {
-    return this.supervisor.subscribe(method, () => input, observer)
+    return this.supervisor.subscribe(method, () => input, observer, onSubscribed)
   }
   attachTerminal(
     terminalId: string,

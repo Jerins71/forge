@@ -1,5 +1,4 @@
 import type { EnvironmentDescriptor } from "@forge/protocol/environment-v2";
-import { validateSecureBuilderControlCapability, validateSecureBuilderControlOrigin } from "./terminal/terminal-access-policy.js";
 import { createEnvironmentService, type EnvironmentService } from "./environment/environment-service.js";
 import { createExposurePolicy, enableTailscaleServe } from "./environment/exposure-policy.js";
 import { getEnvironmentDbPath } from "./swarm/storage/data-paths.js";
@@ -20,7 +19,8 @@ import { getScheduleFilePath } from "./scheduler/schedule-storage.js";
 import { acquireRuntimeLock } from "./runtime-lock.js";
 import { FeedbackService } from "./swarm/feedback-service.js";
 import { SwarmManager } from "./swarm/swarm-manager.js";
-import { BrowserAutomationService } from "./swarm/browser-automation/index.js";
+import { BrowserEngine } from "./swarm/browser-automation/browser-engine.js";
+import { DesktopBrowserChannel } from "./swarm/browser-automation/desktop-browser-channel.js";
 import { seedBuiltins } from "./swarm/agents/specialists/specialist-registry.js";
 import { UnreadTracker } from "./swarm/session/unread-tracker.js";
 import type { AgentDescriptor, SessionLifecycleEvent, SwarmConfig } from "./swarm/types.js";
@@ -46,6 +46,7 @@ export interface ServerReadyInfo {
 }
 
 export interface StartServerOptions {
+  desktopBrowserParent?: boolean;
   config?: SwarmConfig;
   logger?: Partial<ServerLogger>;
   onReady?: (info: ServerReadyInfo) => Promise<void> | void;
@@ -94,12 +95,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let swarmManager: SwarmManager | undefined;
   let wsServer: SwarmWebSocketServer | undefined;
   let environment: EnvironmentService | undefined;
-  const browserAutomationService = new BrowserAutomationService({
-    dataDir: config.paths.dataDir,
-    onSessionChanged: (snapshot, reason) => wsServer?.broadcastBrowserSessionChanged(snapshot, reason),
-    onHostChanged: (host) => wsServer?.broadcastBrowserHostChanged(host),
+  const browserEngine = new BrowserEngine({ dataDir: config.paths.dataDir,
+    desktop: new DesktopBrowserChannel(options.desktopBrowserParent === true),
+    resolveSession: id => { const descriptor = swarmManager?.getAgent(id); return descriptor?.role === "manager" ? descriptor.profileId : undefined; },
   });
-
   try {
     await seedBuiltins(config.paths.dataDir);
 
@@ -107,7 +106,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
 
     swarmManager = new SwarmManager(config, {
       observability: observabilityService,
-      browserAutomationService,
+      browserEngine,
     });
   } catch (error) {
     await Promise.allSettled([
@@ -195,23 +194,11 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
           )
           .map((descriptor) => descriptor.agentId),
     });
-    environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity,
-      localBrowserOrigin: request => {
-        const address = request.socket.localAddress;
-        const peer = request.socket.remoteAddress?.replace(/^::ffff:/, '');
-        if (!config.isDesktop || !address || !peer || !['127.0.0.1', '::1'].includes(peer)) return false;
-        return validateSecureBuilderControlCapability(request, options.secureControlToken)
-          && validateSecureBuilderControlOrigin(request, { backendHost: request.headers.host?.split(":")[0] ?? "127.0.0.1", backendPort: request.socket.localPort ?? config.port }).ok;
-      } });
+    environment = await createEnvironmentService({ config, swarmManager, unreadTracker, exposure, identityOptions: options.environmentIdentity });
     await swarmManager.boot();
     await environment.initialize();
-
     let telemetryService: TelemetryService | null = null;
-    const statsService = new StatsService(swarmManager, {
-      onRefreshAllCompleted: (allStats) => {
-        void telemetryService?.sendOnStatsRefresh(allStats);
-      },
-    });
+    const statsService = new StatsService(swarmManager, { onRefreshAllCompleted: allStats => { void telemetryService?.sendOnStatsRefresh(allStats); } });
     telemetryService = new TelemetryService({
       dataDir: config.paths.dataDir,
       debug: config.debug,
@@ -370,7 +357,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       telemetryService,
       observabilityService,
       feedbackService,
-      browserAutomationService,
+      browserEngine,
       secureControlToken: options.secureControlToken,
     });
 
@@ -397,6 +384,7 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
       handleTerminalSessionLifecycle,
       handleTerminalAgentsSnapshot,
       releaseRuntimeLock,
+      browserEngine,
     });
 
     activeServer = server;
@@ -438,6 +426,7 @@ class BackendServer implements StartedServer {
   readonly environment: EnvironmentDescriptor;
   private readonly environmentService: EnvironmentService;
 
+  private readonly browserEngine: BrowserEngine;
   private readonly swarmManager: SwarmManager;
   private readonly observabilityService: ObservabilityFacade;
   private readonly wsServer: SwarmWebSocketServer;
@@ -452,6 +441,7 @@ class BackendServer implements StartedServer {
 
   constructor(options: {
     config: SwarmConfig;
+    browserEngine: BrowserEngine;
     environment: EnvironmentService;
     port: number;
     swarmManager: SwarmManager;
@@ -464,6 +454,7 @@ class BackendServer implements StartedServer {
     handleTerminalAgentsSnapshot: () => void;
     releaseRuntimeLock: () => void;
   }) {
+    this.browserEngine = options.browserEngine;
     this.host = options.config.host;
     this.port = options.port;
     this.config = options.config;
@@ -505,6 +496,7 @@ class BackendServer implements StartedServer {
       await this.environmentService.stop();
     } finally {
       await Promise.allSettled([
+        this.browserEngine.shutdown(),
         this.queueSchedulerSync(new Set<string>()),
         this.swarmManager.closeSecureSessions(),
         this.swarmManager.disposeHistoryRecall(),

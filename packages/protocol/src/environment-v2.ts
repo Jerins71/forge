@@ -9,8 +9,8 @@ import { Value } from '@sinclair/typebox/value'
 import { ProjectAgentInfoV2Schema, ProjectAgentInputV2Schema, ProjectAgentConfigV2Schema, ProjectAgentSharingFields, ProjectAgentDirectoryV2Schema, ProjectAgentFileNameSchema, ProjectAgentRevisionSchema, ProjectAgentOperationReceiptSchema } from './project-agent-v2.js'
 import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, ElicitationRespondV2Schema, DetailFeatureStreamItemSchema } from './detail-features-v2.js'
 export * from './detail-features-v2.js'
-import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2Schema, BrowserHostV2Schema, BrowserHostLeaseV2Schema, BrowserHostStreamV2Schema, BrowserStreamV2Schema, BrowserRecordingV2Schema } from './browser-v2.js'
-export * from './browser-v2.js'
+import { browserEngineSchemas as B, BrowserEngineSnapshotSchema, BrowserEngineStreamSchema, BrowserScreencastItemSchema, BrowserCookiePreviewSchema, BrowserCookieTransferSchema, BrowserCookieAuditSchema, BrowserEngineSetupSchema, BrowserEngineStatusSchema, BrowserRecordingV2Schema } from './browser-engine-v2.js'
+export * from './browser-engine-v2.js'
 import { ContextSourceSelectorSchema, ThreadLineageSchema, SessionLineageSnapshotSchema } from './lineage-v2.js'
 export * from './lineage-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
@@ -88,6 +88,8 @@ export type Scope = Static<typeof ScopeSchema>
 export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItems: 1, maxItems: 7 })
 
 export const EnvironmentCapabilitiesSchema = O({
+  /** Playwright tabs and live view are available on this environment. */
+  browserEngine: Type.Optional(Type.Boolean()),
   shellResume: Type.Boolean(),
   sessionDetail: Type.Boolean(),
   durableCommands: Type.Boolean(),
@@ -241,9 +243,9 @@ export const RpcErrorSchema = O({
 export type RpcError = Static<typeof RpcErrorSchema>
 export const CommandReceiptSchema = O({
   commandId: V2Uuid,
-  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'browser.tab.open', 'browser.tab.activate', 'browser.tab.close', 'browser.recording.start', 'browser.recording.stop', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
+  method: E('session.launch', 'session.send', 'session.choose', 'session.stop', 'project.create', 'project.update', 'project.archive', 'project.restore', 'project.delete', 'project.reorder', 'session.configure', 'workspace.directories.create', 'recovery.decide', 'session.goal.control', 'session.compact', 'session.resume', 'session.archive', 'session.restore', 'session.clear', 'session.delete', 'session.fork', 'session.provider.switch', 'session.mergeBack', 'worker.continue', 'session.choice.cancel', 'session.stopAll', 'worker.stop', 'worker.resume', 'worker.kill', 'worker.delete', 'session.update', 'session.message.pin', 'session.pins.clear', 'session.readState.set', 'project.readState.clear', 'session.attention.dismiss'),
   projectId: Type.Optional(V2Id),
-  result: Type.Optional(O({ browserRecording: Type.Optional(BrowserRecordingV2Schema), tabId: Type.Optional(V2Id), stoppedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), managerStopped: Type.Optional(Type.Boolean()), pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), terminatedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), archivedAt: Type.Optional(V2Time), openAgentId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })) })),
+  result: Type.Optional(O({ stoppedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), managerStopped: Type.Optional(Type.Boolean()), pinnedAt: Type.Optional(Type.Union([V2Time, Type.Null()])), terminatedWorkerIds: Type.Optional(Type.Array(V2Id, { maxItems: 1000 })), archivedAt: Type.Optional(V2Time), openAgentId: Type.Optional(V2Id), compacted: Type.Optional(Type.Boolean()), reason: Type.Optional(ShortText), projectId: Type.Optional(V2Id), sessionId: Type.Optional(V2Id), path: Type.Optional(Type.String({ maxLength: 4096 })) })),
   sessionId: NullableId,
   state: E('accepted', 'running', 'succeeded', 'failed', 'interrupted'),
   acceptedSequence: V2Sequence, updatedSequence: V2Sequence,
@@ -427,10 +429,6 @@ const TerminalFrame = Type.Union([
   O({ kind: Type.Literal('output'), offset: V2Sequence, data: Type.String({ maxLength: 16_384 }) }),
   O({ kind: Type.Literal('closed'), reason: ShortText }),
 ])
-const BrowserHostSend = O({
-  transferId: V2Uuid, index: Type.Integer({ minimum: 0, maximum: 63 }),
-  count: Type.Integer({ minimum: 1, maximum: 64 }), data: Type.String({ minLength: 1, maxLength: 262_144 }),
-})
 const defineRpc = <I extends TSchema, R extends TSchema, S extends TSchema | undefined = undefined>(
   input: I, output: R, options?: { stream?: S; receipt?: true },
 ) => ({ input, output, error: RpcErrorSchema, stream: options?.stream, receipt: options?.receipt === true })
@@ -502,20 +500,26 @@ export const rpcSchemas = {
     data: Type.String({ maxLength: 16_384 }) }), V2Empty),
   'terminal.resize': defineRpc(O({ subscriptionId: V2Id,
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
-  'browser.get': defineRpc(SessionInput, BrowserSnapshotV2Schema),
-  'browser.subscribe': defineRpc(SessionInput, SubscribeResult, { stream: BrowserStreamV2Schema }),
-  'browser.tab.open': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, url: Type.Optional(Type.String({ maxLength: 2048 })), activate: Type.Optional(Type.Boolean()) }), CommandReceiptSchema, { receipt: true }),
-  'browser.tab.activate': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
-  'browser.tab.close': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
-  'browser.tab.resize': defineRpc(O({ sessionId: V2Id, tabId: V2Id, viewport: BrowserViewportV2Schema }), BrowserSnapshotV2Schema),
-  'browser.recording.start': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id }), CommandReceiptSchema, { receipt: true }),
-  'browser.recording.stop': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, tabId: V2Id, recordingId: V2Id }), CommandReceiptSchema, { receipt: true }),
-  'browser.host.register': defineRpc(O({ registration: BrowserRegistrationV2Schema }), BrowserHostV2Schema),
-  'browser.host.hydrate': defineRpc(O({ requestId: V2Id, ...BrowserHostLeaseV2Schema.properties }), V2Empty),
-  'browser.host.focus': defineRpc(O({ ...BrowserHostLeaseV2Schema.properties, focused: Type.Boolean() }), V2Empty),
-  'browser.host.reveal': defineRpc(O({ ...BrowserHostLeaseV2Schema.properties, sessionId: V2Id, tabId: V2Id, sequence: V2Sequence }), BrowserSnapshotV2Schema),
-  'browser.host.attach': defineRpc(V2Empty, SubscribeResult, { stream: BrowserHostStreamV2Schema }),
-  'browser.host.send': defineRpc(BrowserHostSend, V2Empty),
+  'browser.engine.status': defineRpc(V2Empty, BrowserEngineStatusSchema),
+  'browser.engine.setup': defineRpc(V2Empty, BrowserEngineSetupSchema),
+  'browser.tabs.get': defineRpc(B.session, BrowserEngineSnapshotSchema),
+  'browser.tabs.subscribe': defineRpc(B.session, SubscribeResult, { stream: BrowserEngineStreamSchema }),
+  'browser.tabs.open': defineRpc(B.open, BrowserEngineSnapshotSchema),
+  'browser.tabs.activate': defineRpc(B.tab, BrowserEngineSnapshotSchema),
+  'browser.tabs.close': defineRpc(B.tab, BrowserEngineSnapshotSchema),
+  'browser.tabs.navigate': defineRpc(B.navigate, BrowserEngineSnapshotSchema),
+  'browser.tabs.resize': defineRpc(B.resize, BrowserEngineSnapshotSchema),
+  'browser.tabs.input': defineRpc(B.input, V2Empty),
+  'browser.tabs.recording.start': defineRpc(B.tab, BrowserRecordingV2Schema),
+  'browser.tabs.recording.stop': defineRpc(B.tab, BrowserRecordingV2Schema),
+  'browser.screencast.subscribe': defineRpc(B.screencast, SubscribeResult, { stream: BrowserScreencastItemSchema }),
+  'browser.screencast.ack': defineRpc(B.ack, V2Empty),
+  'browser.cookies.preview': defineRpc(B.preview, BrowserCookiePreviewSchema),
+  'browser.cookies.apply': defineRpc(B.apply, BrowserCookieAuditSchema),
+  'browser.cookies.prepareSend': defineRpc(B.prepareSend, BrowserCookieTransferSchema),
+  'browser.cookies.receive': defineRpc(B.receive, BrowserCookieAuditSchema),
+  'browser.cookies.audit': defineRpc(B.session, BrowserCookieAuditSchema),
+  'browser.cookies.forget': defineRpc(B.forget, BrowserCookieAuditSchema),
   'projectAgent.get': defineRpc(SessionInput, ProjectAgentConfigV2Schema),
   'projectAgent.references.list': defineRpc(SessionInput, O({ sessionId: V2Id, references: Type.Array(Type.String({ maxLength: 4096 }), { maxItems: 1000 }) })),
   'projectAgent.reference.read': defineRpc(O({ sessionId: V2Id, fileName: ProjectAgentFileNameSchema }), O({ sessionId: V2Id, fileName: ProjectAgentFileNameSchema, content: Type.String({ maxLength: 131072 }), revision: ProjectAgentRevisionSchema })),
@@ -546,11 +550,13 @@ export const rpcScopes = {
   'access.grant.create': 'access:admin', 'access.pairing.address': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
-  'browser.get': 'session:read', 'browser.subscribe': 'session:read',
-  'browser.tab.open': 'session:operate', 'browser.tab.activate': 'session:operate', 'browser.tab.close': 'session:operate', 'browser.tab.resize': 'session:operate',
-  'browser.recording.start': 'session:operate', 'browser.recording.stop': 'session:operate',
-  'browser.host.register': 'session:operate', 'browser.host.hydrate': 'session:operate', 'browser.host.focus': 'session:operate', 'browser.host.reveal': 'session:operate',
-  'browser.host.attach': 'session:operate', 'browser.host.send': 'session:operate',
+  'browser.engine.status': 'session:read',
+  'browser.engine.setup': 'session:operate',
+  'browser.tabs.get': 'session:read', 'browser.tabs.subscribe': 'session:read',
+  'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.input': 'session:operate',
+  'browser.tabs.recording.start': 'session:operate', 'browser.tabs.recording.stop': 'session:operate',
+  'browser.screencast.subscribe': 'session:read', 'browser.screencast.ack': 'session:read',
+  'browser.cookies.preview': 'session:operate', 'browser.cookies.apply': 'session:operate', 'browser.cookies.prepareSend': 'session:operate', 'browser.cookies.receive': 'session:operate', 'browser.cookies.audit': 'session:read', 'browser.cookies.forget': 'session:operate',
   'projectAgent.get': 'session:read', 'projectAgent.references.list': 'session:read', 'projectAgent.reference.read': 'session:read',
   'projectAgent.sharing.get': 'session:read', 'projectAgent.directory': 'workspace:read',
   'projectAgent.set': 'session:operate', 'projectAgent.sharing.set': 'session:operate', 'projectAgent.recommend': 'session:operate', 'projectAgent.operation.get': 'session:operate',

@@ -19,7 +19,7 @@ import { SettingsProjectResources } from '@/components/settings/SettingsProjectR
 import { SettingsProjectSettings, type ProjectSettingsActions } from '@/components/settings/SettingsProjectSettings'
 import { SettingsSlashCommands } from '@/components/settings/SettingsSlashCommands'
 import { SettingsExtensions } from '@/components/settings/SettingsExtensions'
-import { SettingsExternalChrome } from '@/components/settings/SettingsExternalChrome'
+import { SettingsBrowser } from '@/components/settings/SettingsBrowser'
 import { SettingsAbout } from '@/components/settings/SettingsAbout'
 import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes-api'
 import { SettingsCliAccess } from '@/components/settings/SettingsCliAccess'
@@ -62,6 +62,8 @@ interface SettingsPanelProps {
   initialSkillImportUrl?: string
   /** Called after the Skills tab consumes the import URL so the bearer URL can be removed from route state. */
   onSkillImportUrlConsumed?: () => void
+  /** Shows a session with its Browser panel open (Settings → Browser → Sign in once). */
+  onOpenBrowserPanel?: (environmentId: string, sessionId: string) => void
 }
 
 export function SettingsPanel({
@@ -79,6 +81,7 @@ export function SettingsPanel({
   initialTab,
   initialSkillImportUrl,
   onSkillImportUrlConsumed,
+  onOpenBrowserPanel,
 }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<SettingsTab>(() => {
     if (initialTab) {
@@ -217,7 +220,7 @@ export function SettingsPanel({
         />
       )}
       {activeTab === 'extensions' && <SettingsExtensions apiClient={apiClient} />}
-      {activeTab === 'external-chrome' && <SettingsExternalChrome />}
+      {activeTab === 'browser' && <SettingsBrowser environmentId={environmentId} onOpenBrowserPanel={onOpenBrowserPanel} />}
       {activeTab === 'cli-access' && <SettingsCliAccess backendUrl={backendUrl} apiClient={apiClient} />}
       {activeTab === 'environments' && <EnvironmentsSettings />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}

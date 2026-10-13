@@ -5,7 +5,7 @@ import settingsAuthContent from './articles/settings/settings-auth.md?raw'
 import settingsCliAccessContent from './articles/settings/settings-cli-access.md?raw'
 import settingsEditorContent from './articles/settings/settings-editor.md?raw'
 import settingsExtensionsContent from './articles/settings/settings-extensions.md?raw'
-import settingsExternalChromeContent from './articles/settings/settings-external-chrome.md?raw'
+import settingsBrowserContent from './articles/settings/settings-browser.md?raw'
 import settingsGeneralContent from './articles/settings/settings-general.md?raw'
 import settingsGitMonitoringContent from './articles/settings/settings-git-monitoring.md?raw'
 import settingsHistoryContent from './articles/settings/settings-history.md?raw'
@@ -442,35 +442,27 @@ export const settingsArticles: HelpArticle[] = [
     contextKeys: ['settings.extensions'],
   },
   {
-    id: 'settings-external-chrome',
-    title: 'Use Chrome with Forge',
+    id: 'settings-browser',
+    title: 'Browser',
     category: 'settings',
-    summary: 'Set up or repair optional automatic Chrome use in Forge Desktop.',
-    content: settingsExternalChromeContent,
+    summary: 'Each project’s browser profile per machine: setup, signed-in sites, Sign in once, and Import from Chrome.',
+    content: settingsBrowserContent,
     keywords: [
-      'Use Chrome with Forge',
-      'chrome extension',
-      'load unpacked',
-      'developer mode',
-      'native messaging',
-      'Chrome setup',
-      'automatic browser',
-      'permissions',
-      'repair',
-      'DevTools',
-      'debugger',
-      'Take Control',
-      'fresh snapshot',
-      'attached-idle',
-      'pointer movement',
-      'release reconciliation',
-      'timeout',
-      'dedicated profile',
-      'Windows',
-      'beta',
+      'browser',
+      'browser profile',
+      'sign in',
+      'cookies',
+      'import from Chrome',
+      'remote debugging',
+      'Keychain',
+      'Chrome Safe Storage',
+      'Files & Folders',
+      'forget site',
+      'set up browser',
+      'send to another machine',
     ],
-    relatedIds: ['settings-extensions', 'chat-browser'],
-    contextKeys: ['settings.external-chrome'],
+    relatedIds: ['chat-browser'],
+    contextKeys: ['settings.browser'],
   },
   {
     id: 'settings-cli-access',

@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url));
 export default defineConfig({
-  testDir: '.', testMatch: ['slice.spec.ts', 'ui.spec.ts', 'lineage-ui.spec.ts', 'ux.spec.ts', 'activity.spec.ts', 'polish.spec.ts', 'load.spec.ts', 'cli.spec.ts', 'pairing.spec.ts'],
+  testDir: '.', testMatch: ['browser-engine.spec.ts', 'slice.spec.ts', 'ui.spec.ts', 'lineage-ui.spec.ts', 'ux.spec.ts', 'activity.spec.ts', 'polish.spec.ts', 'load.spec.ts', 'cli.spec.ts', 'browser.spec.ts', 'pairing.spec.ts'],
   globalSetup: fixture('global-setup.ts'),
   fullyParallel: false, workers: 1, retries: 0, timeout: 60_000,
   outputDir: '../../.internal/forge-v2-remote/e2e/playwright',

@@ -5,6 +5,11 @@ import { launchFleet, readManifest, verifyFleetHealth, repositoryRoot } from '..
 
 /** Suites whose Claude sessions run the real Claude Code against a scripted model; Codex sessions are unchanged. */
 const BACKEND_ENTRIES: Record<string, string> = { 'lineage-ui': 'lineage-backend-process.ts', activity: 'claude-backend-process.ts', pairing: 'pairing-backend-process.ts' };
+/** The browser suite reuses one pinned headless Chrome download across runs (gitignored), and points
+ * Import from Chrome at a seeded throwaway Chrome profile; test fleets never read the user's own. */
+export const BROWSER_E2E_BROWSER_CACHE = join(repositoryRoot, '.internal/browser-engine/runtime');
+export const BROWSER_E2E_CHROME_PROFILE = join(repositoryRoot, '.internal/browser-e2e-chrome');
+const BACKEND_ENV: Record<string, NodeJS.ProcessEnv> = { browser: { FORGE_BROWSER_CACHE_DIR: BROWSER_E2E_BROWSER_CACHE, FORGE_BROWSER_TEST_CHROME_PROFILE: BROWSER_E2E_CHROME_PROFILE } };
 
 /** Suite options force separate workers: destructive slice scenarios cannot contaminate UI/load. */
 export const test = base.extend<{ environmentFailure: void }, { environmentSuite: string; environmentManifest: string }>({
@@ -15,9 +20,9 @@ export const test = base.extend<{ environmentFailure: void }, { environmentSuite
       await use(process.env.FORGE_E2E_MANIFEST);
       return; // Explicit attachment never takes ownership of another launcher's fleet.
     }
-    if (!['slice', 'ui', 'lineage-ui', 'ux', 'activity', 'polish', 'load', 'cli', 'pairing'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
+    if (!['slice', 'ui', 'lineage-ui', 'ux', 'activity', 'polish', 'load', 'cli', 'pairing', 'browser'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
     const out = join(repositoryRoot, `.internal/forge-v2-remote/e2e-manifest-${process.env.FORGE_E2E_RUN_ID}-${worker.workerIndex}-${environmentSuite}.json`);
-    const fleet = await launchFleet({ environments: Number(process.env.FORGE_E2E_ENVIRONMENTS ?? (environmentSuite === 'load' ? 8 : 3)), out, ...(BACKEND_ENTRIES[environmentSuite] ? { backendEntry: join(repositoryRoot, 'scripts/environment-e2e/fixtures', BACKEND_ENTRIES[environmentSuite]) } : {}) });
+    const fleet = await launchFleet({ environments: Number(process.env.FORGE_E2E_ENVIRONMENTS ?? (environmentSuite === 'load' ? 8 : 3)), out, ...(BACKEND_ENTRIES[environmentSuite] ? { backendEntry: join(repositoryRoot, 'scripts/environment-e2e/fixtures', BACKEND_ENTRIES[environmentSuite]) } : {}), ...(BACKEND_ENV[environmentSuite] ? { backendEnv: BACKEND_ENV[environmentSuite] } : {}) });
     process.env.FORGE_E2E_MANIFEST = fleet.manifestPath;
     try { await use(fleet.manifestPath); }
     finally {

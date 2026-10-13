@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, Server, ShieldCheck } from 'lucide-react'
+import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Globe2, Grid3X3, Server, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HelpTrigger } from '@/components/help/HelpTrigger'
@@ -51,7 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'git-monitoring', label: 'Git monitoring', icon: <GitBranch {...ICON_PROPS} />, description: 'Repositories Forge watches for changes.' },
       { id: 'secrets', label: 'Secrets', icon: <ShieldCheck {...ICON_PROPS} />, description: 'Secrets available to agents and tools.' },
       { id: 'extensions', label: 'Extensions', icon: <Puzzle {...ICON_PROPS} />, description: 'Extend Forge with additional capabilities.' },
-      { id: 'external-chrome', label: 'Chrome', icon: <MonitorCog {...ICON_PROPS} />, description: 'Let agents use your Chrome browser.' },
+      { id: 'browser', label: 'Browser', icon: <Globe2 {...ICON_PROPS} />, description: 'Each project’s browser profile, sign-ins and Chrome import.' },
       { id: 'cli-access', label: 'CLI Access', icon: <TerminalSquare {...ICON_PROPS} />, description: 'Use the Forge command line tool.' },
       { id: 'stream-deck', label: 'Stream Deck', icon: <Grid3X3 {...ICON_PROPS} />, description: 'Control Forge from an Elgato Stream Deck.' },
     ],

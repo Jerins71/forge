@@ -4,22 +4,11 @@ This workspace packages Forge as a standalone desktop application for supported 
 
 ## Architecture
 
-The Electron app is a thin wrapper around Forge's existing backend and UI:
+The main process launches the backend and owns sandboxed `WebContentsView` tabs. The backend owns Playwright, tab state, browser tools, recordings, and cookie import. It connects to those views through the private backend-child IPC channel and a private local socket; no TCP debugging port is exposed.
 
-- **Main process** (`src/main.ts`) — launches the packaged backend, owns application windows and updates, composes one protocol-v2 `AutomaticBrowserHost`, and owns RAM-only read-only browser-preview membership and pixels
-- **Trusted preload** (`src/preload.ts`) — constructs role-scoped bridges. The main renderer gets bounded browser/workspace/Chrome setup APIs plus preview snapshot and frame-pull IPC; the managed-browser pop-out gets only its workspace bridge
-- **Renderer process** — loads the staged UI bundle from `ui/index.html`. The main role registers one Desktop browser host with the local Builder backend, projects canonical browser-tab state, renders either the embedded workspace or a Chrome-backed tab card, and overlays the automatic compact preview stack in Chat. The renderer transiently relays complete `browser_status` inventory responses between the trusted bridge and backend, but does not project that inventory into Browser workspace UI or canonical renderer state; it also receives no per-tab operation-authority controls
-- **Guest preload** (`src/browser/guest-preload.ts`) — runs inside sandboxed embedded tab views, reports only real pointer/key input so human control can interrupt an agent action, and renders the non-interactive agent cursor inside the native guest
+The trusted preload exposes only the native Browser panel’s present/hide bridge. The UI reads tabs and sends actions through authenticated environment-v2 RPCs. Native views use persistent project partitions without user extensions. Main hides presented views when the renderer navigates or exits, and Playwright viewport emulation does not change panel placement.
 
-`BrowserAutomationManager` owns the `AutomaticBrowserHost` policy seam in the main process. Logical tabs carry sticky `managed-electron` or `external-chrome` affinity. Explicit targets never migrate. Tabless common operations may acquire Chrome automatically and fall back directly to Electron when one acquisition/execution attempt proves mutation did not start; a possible mutation returns no-replay failure metadata. Resize and recording route directly to Electron. Chrome authority is exact per tab and retained only for a short adaptive burst: logical inactivity releases at 30 seconds, physical debugger idle expires at 35 seconds, and a session is capped at five minutes. Failed release acknowledgement keeps the exact checkpoint and blocks later acquisition until reconciliation. **Show in Chrome** settles an active burst, reacquires the exact target transiently, reveals it, and releases it again. **Take Control** is terminal human takeover and releases the exact authority, including a durable recovered checkpoint. Turn end, stop, update/quit, and session lifecycle cleanup use correlated generic host requests.
-
-The Desktop relay writes an exact durable pre-acquisition journal before invoking the extension. A journal-write failure proves no request was sent and can remain fallback-eligible; after request delivery may have begun, a crash, lost response, or uncertain finalization is `mutationState: possible`, forbids automatic fallback/replay, and is reconciled only through exact lease evidence after reconnect. Release checkpoints and pending release acknowledgements are retained until the exact extension scope is acknowledged; bounded checkpoint/receipt admission applies backpressure instead of evicting cleanup evidence.
-
-The embedded adapter uses main-owned `WebContentsView` instances with persistent profile-scoped partitions. Views enforce sandboxing, context isolation, no Node integration, HTTP(S)-only navigation, restricted permissions, and expected partitions. The same view can move into the single native pop-out and back without remounting, changing host generation, or interrupting CDP/recording. Cmd+W docks it on macOS and Ctrl+W docks it on Windows/Linux. The adapter uses pinned `playwright-core` 1.60.0 extracted from `lib/coreBundle.js`; marker, version, fixture, packaging, and notice tests fail closed when that private integration changes.
-
-The optional Chrome adapter has no Electron view or recording authority. Its coordinator deploys the deterministic unpacked extension and required native host into the active Forge data directory, owns current-user authentication/rendezvous and Chrome registration, and connects the main-process relay to profile-wide eligible-tab inventory plus exact operation-scoped tab authority. Once enabled and authenticated, the extension covers eligible ordinary web tabs across its profile; `browser_status` returns a bounded inventory across ready authenticated profiles, and `browser_open` selects the active/most-recent eligible tab or an inventory `tabId` without OS focus. Trusted clicks, keys, scrolls, and touch advance the control epoch; after in-flight CDP settlement the exact lease may remain `attached-idle` but requires a fresh snapshot. Idle pointer movement does not interrupt, while a mismatched synthetic-sequence pointer move does. Navigation positively re-proves root identity and reinjects the singleton bridge before returning to `attached-idle`; restricted/unproven targets, debugger preemption, transport uncertainty, expiry, and terminal cleanup are fail-closed. There is no profile confirmation prompt or picker.
-
-`AutomaticBrowserHost` publishes exact main-local control observations to `BrowserPreviewHost`; the Browser workspace has no manual Preview admission control. A tab joins the main Chat overlay when agent control starts, stays through inter-operation/authority-idle gaps, and leaves on the owning turn/session or terminal takeover boundary. `BrowserPreviewHost` intersects that signal with the selected workspace's canonical scope, bounds the cascade to four cards, and never lists, acquires, executes, renews, releases, or polls Chrome authority. Managed cards receive bounded `capturePage(undefined, { stayHidden: true })` thumbnails without changing native view ownership, focus, visibility, or source viewport. Chrome cards mirror only already-successful exact-target agent snapshots. One latest image per card is delivered through renderer pull IPC, discarded after privacy/lifecycle invalidation, and never enters browser persistence or backend transport. The [Browser automation guide](../../docs/BROWSER_AUTOMATION.md) is the user-facing source of truth.
+Without an attached Desktop host, including remote environments, the backend installs the pinned headless shell on demand and streams the live view over the authenticated environment connection. User input cancels the tab’s agent action. Chrome is used only for explicit cookie import. On macOS, Source B runs in Electron main so Keychain consent names Forge. See the [Browser automation guide](../../docs/BROWSER_AUTOMATION.md).
 
 ### Packaged layout
 
@@ -33,8 +22,7 @@ The optional Chrome adapter has no Electron view or recording authority. Its coo
 - **Stream Deck plugin installer** — when `FORGE_STREAM_DECK_SETUP_ENABLED=true`, `.stage/stream-deck/com.forge.command-center.streamDeckPlugin` is built, validated, and packaged from `apps/stream-deck/` for the optional local Command Center installation flow
 - **Cursor SDK runtime assets** — required and staged for native manager and specialist support via `@cursor/sdk`, together with `sqlite3` and the required platform-native SDK assets; packaging and its packaged-runtime preflight fail if any of these assets are missing
 - **SQLite runtime** — `better-sqlite3` remains external to the backend bundle so its Electron-specific native binding can be staged and exercised with Electron-as-Node before packaging
-- **Embedded browser runtime** — main/trusted-preload/guest-preload bundles in `app.asar`, plus `.stage/browser-runtime/playwright-core/` and an exact staged copy of root `THIRD_PARTY_NOTICES.md` under packaged `resources/browser-runtime/`
-- **Optional Chrome adapter resources** — deterministic extension shell/payload and a platform/architecture SEA native relay under `.stage/external-chrome/`, packaged as `resources/external-chrome/`; release builds use the official pinned SEA Node, require macOS Developer ID signing before the native-host hash/manifest is created, and hash-pin the credential-free unsigned Windows host
+- **Browser engine runtime** — pinned `playwright-core` and native cookie/archive dependencies in the staged backend dependency closure, with root `THIRD_PARTY_NOTICES.md` copied into Forge resources. Headless Chrome and the recording encoder install into the environment data directory on demand.
 
 At runtime the packaged app spawns the staged backend bundle from `backend/dist/index.mjs`, waits for backend readiness, then opens the renderer from the staged `ui/` directory.
 
@@ -116,25 +104,10 @@ Set `FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE=1` for the additional minted-ses
 | File | Purpose |
 |------|---------|
 | `src/main.ts` | Main process entry point. Window management, backend lifecycle, IPC handlers |
-| `src/preload.ts` | Trusted renderer bridge for one browser host plus bounded Chrome setup/repair |
-| `src/browser/browser-automation-manager.ts` | Main-process composition of the automatic host and target adapters |
-| `src/browser/automatic-browser-host.ts` | Sticky affinity, acquisition, safe fallback, no replay, authority bursts, reveal, lifecycle policy, and preview control observations |
-| `src/browser/browser-target-adapter.ts` | Private embedded/Chrome adapter and authority contracts |
-| `src/browser/managed-electron-target-adapter.ts` | Electron-hosted tab runtime, typed operation execution, interruption, diagnostics, and recording capture |
-| `src/browser/external-chrome-target-adapter.ts` | Chrome common-operation, acquisition, exact release, and reveal adapter |
-| `src/browser/browser-ipc.ts` | Main-authority-only automatic-host IPC handlers |
-| `src/browser/managed-browser-view-host.ts` | Epoch/sequence-guarded main-process view ownership, bounds, and same-view reparenting |
-| `src/browser/browser-workspace-ipc.ts` | Narrow role-scoped pop-out projection, atomic canonical preview scope publication, and correlated command relay |
-| `src/browser/browser-preview-host.ts` | RAM-only automatic card membership, bounded capture scheduling, passive Chrome observation, privacy state, and frame-pull ownership |
-| `src/browser/browser-preview-ipc.ts` | Exact-main-frame validation for preview state and frame pull |
-| `src/browser/guest-preload.ts` | Sandboxed guest input-only preload |
-| `src/browser/playwright-injected-runtime.ts` | Pinned, fail-closed Playwright semantic-locator runtime extraction |
-| `src/external-chrome/coordinator.ts` | Optional adapter deployment, current-user authentication, registration, update, recovery, and repair coordinator |
-| `src/external-chrome/relay-runtime.ts` | Authenticated profile-wide inventory, exact per-tab checkpoints, operation transport, release, reveal, and recovery |
-| `src/external-chrome/registration.ts` | Forge-owned native-host manifest/registry inspection, repair, transfer, and removal |
-| `src/external-chrome/data-paths.ts` | Canonical optional Chrome adapter integration paths under the active Forge data directory |
-| `scripts/stage-external-chrome.mjs` | Combines verified extension and native-host inventories into the Electron stage |
-| `scripts/external-chrome-package-content-smoke.mjs` | Verifies staged/packaged inventory, target metadata, hashes, and signature policy |
+| `src/preload.ts` | Trusted main-renderer present/hide browser bridge |
+| `src/browser/desktop-browser-host.ts` | Main-owned sandboxed project tabs, private IPC, native presentation and input |
+| `src/browser/cdp-relay.ts` | Minimal CDP browser facade for Playwright over the private channel |
+| `src/browser/browser-engine-fixture-main.ts` | Isolated native-host E2E fixture |
 | `src/auto-updater.ts` | Auto-update logic using `electron-updater` and GitHub Releases |
 | `src/window-state.ts` | Persists window position, size, maximized state, and fullscreen state across restarts |
 | `src/fix-path.ts` | Ensures PATH is set correctly on macOS when launched from GUI (not terminal) |
@@ -157,7 +130,7 @@ Press Ctrl+C once to stop development. The launcher asks Electron to quit over i
 
 Before Electron launches, the desktop workspace prepares a cached `better-sqlite3` binary for Electron's embedded Node runtime. The cache lives under `apps/electron/.dev-native/` and is separate from the Host-Node binary installed by pnpm, so switching between `pnpm dev` and `pnpm dev:electron` does not rebuild or overwrite shared dependencies. The cache is versioned by the Electron version, platform, architecture, and `better-sqlite3` source fingerprint, and is verified with an Electron-as-Node in-memory database smoke test before use.
 
-The `dev` and `start` commands also build the optional Chrome extension and native-relay bundle, wrap the bundle in an explicit current-Node shebang host, smoke it without registration, and stage the result under `apps/electron/.dev-external-chrome/`. Dev Electron validates and deploys that inventory through the same stable data-directory layout used by packaged releases, so Settings can reveal the unpacked `extension/` folder. This development manifest is opt-in and cannot pass the default release-manifest policy; packaged builds still require the SEA and platform-specific release integrity contract. The shebang host supports macOS and Linux development. On Windows, dev preparation reuses a hash-verified validation SEA when possible; otherwise it builds one through the native-host packaging path with the repository Node executable. Windows validation uses direct `--build-sea` when available; on supported older Node builds (including Node 22 and 24) without that option, it uses `--experimental-sea-config` and pinned `postject` to inject the blob into a copy of the same `node.exe`. Both paths require the SEA fuse and executable native-message smoke before staging. If a rebuild is needed and that optional toolchain is unavailable, preparation removes only the stale worktree stage, reports External Chrome as unavailable for that run, and lets Forge Desktop continue with its embedded browser; unrelated build or integrity failures remain fatal. This allowance is confined to the unpacked dev resource root and is rejected by packaged/release policy; packaged Windows builds use the release-pinned official Node 26.5.0 and an explicit unsigned manifest protected by strict SHA-256 validation. To build and smoke only these worktree-local resources without launching Electron or changing native registration, run `pnpm --dir apps/electron prepare:dev-external-chrome`.
+The browser engine requires no extension or native-messaging registration. Development builds use the same private child channel as packaged Desktop.
 
 Electron 42+ downloads its platform binary on first execution rather than during package postinstall. Materialize it early and assert the exact embedded runtime before native preparation or packaging:
 
@@ -204,76 +177,11 @@ The backend still enforces environment authentication and scopes, the secure
 origin policy, and the control capability. This adds no browser or remote
 authority and does not relax either backend secure gate.
 
-Focused Automatic Browser Host validation commands:
+Browser engine validation uses the real fixture E2E suite, including native Electron relay, headless tabs, and cookie import. See [Browser automation validation](../../docs/BROWSER_AUTOMATION.md#validation-and-isolation). Electron renderer-bridge and shutdown checks are:
 
 ```bash
-# A fresh worktree needs the shared protocol output used by the Electron bundle
-pnpm --filter @forge/protocol build
-
-# Main-process automatic policy, adapters, and relay lifecycle
-pnpm --dir apps/electron exec vitest run \
-  src/browser/__tests__/automatic-browser-host.test.ts \
-  src/browser/__tests__/browser-target-adapters.test.ts \
-  src/external-chrome/__tests__/relay-runtime.test.ts
-
-# Electron host fixture: launches real main-owned embedded views against a local HTTP fixture
-pnpm --dir apps/electron test:browser-fixture
-
-# Native WebContentsView spike: repeatedly reparents one main-owned guest between windows
-pnpm --dir apps/electron test:browser-popout-reparent
-
-# Preview capture fixture: exercises stayHidden capture while attached, detached, hidden,
-# minimized, occluded, and pop-out-owned without changing source presentation
-pnpm --dir apps/electron test:browser-preview-capture
-
-# Builds a minimal unpacked app and verifies app.asar, Playwright runtime, and notices
-pnpm --dir apps/electron test:browser-package
-
-# Verifies maintained third-party attribution and adapted-file mappings
-pnpm exec vitest run scripts/__tests__/browser-third-party-notices.test.mjs
+pnpm --dir apps/electron exec vitest run src/__tests__/environment-preload-sandbox.test.ts src/__tests__/main-quit-handler.test.ts
 ```
-
-The real embedded-view fixtures require a graphical Electron environment. Passing on one operating system does not qualify another. Native macOS and Windows reparenting, preview-capture fidelity/cost, recording/media, close-race, and packaged-layout qualification remain separate supported-platform gates. The preview fixture reports dimensions, byte size, timing, page visibility, source bounds/owner, focus, and whether fixture animation pixels changed; it does not prove equivalent behavior on another OS or production website. Experimental Linux local-directory smoke work is separately qualified but is not Desktop support or release evidence; do not infer headed or platform qualification from unit tests or one-machine smoke runs.
-
-### Optional Chrome adapter packaging and validation
-
-The optional Chrome path has separate extension, native-relay, Electron coordinator, staging, and package-content gates. The non-live validation path is:
-
-```bash
-# Shared contracts and package workspaces
-pnpm --filter @forge/protocol build
-pnpm --filter @forge/chrome-extension identity
-pnpm --filter @forge/chrome-extension typecheck
-pnpm --filter @forge/chrome-extension test
-pnpm --filter @forge/chrome-extension build
-pnpm --filter @forge/external-chrome-native-host typecheck
-pnpm --filter @forge/external-chrome-native-host test
-
-# Credential-free, explicitly non-publishable current-target SEA
-FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm --filter @forge/external-chrome-native-host package:current
-
-# Electron automatic policy, coordinator/adapter, relay, and packaging policy
-pnpm --dir apps/electron exec vitest run \
-  src/browser/__tests__/automatic-browser-host.test.ts \
-  src/browser/__tests__/browser-target-adapters.test.ts \
-  src/external-chrome/__tests__
-pnpm --dir apps/electron exec vitest run scripts/__tests__/external-chrome-staging.test.mjs scripts/__tests__/external-chrome-release-signing.test.mjs scripts/__tests__/windows-ci-signing-env.test.mjs
-FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm --dir apps/electron stage:external-chrome
-FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm --dir apps/electron test:external-chrome-package
-```
-
-`stage:external-chrome` expects the built extension and native-host package manifests. It fails on a missing required executable, target/architecture mismatch, protocol mismatch, incomplete inventory, hash drift, or release-integrity policy failure. The package-content smoke walks the complete stage, rejects symlinks/extra files/hash changes, and verifies platform-specific native-host metadata: macOS requires its Developer ID signature while Windows requires explicit unsigned release metadata plus the exact manifest SHA-256. Validation mode explicitly allows an unverified validation signature only for non-publishable staging, package-content, and installer validation; runtime deployment and the release path reject it.
-
-The opt-in extension fixture can exercise a temporary isolated Chrome profile, but it is not a replacement for live MV3 service-worker suspension/restart, headed Chrome, Chrome debugger preemption, native-registration/Desktop end-to-end, or target-platform runs. Do not run live registration or load an everyday Chrome profile during routine CI/docs validation. Unit tests, builds, staging, and package-content smoke do not by themselves qualify those live gates, installer contents, or the release SEA and platform-integrity path.
-
-If you only want to run the Electron app without starting the UI dev server separately:
-
-```bash
-cd apps/electron
-pnpm dev
-```
-
-This builds the main process and launches Electron, but you still need the UI dev server running in another terminal.
 
 ## Building
 
@@ -295,15 +203,14 @@ The packaging pipeline:
 6. Builds `@forge/cli` and stages the bundled CLI entrypoint into `apps/electron/.stage/cli/cli.js`
 7. Stages Forge runtime resources into `apps/electron/.stage/forge-resources/`
 8. Stages the optional Stream Deck plugin installer into `apps/electron/.stage/stream-deck/` only when `FORGE_STREAM_DECK_SETUP_ENABLED=true`; the directory remains empty by default
-9. Stages pinned `playwright-core` and the byte-identical root `THIRD_PARTY_NOTICES.md` into `.stage/browser-runtime/`, validating the injected-runtime markers before packaging
-10. Builds the optional Chrome adapter shell/payload and current platform/architecture native relay with official Node 26.5.0; macOS release mode signs and signer-verifies the relay before calculating its hash, while Windows release mode emits explicit unsigned metadata protected by the exact manifest hash; explicit validation mode remains non-publishable
-11. Runs a packaged-runtime preflight that resolves and loads the staged native/runtime externals from `.stage/backend/node_modules/`, exercising `better-sqlite3`, `sqlite3`, `node-pty`, `sharp`, and `koffi` with Electron-as-Node and ensuring they do not silently fall back to repo-level `node_modules`
-12. Runs a staged CLI preflight with Electron-as-Node against `.stage/cli/cli.js --version`
+9. Stages pinned `playwright-core` with the backend dependency closure and copies root `THIRD_PARTY_NOTICES.md` into Forge resources
+10. Runs a packaged-runtime preflight that resolves and loads the staged native/runtime externals from `.stage/backend/node_modules/`, exercising `better-sqlite3`, `sqlite3`, `node-pty`, `sharp`, and `koffi` with Electron-as-Node and ensuring they do not silently fall back to repo-level `node_modules`
+11. Runs a staged CLI preflight with Electron-as-Node against `.stage/cli/cli.js --version`
 13. Runs `electron-builder --publish never`; Windows packaging disables all identity discovery and restores the manifest-hashed host after extra-resource processing, macOS excludes that nested host with `mac.signIgnore`, and `afterSign` rechecks the packaged host hash plus platform-specific release contract before installers are produced
 
 Packaged outputs are written to `apps/electron/release/`, which is treated as ephemeral build output for the current run.
 
-The optional Chrome adapter adds fail-closed release gates to that pipeline. A publishable installer requires the pinned extension ID and deterministic shell/payload inventory, a required SEA for the package target/architecture, matching native protocol metadata, byte-identical preservation through electron-builder, and post-package hash verification. macOS additionally requires verified Developer ID identity/team; Windows is explicitly unsigned and may run only while its deployed executable matches the release manifest SHA-256. A validation-mode relay or manifest is deliberately non-deployable and must never be promoted by relabeling it as a release artifact. Complete headed Chrome, live native registration, target-platform, installer, and updater checks remain operator gates before any draft is published.
+Packaging fails if staged runtime dependencies resolve outside the stage or cannot load. Complete target-platform, installer, and updater checks remain operator gates before any draft is published.
 
 ## Desktop CLI
 
@@ -337,21 +244,15 @@ Add the macOS signing variables to `.env` before packaging a macOS release build
 | `APPLE_ID` | Your Apple ID email |
 | `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password from appleid.apple.com |
 | `APPLE_TEAM_ID` | Your Apple Developer Team ID |
-| `FORGE_MACOS_SIGNING_IDENTITY` | Exact `Developer ID Application: … (TEAMID)` common name expected on the native host |
-| `FORGE_SEA_NODE` | Absolute path to the official Node 26.5.0 executable (not a vendor build missing `NODE_SEA_FUSE`) |
 
-Release packaging also requires `FORGE_EXTERNAL_CHROME_BUILD_MODE=release`. The native host is signed first and its observed identity/team must match the two expected values; electron-builder then signs/notarizes the outer app.
+Electron-builder signs and notarizes the macOS app using the configured Apple credentials.
 
 ### Windows unsigned release packaging
 
-| Variable | Description |
-|----------|-------------|
-| `FORGE_SEA_NODE` | Official Node 26.5.0 executable installed by `actions/setup-node` |
-
-`workflow_dispatch` releases are credential-free on Windows. Packaging blanks `WIN_CSC_*`, `CSC_*`, and the signer subject and sets `CSC_IDENTITY_AUTO_DISCOVERY=false`, so neither electron-builder nor the External Chrome native host can discover or use a signing identity. The Windows release manifest explicitly records an unsigned native host; staging, deployment, and runtime registration require exact SHA-256 agreement and fail closed on drift. `electron/*` pushes retain validation mode. Validation native-host manifests stay explicitly unverified and cannot be deployed or published as a release. For a local non-publishable package smoke, set validation mode explicitly.
+Windows releases are credential-free. Packaging blanks `WIN_CSC_*`, `CSC_*`, and the signer subject and sets `CSC_IDENTITY_AUTO_DISCOVERY=false`. Both manual release builds and validation builds use this policy. Validation builds remain non-publishable. For a local package smoke:
 
 ```bash
-FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm package:electron
+pnpm package:electron
 ```
 
 ## Releasing
@@ -394,7 +295,7 @@ FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm package:electron
 2. **Start/register exact-SHA Windows, then build and validate macOS locally**
    - Before either platform starts, `release.sh --evidence` verifies isolated preparation/install/toolchain/store provenance, the actual complete local full report, matching Manual Quality `workflow_dispatch` full-report artifact, and successful Secure Sessions **push** run on the final SHA. Use the skill helper `prepare-packaging` for a separate fresh remote clone/install; never copy quality build outputs or developer `node_modules`.
    - Windows dispatch requires `expected_sha`; the workflow validates the event SHA before checkout/install/build and asserts the exact checked-out HEAD. The operator persists dispatch intent/run ID before macOS starts and resumes that run, never dispatching twice after interruption.
-   - Install the official Node 26.5.0 distribution, then run `FORGE_EXTERNAL_CHROME_BUILD_MODE=release FORGE_SEA_NODE=/absolute/path/to/official/node pnpm package:electron` on a macOS machine with the signing, expected-identity, and notarization credentials in `.env`
+   - Install the official Node 26.5.0 distribution, then run `pnpm package:electron` on a macOS machine with the signing, expected-identity, and notarization credentials in `.env`
    - This build clears `apps/electron/release/` first; copy/archive older artifacts elsewhere if you need to keep them
    - Confirm the expected macOS assets exist in `apps/electron/release/`
 
@@ -413,8 +314,8 @@ FORGE_EXTERNAL_CHROME_BUILD_MODE=validation pnpm package:electron
    - After macOS cleanup/build, collect the already-registered exact-SHA Windows run into a per-cut isolated directory. The project-scoped script then uploads the complete 8-asset draft set from that current-run inventory. Never promote leftover serial downloads or an experimental Linux `dir` output.
 
 6. **Publish last**
-   - Every full build stops at the verified draft. After downloading and hash-checking all eight assets/manifests, exercise actual Desktop startup, interaction, and persistence after relaunch from the downloaded macOS artifact with isolated data/ports. Record the exact SHA/version, all asset hashes, signing/notary/native-host evidence and smoke timings. Staged module/Pi smoke is not Desktop startup. Surface native-keychain prompts immediately rather than silently retrying; mock-keychain smoke is limited evidence, not native qualification.
-   - Use `--publish-draft --expected-sha "$FINAL_SHA" --evidence /absolute/path/to/cut.json` to revalidate the same assets and hash-bound smoke/signing evidence without rebuilding, publish, then redownload/hash-check the published inventory. Windows unsigned native-host integrity and CI tests do not establish Windows headed qualification; report absent target-platform smoke explicitly.
+   - Every full build stops at the verified draft. After downloading and hash-checking all eight assets/manifests, exercise actual Desktop startup, interaction, and persistence after relaunch from the downloaded macOS artifact with isolated data/ports. Record the exact SHA/version, all asset hashes, signing/notary evidence and smoke timings. Staged module/Pi smoke is not Desktop startup. Surface native-keychain prompts immediately rather than silently retrying; mock-keychain smoke is limited evidence, not native qualification.
+   - Use `--publish-draft --expected-sha "$FINAL_SHA" --evidence /absolute/path/to/cut.json` to revalidate the same assets and hash-bound smoke/signing evidence without rebuilding, publish, then redownload/hash-check the published inventory. Windows unsigned packaging and CI tests do not establish Windows headed qualification; report absent target-platform smoke explicitly.
    - Publish the draft only after both platforms are validated and the full asset set is attached
    - For beta builds, publish it as a **GitHub prerelease**
    - For stable builds, publish only after the beta rollout has been validated and you are intentionally cutting a stable version
@@ -443,7 +344,7 @@ Forge uses `electron-updater` against GitHub Releases. Auto-update clients need 
 ### Windows CI notes
 
 - `workflow_dispatch` is the credential-free unsigned Windows release build path: all `WIN_CSC_*` / `CSC_*` values and signer metadata are blanked and identity auto-discovery is disabled
-- `electron/*` branch pushes are validation-only builds with the same credential isolation; the optional Chrome adapter package is deliberately non-deployable
+- `electron/*` branch pushes are validation-only builds with the same credential isolation; these validation artifacts must not be published
 - The workflow does not publish a GitHub Release on its own
 - After local macOS cleanup/build, collect the already-registered exact-SHA `workflow_dispatch` run into a per-cut isolated directory. The project-scoped release script then uploads the complete 8-asset draft set; do not manually download Windows leftovers and upload them serially beside macOS files from `apps/electron/release/`
 - The release operator is still responsible for choosing the correct GitHub release channel: beta builds stay prerelease, stable builds are published later as stable
@@ -452,7 +353,7 @@ Forge uses `electron-updater` against GitHub Releases. Auto-update clients need 
 
 The Electron app uses port `47287` for the backend by default in packaged mode. You can override this by setting `FORGE_PORT` before launching the app.
 
-Installed Forge Desktop also serves its packaged browser UI on port `47188` while it is running. It binds on `FORGE_HOST` (or `0.0.0.0` when unset), so a trusted-network browser can open `http://<station-address>:47188`. That browser derives its own hostname and receives the Electron-owned runtime backend port, including a `FORGE_PORT` override. It does not receive Electron's preload bridge, Desktop IPC, or local Automatic Browser capability. Keep this Builder surface on loopback or a known trusted network; use an authentication-enforcing proxy before exposing it more broadly.
+Installed Forge Desktop also serves its packaged browser UI on port `47188` while it is running. It binds on `FORGE_HOST` (or `0.0.0.0` when unset), so a trusted-network browser can open `http://<station-address>:47188`. That browser derives its own hostname and receives the Electron-owned runtime backend port, including a `FORGE_PORT` override. It receives browser tabs and screencasts through the authenticated environment connection, without Electron’s preload or private CDP authority. Keep this Builder surface on loopback or a known trusted network; use an authentication-enforcing proxy before exposing it more broadly.
 
 The root `pnpm dev:electron` workflow also uses backend port `47287`; only its UI remains on the Vite dev port `47188`.
 

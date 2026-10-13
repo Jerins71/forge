@@ -31,7 +31,7 @@ import type {
   SessionContextModeSnapshot,
   SessionGoalSnapshot,
 } from "@forge/protocol";
-import type { BrowserAutomationInvocationResult } from "./browser-automation/browser-automation-service.js";
+import type { BrowserAutomationInvocationResult } from "./browser-automation/browser-automation-manager-adapter.js";
 import type {
   RequestSecureSecretAccessToolInput,
   SecureSessionAgentView,
@@ -118,7 +118,6 @@ export interface SwarmToolHost extends HistoryRecallToolHost {
     callerAgentId: string,
     operation: Operation,
     input: BrowserAutomationInputByOperation[Operation],
-    routing?: { requiredTargetAffinity?: "managed-electron" },
   ): Promise<BrowserAutomationInvocationResult<Operation>>;
   updatePlan(
     callerAgentId: string,

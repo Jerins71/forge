@@ -78,7 +78,7 @@ import type {
   SwarmAgentRuntime
 } from "./runtime-contracts.js";
 import type { SwarmToolHost } from "./swarm-tool-host.js";
-import { BrowserAutomationService, createBrowserAutomationManagerInvoker } from "./browser-automation/index.js";
+import { BrowserEngine, createBrowserAutomationManagerInvoker } from "./browser-automation/index.js";
 import type {
   AgentDescriptor,
   AgentModelDescriptor,
@@ -210,8 +210,8 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   private terminalArchiveHooks: TerminalArchiveHooks | undefined;
   private readonly observabilityCoordinator: SwarmObservabilityCoordinator;
   private readonly historySearchService: HistorySearchService;
-  private readonly browserAutomationService: BrowserAutomationService;
-  readonly invokeBrowserAutomation = createBrowserAutomationManagerInvoker({ getDescriptor: (id) => this.descriptors.get(id), getService: () => this.browserAutomationService });
+  private readonly browserEngine: BrowserEngine;
+  readonly invokeBrowserAutomation = createBrowserAutomationManagerInvoker({ getDescriptor: (id) => this.descriptors.get(id), getService: () => this.browserEngine });
   constructor(config: SwarmConfig, options?: SwarmManagerOptions) {
     super();
     this.now = options?.now ?? nowIso;
@@ -260,7 +260,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     this.skillMetadataService = foundation.skillMetadataService;
     this.skillFileService = foundation.skillFileService;
     this.secretsEnvService = foundation.secretsEnvService;
-    this.observabilityCoordinator = foundation.observabilityCoordinator; this.browserAutomationService = options?.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.config.paths.dataDir, now: this.now });
+    this.browserEngine = options?.browserEngine ?? new BrowserEngine({ dataDir: this.config.paths.dataDir, resolveSession: id => this.descriptors.get(id)?.profileId }); this.observabilityCoordinator = foundation.observabilityCoordinator;
     this.agentDirectory = this.createAgentDirectory();
     this.secureSecretSettingsService = new SecureSecretSettingsService({
       dataDir: this.config.paths.dataDir,
@@ -574,7 +574,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         observability: this.observabilityCoordinator,
       },
       toolHost: this,
-      browserAutomation: this.browserAutomationService,
+      browserAutomation: this.browserEngine,
       secureSessions: createSecureSessionLifecyclePort(this.secureSessionsService),
       descriptors: {
         upsertDescriptor: (descriptor) =>

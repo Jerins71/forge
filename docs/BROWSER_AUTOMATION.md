@@ -1,198 +1,49 @@
 # Browser automation
 
-Forge Desktop exposes one protocol-v2 **Automatic Browser Host** to normal local Builder managers. The host privately runs each logical tab on either Forge's embedded Electron browser or the optional Chrome adapter. This is not a user- or caller-selected host preference, and neither target kind is a Skill.
+Forge’s Browser panel and built-in `browser_*` tools share one Playwright engine in each environment backend. Tabs belong to a session; persistent browser profiles belong to a project on that machine. Several clients can view the same tabs, including clients connected to different environments. This capability is available to eligible Builder managers and is independent of the `agent-browser` Skill.
 
-Automatic Browser and External Chrome remain supported on Windows, but the Windows experience is beta and has known issues. Hash pinning, signed-package checks, and the rest of the security contract are unchanged.
+## Local desktop and remote environments
 
-The separate [`agent-browser` Skill](#agent-browser-skill) keeps its own CLI and browser lifecycle.
+Forge Desktop owns sandboxed Electron `WebContentsView` tabs with persistent project partitions, retaining the established Forge partition names and permission policy so existing logins survive the engine replacement. The backend drives them with Playwright over the private parent/child IPC channel and a private local socket (a named pipe on Windows). The engine opens no TCP debugging port. The Browser panel presents the real native view; hiding the panel or reloading the renderer detaches the view while keeping the tab alive. Agent viewport changes use CDP emulation and do not change panel placement.
 
-## Pi tool discovery
+When no Desktop host is attached, including remote environments, Forge launches a pinned Chrome for Testing `chrome-headless-shell` with a persistent context per project. Forge automatically downloads it on first use, verifies the archive SHA-256 and size, and installs it under the environment data directory. `browser.engine.status` reads the machine’s `ready`, `missing`, `installing`, or `failed` setup state without a session; `browser.engine.setup` starts or retries installation. The pinned version and platform checksums are in `apps/backend/src/swarm/browser-automation/headless-browser.ts`. `FORGE_BROWSER_CACHE_DIR` can place the verified executable cache in a shared fleet cache; profiles always stay in their own environment data directory.
 
-Local Builder Pi managers load the Automatic Browser through
-`discover_tools({bundles:["browser"]})`. The initial model request includes a compact
-browser capability description; the `browser_*` schemas appear on the next request
-after loading. Discovery does not open a tab, start recording, or change tab authority.
-The normal typed tools and all target restrictions below continue to apply. See
-[deferred browser tools](PI_EXTENSIONS.md#deferred-browser-tools) for reload and resume behavior.
+Chromium’s sandbox remains enabled. Linux hosts need the browser’s shared libraries. On Debian/Ubuntu 24.04, install:
 
-## Automatic target policy
-
-Each logical browser tab has a sticky private target affinity:
-
-- `managed-electron` — a main-process-owned Electron `WebContentsView` rendered inside Forge;
-- `external-chrome` — one exact tab in a Chrome profile that loaded Forge's extension.
-
-The affinity is assigned to each logical tab and is not a host-preference picker. An inventory `tabId` may explicitly select an eligible Chrome tab when opening; after selection, an operation with an explicit logical `tabId` always returns to that target. Forge never silently moves an explicit Chrome tab into Electron, or an embedded tab into Chrome, to make an operation succeed.
-
-Once the Forge extension is enabled and authenticated in a Chrome profile, the Automatic Browser can access eligible ordinary web tabs across that profile. For a tabless request, the Automatic Browser Host:
-
-1. keeps non-open operations on the session's selected or default logical tab when one exists;
-2. treats `browser_open` as the explicit selection boundary described below;
-3. routes physical resize and recording directly to an embedded tab; and
-4. uses the embedded browser when Chrome acquisition is unavailable or an embedded-only capability is required.
-
-### Eligible tab inventory and open selection
-
-`browser_status` returns a bounded `eligibleTabs` inventory across all ready, authenticated Chrome profiles. Each entry has an opaque canonical `tabId` accepted by `browser_open`; inventory selection does not require OS focus. Ranking is deterministic: active tab first, then a tab in the focused window, then descending Chrome last-access time (exposed publicly as `lastAccessedAt`), descending profile connection time, ascending opaque extension-instance ID, ascending window ID, and ascending tab ID. The public inventory is capped at 32 entries. `eligibleTabsTruncated` is true when the aggregate exceeds that cap, any profile reports its own inventory truncated, or a ready profile's inventory request fails; candidates from failed profiles are omitted. There is no Chrome profile confirmation prompt or picker.
-
-Explicit **New browser tab** and empty-state **Open a tab** actions create embedded Forge tabs. Closing the last managed tab leaves the Browser workspace empty with no automatic blank-tab recreation. If a connected Forge Desktop is too old to keep workspace creation embedded, opening a workspace tab is rejected and Forge asks you to update Desktop.
-
-Default and automatic `browser_open` behavior remains eligible Chrome reuse and selection:
-
-- The model-facing `browser_open` tool defaults `reuseExistingTab` to `true`. Without `tabId`, it selects the active or most recently accessed eligible tab from the profile-wide inventory, without requiring Chrome or the operating system to be focused.
-- Passing an inventory `tabId` explicitly selects that exact eligible Chrome tab. The tab ID comes from `browser_status`; it is not a profile picker or host preference.
-- Explicit `reuseExistingTab: false`, or no eligible tab, may create an inactive neutral Chrome `about:blank` tab. A URL-bearing open performs one authorized initial navigation on that created tab.
-- After an open selects a logical tab, subsequent non-open operations remain sticky to it. Explicit Chrome tabs do not migrate, and child tabs are not automatically enrolled.
-
-Set `target: 'managed'` to explicitly create or select an embedded Forge tab using the existing managed affinity instead of Automatic Browser Chrome selection. `target` cannot be combined with `tabId`. Invalid `target` values are rejected.
-
-Chrome-internal pages, extension pages, and other platform-restricted pages remain excluded from eligibility. A normal web tab held by DevTools or another competing debugger may still appear in `eligibleTabs`, but acquisition or execution fails while that debugger controls the tab; inventory does not imply that Forge can take control.
-
-## Operations and workspace
-
-The common operation set is:
-
-- status and open;
-- navigate and snapshot;
-- click, type, key press, and scroll;
-- JavaScript evaluation; and
-- bounded wait (`waitFor` in protocol v2).
-
-### External Chrome snapshot response bounds
-
-An External Chrome snapshot measures the complete JSON-RPC response in UTF-8 before sending it. Its PNG is captured adaptively from the page's CSS viewport and device pixel ratio: Forge starts at the largest qualified scale and retries smaller scales until the PNG meets the qualified pixel and byte limits, never upscaling a smaller source viewport. The useful floor is 320×180; if the image is still too large at that minimum qualified scale, Forge returns the typed, non-retryable `response-too-large` failure with the stable `minimum-qualified-screenshot-overflow` limitation. It never claims a snapshot succeeded by dropping or silently shrinking below that floor.
-
-If the successful JSON-RPC response would exceed the negotiated bounded response envelope, the extension deterministically compacts only optional snapshot data: it drops console, network, and action-timeline diagnostics; bounds accessibility nodes; keeps a bounded prefix of visible text; and retains the largest fitting prefix of interactive elements. If that still does not fit, accessibility data, interactive elements, and visible text may be omitted as a final fallback. The screenshot is never dropped, recompressed, or replaced. A compacted response includes `compaction.omitted` with positive counts for each omitted source category; `compaction` is absent when nothing was omitted. If the screenshot itself cannot fit the envelope, Forge returns `response-too-large` with the stable screenshot-only limitation rather than overflowing the relay. Callers should branch on the stable error code and retryability; diagnostic `details` are bounded metadata, not required for this outcome.
-
-Physical viewport resize and recording start/stop are embedded-only. Chrome also has no managed download workflow, saved download artifacts, opening of downloaded files, standalone screenshot export controls, or interactive dock/pop-out page view. A Chrome snapshot can still return bounded transient page and PNG data to the active operation, and its latest successful image can appear automatically in a read-only floating preview.
-
-The Desktop activity rail has one **Browser** workspace for embedded Forge tabs, with navigation, viewport, transient screenshot, recording, and dock/pop-out controls. Chrome-backed targets stay entirely in Chrome: their transient references are not shown as Browser-workspace tabs or cards and do not suppress creation of an embedded tab.
-
-### Automatic floating browser previews
-
-When the agent begins using an exact managed or Chrome-backed tab, Forge Desktop automatically places a small read-only thumbnail over the main Chat surface. There is no Preview button and no separate Preview window. Up to four active-turn thumbnails form one compact, frameless cascade; the whole cluster can be dragged or resized from its lower-left corner and remains subscribed while the Browser workspace temporarily hides it. Click an exposed thumbnail to bring it forward; double-click the front managed thumbnail to open its tab in the Browser workspace.
-
-Admission follows the main-process control lifecycle rather than renderer UI state or Chrome inventory. A managed tab joins after exact agent control begins. A Chrome-backed tab joins only when a successful exact-target snapshot has supplied real pixels—control state or an eligible inventory row alone never creates an empty preview. A preview stays through short inter-operation or Chrome authority-idle gaps and leaves on turn end, terminal Take Control, tab removal, session lifecycle, or selected workspace/host replacement.
-
-- A managed card uses a bounded native-viewport capture, normally no more than once per second after the renderer consumes the previous frame. Capture uses `stayHidden`, never focuses, unhides, reparents, resizes, or keeps the page awake, and waits rather than competing with an active automation or recording capture.
-- A Chrome card performs no capture request of its own and is not shown until it can mirror a successful exact-target PNG from a normal agent `snapshot` operation. When the retained image expires after five minutes, the card disappears instead of becoming an empty placeholder. The preview never polls Chrome, acquires authority, or extends a lease.
-- The cluster accepts no page clicks, typing, scrolling, refresh, browser-viewport resize, recording, or Take Control action. Pointer interaction moves or resizes the preview stack, changes the front thumbnail, or opens the front managed tab in the Browser workspace. Arrow keys can move or resize the stack when its card or resize handle has focus.
-- Screen lock and system suspend immediately discard retained pixels and block new frames. Unlock resumes automatic capture. Selected workspace/host changes, tab removal, turn/session release, window close, and shutdown clear or invalidate the relevant in-memory state.
-
-Preview pixels stay in bounded main/renderer memory and are delivered over preview-only pull IPC. They are not written to browser state, conversation history, artifacts, logs, or the backend. Although the surface runs in the privileged main renderer, it uses only the preview snapshot/frame-pull APIs and does not invoke Automatic Browser, workspace, Chrome setup, file, or secure-vault commands.
-
-The workspace renderer registers one Desktop host with the local Builder backend and forwards bounded calls through trusted IPC. It transiently relays complete `browser_status` inventory responses between the trusted bridge and backend, but does not project that inventory into Browser workspace UI or canonical renderer state. The renderer exposes no tab-attachment, group, lease, or authority controls.
-
-### Logical authority and physical debugger lifecycle
-
-Logical Chrome authority (the exact session/lease/tab ownership) and the physical `chrome.debugger` attachment are separate lifecycles. A logical tab can remain Chrome-affine and idle while no debugger is attached. The Desktop authority burst releases after 30 seconds of logical inactivity; the extension's physical debugger session has a 35-second idle timeout and a five-minute maximum lifetime. Nearby operations may reuse one exact same-lease attachment, but `attached-idle`/`agent-idle` is truthful only while that exact attachment and its leased root identity remain positively proven.
-
-Trusted clicks, key presses, wheel scrolls, and touch gestures are collaborative input. They advance the operation/control epoch, cancel the agent operation, and require a fresh snapshot before another potentially mutating operation. Forge waits for already-dispatched CDP commands to settle; when that proof succeeds it preserves the exact logical lease and exact attachment as `attached-idle` rather than detaching or replaying. A fresh snapshot re-observes the page and clears the gate. Ordinary trusted pointer movement while idle is ignored. During an active exact synthetic sequence, however, a mismatched or interleaved trusted `pointermove` (including a hover move at different coordinates) cancels that sequence; only the exact next expected event is treated as synthetic. Untrusted page events do not interrupt.
-
-A renderer swap or eligible page navigation stays on the same logical target. Forge positively re-proves the replacement root and frame ancestry over the exact debugger channel, reinjects the singleton bridge, and remains `attached-idle` only after that proof; callers must re-observe with a fresh snapshot. While revalidation is pending, status does not claim `attached-idle`. Restricted or unproven targets, DevTools/competing-debugger preemption, a closed tab, transport uncertainty, expiry, operation cancellation/failure/timeout, update, and quit detach physical control and terminally reconcile the logical lease as appropriate. Stop/turn end release the exact authority; **Take Control** is an explicit terminal human takeover that releases the exact authority and does not leave it available for agent reattachment. This distinction never permits an explicit target to migrate.
-
-## Safety, fallback, and authority
-
-### Safe fallback and no replay
-
-Automatic fallback is limited to requests whose failure metadata proves that mutation did not start. Forge makes one Chrome acquisition/execution attempt for the request; if that attempt fails before mutation, it falls back directly to the embedded browser. Forge does not make a dedicated-Chrome retry or promise focused-tab reuse.
-
-Desktop writes a durable, exact pre-acquisition journal before sending an acquisition request. If that journal cannot be written, the request has not been sent and a non-explicit request may still be eligible for embedded fallback with `mutationState: not-started`. Once delivery may have begun, a Desktop crash, lost response, or uncertain journal finalization is treated as `mutationState: possible`: Forge performs no fallback and no replay, and reconciles the exact lease/tab on authenticated reconnect. A possible mutation returns no-replay evidence to the caller.
-
-Forge does not replay an operation after it may have clicked, typed, navigated, evaluated code, or otherwise mutated the page. That failure returns typed `mutationState` and `noReplay` details to the caller. Explicit logical targets also never fall back to another affinity.
-
-### Operation-scoped Chrome authority
-
-Chrome control is private, per-tab, compare-and-set authority. Consecutive operations may share a short adaptive authority burst so Forge does not repeatedly attach and release the debugger between nearby actions. Operations remain serialized, and trusted human input interrupts agent control instead of racing it.
-
-Every non-terminal release is tied to the exact Chrome instance, logical session, tab, lease identity, and owner epoch. Desktop checkpoints that identity before control. The extension durably retains an exact release receipt after releasing the tab; the receipt is not removed merely because the release response arrived. Desktop first durably records the pending acknowledgement, then sends the exact release acknowledgement; the extension removes its receipt only after that explicit acknowledgement succeeds. If either response or persistence is lost, both sides retain exact evidence and retry the same scope after reconnect. Later acquisition for that session is blocked until reconciliation.
-
-Admission reserves bounded checkpoint and release-receipt capacity before a new acquisition or created tab can proceed. When that capacity or a transport/request queue is full, Forge rejects or backpressures new work rather than evicting receipts, guessing a scope, or abandoning cleanup.
-
-Physical control detaches on trusted input after settlement, external navigation while its replacement root is being proved, DevTools/competing-debugger preemption, proven root-identity or restricted-target loss, target close, operation cancellation/failure/timeout, idle timeout, maximum lifetime, transport uncertainty, lease expiry, and runtime update/shutdown. Trusted collaborative input and eligible navigation normally preserve the exact logical lease and, once settlement/revalidation is proven, the exact attachment as `attached-idle`; timeout or physical expiry may leave the exact lease idle for a later reattach. Identity loss, restricted targets, DevTools preemption, target close, transport uncertainty, lease expiry, and terminal lifecycle cleanup release that lease with exact evidence. Chrome tabs remain open when authority is released. Inspect or snapshot again after a collaborative interruption or navigation; never replay a request whose mutation state is possible.
-
-Chrome refuses extension debugger attach, detach, and commands while any frame in the tab belongs to another extension, such as a password manager's inline autofill menu (Bitwarden, 1Password), and force-detaches an attached debugger when such a frame appears. That detach releases the lease as debugger loss. When Chrome refuses, Forge removes other extensions' iframes from the page (including closed shadow roots and same-origin child frames) without moving focus, then retries for up to two seconds. If the extension keeps re-adding its frame, the operation fails with retryable `debugger-unavailable`, `details.reason: "foreign-extension-frame"`, and the offending `chrome-extension://` ID; the user must turn off that extension's inline menu or site access for the site. `pnpm --filter @forge/chrome-extension fixture:foreign-extension-frame` (with `FORGE_RUN_ISOLATED_CHROME=1`) proves these paths in Chrome for Testing.
-
-Turn end, stop, archive, host replacement, Desktop update, and Desktop quit use this fail-closed cleanup path. In particular, archive does not proceed when its browser release cannot be acknowledged. Deletion is different because it is terminal: Forge attempts exact browser revocation, but browser revocation is best-effort and a stale release cannot block deletion. After a delete request, Desktop clears the matching session's in-memory state, while External Chrome attempts to release and then forgets matching checkpoints and session affinity even if the extension is disconnected or the acknowledgement is lost.
-
-### Maintainer correctness boundaries
-
-- Re-injection is a recovery probe, not a second attachment mechanism. Each live document owns one singleton content bridge, keyed by exact tab, frame, and document identity; duplicate bridges are rejected, stale document bridges are replaced, and bridge cardinality is bounded. Eligible navigation re-proves root identity and frame ancestry before reinjection; it does not create a detach/reattach gap.
-- Collaborative input is epoch-based. Trusted click, key, wheel, or touch starts revoke the current operation epoch before cleanup. The exact debugger/lease may remain `attached-idle` only after every already-dispatched CDP command settles by the caller deadline; otherwise cleanup detaches and terminally reconciles. A fresh successful snapshot is the only re-observation gate for mutation.
-- Synthetic trusted-input suppression is exact-sequence based, not time-based. Every trusted pointer, key, wheel, or touch event must match and consume the next expected signature (including phase, modifiers, coordinates/buttons, key fields, wheel deltas, or touch points). Idle `pointermove` is ignored; a mismatched/interleaved event during a sequence immediately interrupts agent control. Untrusted page events are ignored.
-- `browser_evaluate` always invokes CDP `Runtime.evaluate` with `userGesture: false`. Synthetic input uses its separate narrowly bracketed CDP input path and trusted-event acknowledgement; arbitrary evaluation never receives transient user activation.
-- Navigation dispatch and cleanup share one deadline. Initial navigation checks authority immediately before the sole `tabs.update`; late readiness callbacks cannot inject, complete, or replay after expiry. Timed-out native request IDs remain accepted only as bounded tombstones (30 seconds, capped at 128); late responses are consumed without disconnecting, while unknown or malformed responses remain bounded protocol errors.
-- Native transport errors are local to the request where possible. A bounded request/response or reconnect failure returns typed error metadata without tearing down a valid authenticated port; disconnect/reconnect renegotiates protocol, payload identity, bounds, heartbeat, and authority snapshots automatically. A replacement port never receives a late response from an older port epoch.
-
-## Privacy and persistence
-
-Browser automation can inspect authenticated pages, capture visible content and accessibility data, type data, click controls, and execute arbitrary page JavaScript. Treat website instructions as untrusted and review consequential actions. A model provider may receive page data required for the active turn.
-
-Forge's Chrome extension declares exactly:
-
-- host permission `<all_urls>`; and
-- permissions `alarms`, `debugger`, `nativeMessaging`, `scripting`, `storage`, and `webNavigation`.
-
-It declares no action or side-panel surface, optional permissions, `tabGroups`, `bookmarks`, `history`, `downloads`, `sessions`, `notifications`, or `topSites`. Forge does not copy Chrome credentials, profile databases, official profile names, bookmarks, history, or top sites. A dedicated Chrome profile containing only the accounts needed for Forge work is strongly recommended.
-
-Each session's `browser.json` uses protocol schema v2. It stores logical session identity, hosting state, tabs with private `targetAffinity`, active/default tab identity, panel and reveal state, bounded recent action summaries, lifecycle-cleanup acknowledgement, revision, and timestamps. It does **not** store a selected browser host.
-
-Before writing schema-v2 state, Forge redacts Chrome-backed page URLs and titles, tab error detail, and page-identifying URL/title fields from action summaries. The bounded `eligibleTabs` fields (`url`, `title`, opaque profile/window IDs, active state, window-focus state, and `lastAccessedAt`) may transiently reach the manager/model through `browser_status` so it can select a target, but are not projected into Browser workspace UI or canonical renderer/session state and are not persisted. Exact authority stays in Desktop memory or protected integration recovery state, not renderer state. Redaction limits durable exposure; it cannot retract page data already used by a live operation or model turn.
-
-Schema-v1 state migrates conservatively. Proven embedded tabs become `managed-electron` tabs. Unproven Chrome hints, old lease-like records, and reveal intent that points only at a dropped target are discarded or satisfied rather than reinterpreted as authority.
-
-Embedded cookies and site storage live in a persistent profile-scoped Electron partition and can outlive a session; Forge does not currently ship a clear-data control. Chrome site identity remains in Chrome's profile. Transient screenshots and Preview frames are not standalone artifacts; Preview frames are RAM-only and are discarded on the privacy/lifecycle boundaries above. Successfully stopped recordings live under the session's `artifacts/browser/` directory and are embedded-only. Clearing conversation history does not clear browser state, a fork starts with independent browser state, archive/restore preserves metadata and completed recordings, and deleting a session removes its browser metadata and recordings but not the profile-scoped Electron partition.
-
-## Optional Chrome setup
-
-Forge's Chrome adapter is an intentionally unpacked local Desktop integration, not a Chrome Web Store extension. Chrome 125 or newer, Developer mode, and unpacked extensions must be allowed by browser and enterprise policy.
-
-Forge Desktop deploys a deterministic extension shell/payload and an authenticated native-messaging host under the active data directory. Chrome always loads the stable folder:
-
-```text
-<data-dir>/integrations/external-chrome/extension/
+```bash
+sudo apt-get install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2
 ```
 
-Setup is per Chrome profile and per `FORGE_DATA_DIR`:
+Older distributions may name the audio package `libasound2`. Missing libraries produce an actionable setup failure. Hosts must also permit Chromium’s sandbox and supported architecture. Forge uses the browser’s normal automation defaults.
 
-1. Open the intended dedicated Chrome profile.
-2. In Forge Desktop, open **Settings → Use Chrome with Forge**.
-3. Choose **Show Forge extension folder** when available.
-4. Manually open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the exact revealed `extension/` folder—not its parent or a payload subdirectory.
-5. Confirm extension ID `fcchfcnadajoejfbiclihglkmbcfhajd`.
-6. Return to Settings and choose **Use Chrome with Forge**.
+## Tools and shared tab state
 
-Settings is deliberately limited to status, setup/enable, qualified repair, and revealing the validated folder, with advanced diagnostics for failures. There is no browser-host selector, persisted target preference, profile alias, candidate list, attachment flow, or authority UI.
+The tools are `browser_status`, `browser_open`, `browser_navigate`, `browser_resize`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_press`, `browser_scroll`, `browser_evaluate`, `browser_wait_for`, `browser_recording_start`, and `browser_recording_stop`. They operate on the same tabs displayed by `browser.tabs.get` and `browser.tabs.subscribe`. Snapshots include bounded page text, accessibility data, interactive elements, console/network summaries, and a transient PNG. Completed WebM recordings are session artifacts and work with both hosts.
 
-Compatible connected extensions can reload an authenticated local payload after Desktop update or recovery. A manual reload in `chrome://extensions` is fallback-only when **Settings → Use Chrome with Forge → Advanced diagnostics → Recovery** reports `manual-extension-reload`. Development builds can also require one manual reload after Desktop replaces same-version development content while the old worker is broken or disconnected.
+A tab reports its URL, title, favicon, viewport, loading/error state, optional short agent action label, and optional agent cursor in page CSS pixels. Tab subscriptions deliver replacement snapshots with a revision. User mouse, wheel, text, or key input in a tab cancels the agent’s current and queued actions in that tab. Subsequent agent actions can resume normally. There is no separate take-over mode or lease, receipt, or operation journal.
 
-### Repair and troubleshooting
+Remote tabs use `Page.startScreencast` over the existing authenticated environment-v2 connection. Each viewer has its own outstanding frame and acknowledgement; one slow viewer cannot block others. `browser.screencast.subscribe` sends bounded JPEG frames or stream-state messages. The client’s `screencast()` handle supplies `release()` and `ack(frameId)` and replaces its subscription ID on reconnect. `browser.tabs.input` injects CDP input into the same page. Local native tabs can also stream to another client; the local panel can display the real view instead.
 
-- **Chrome setup is unavailable:** use the main Forge Desktop window. Ordinary web clients cannot inspect local installation state or invoke Desktop browser IPC.
-- **Chrome does not connect:** verify Chrome 125+, Developer mode, enterprise policy, the exact stable folder, and the pinned extension ID, then refresh Settings.
-- **Native host missing or untrusted:** choose **Repair** only when Settings enables it. Do not substitute or hand-edit an executable, manifest, registry key, rendezvous, or authentication file.
-- **Registration conflict:** Chrome has one current-user registration target for Forge's native host name. Stop the other Forge installation or data-directory owner before using qualified repair; do not overwrite the target manually.
-- **Restricted target or debugger conflict:** close DevTools or the competing debugger and retry. Forge will not take over a restricted page.
-- **Pending exact release:** for a normal lifecycle release or archive, keep Chrome and Forge open for authenticated reconciliation; Forge blocks new acquisition rather than abandoning the checkpoint or guessing another target. A terminal delete is the exception: Forge forgets matching Desktop/External Chrome session state and checkpoints after its best-effort revocation attempt, so a stale release does not block deletion.
-- **Chrome tab no longer exists:** the logical target remains Chrome-affine and fails. Open a new logical browser tab instead of expecting silent migration.
-- **Different data directory:** load that data directory's stable extension folder in the intended Chrome profile and complete setup there.
+## Import from Chrome
 
-For maintainers diagnosing a newly dedicated Chrome open, the target may first appear as an inactive `about:blank`. A URL-bearing open performs the one authorized initial navigation for that exact target; it must not be treated as a generic navigation replay.
+Import is an explicit user operation. Forge reads Chrome cookies into bounded, expiring memory and previews domains grouped by eTLD+1 with counts and last-used timestamps when available. No cookies are written until the user selects sites and applies the import. The profile receives only those sites. The audit lists site domains, counts, and import times, never cookie values. **Forget site** removes that site’s cookies from the target profile.
 
-The focused unit/build and isolated-profile checks do not prove live MV3 service-worker suspension/restart behavior, headed Chrome, native-host/Desktop end-to-end registration, or current-platform Chrome debugger behavior. Supported macOS and Windows reparenting and packaging remain separate qualification gates. macOS release qualification requires signing and notarization; Windows release packaging is credential-free and unsigned, with the deployed External Chrome native host trusted only while its release-manifest SHA-256 stays pinned. Linux `dir` packaging is experimental local smoke work only: it is non-publishable and is not Linux Desktop support coverage.
+Source A works across supported operating systems with Chrome 144 or later: enable the remote-debugging toggle at `chrome://inspect/#remote-debugging`, keep Chrome open, and allow Forge in Chrome’s consent dialog. Forge reads `DevToolsActivePort`, connects solely to read `Storage.getCookies`, and disconnects. Agents never drive the user’s Chrome.
 
-Canonical data paths and OS registration targets are in [Configuration](CONFIGURATION.md#chrome-adapter-local-integration). Maintainer staging, platform-integrity, package-content, and qualification gates are in the [Electron release guide](../apps/electron/README.md#optional-chrome-adapter-packaging-and-validation).
+Source B is a macOS/Linux fallback that opens the Cookies SQLite database read-only. Forge accesses Chrome Safe Storage through the in-process macOS Keychain or Linux libsecret binding, so OS consent belongs to Forge. Files & Folders denial on macOS returns a typed error with a System Settings deep link. Unsupported encryption returns an actionable error. Windows database import is unsupported; use Source A.
 
-## Local-only boundary
+Forge never copies Login Data, a whole Chrome profile, or decrypted cookie values to disk during import. Values remain in memory until selected cookies are handed to the target browser, which persists its own normal cookie store. The optional **also send to an environment** operation creates a single-use, expiring payload over the authenticated connection; it is off by default. Browser profiles stay on their own machine, and nothing is forwarded unless the user explicitly sends selected cookies.
 
-The Automatic Browser Host is attached only to the normal local Builder backend reached by Forge Desktop. An ordinary browser client has no local host. Forge does not forward its Electron views, Chrome relay, extension connection, private target affinity, authority, recovery checkpoints, or IPC to another backend.
+## Persistence and lifecycle
 
-A normal manager running on a remote backend may still have structurally planned browser tools. Without a Desktop host connected directly to that backend, calls return `unavailable-host`; the viewing machine's Desktop does not satisfy them.
+Session `browser.json` stores the tab list, active tab, viewport, and revision metadata. Browser contexts and cookie audits use the canonical paths in `data-paths.ts`. Desktop project partitions are held in Electron’s own user-data directory. Restarting Forge restores logical tabs; closing or archiving a session closes its physical tabs while preserving its project profile. Deleting a session removes its session metadata and artifacts, without deleting shared project logins.
 
-Forge Desktop registers the host on its own machine's environment connection: the `browser.host.attach` subscription is the host connection. Typed register, hydrate, focus and reveal RPCs use that same socket; bounded multipart report and automation responses use `browser.host.send` without legacy command envelopes. Hydration and report results arrive in bounded chunks on the host stream. Ending the subscription, a dropped socket, or a reload unregisters the host; the renderer registers and hydrates again when the connection returns. Desktop stays registered with this machine while a session on another machine is on screen, never registers with a remote machine, and shows **Browser is not available on remote machines** in place of the Browser workspace for those sessions.
+The former Chrome extension, native-messaging host, External Chrome relay, setup page, leases, and journals have been removed. There is no mode for agents to control everyday Chrome. Existing old integration files are not read or automatically removed from users’ machines.
 
-The Browser workspace reads the canonical session store through `browser.get` and `browser.subscribe`. Opening, activating and closing tabs and starting/stopping recordings use native command IDs and durable control receipts. A retry with the same ID inspects the saved receipt; it never repeats an ambiguous operation. Resize, physical reports and automation replies are ephemeral. Reconnect registers and hydrates the host without replaying those messages. Only a socket ticket issued using the private Desktop capability on the owned backend's loopback endpoint can attach or operate a local host; ordinary environment device scopes are required in addition.
+## Validation and isolation
 
-## `agent-browser` Skill
+`scripts/environment-e2e/browser-engine.spec.ts` exercises real Playwright against fixture pages, the private native Electron relay, env-a/env-b tool calls, multiple viewers, cancellation, recordings, cookie import, and profile persistence. It writes repeatable proof artifacts under the E2E output directory. The fake Codex runtime supports `[fixture:browser-open <url>]` and `[fixture:browser-click <selector>]` and invokes the registered browser tools.
 
-The `agent-browser` Skill invokes the separately installed Vercel Labs CLI and owns a separate browser/session lifecycle. It does not register the Automatic Browser Host, use `browser.json`, appear in the Browser workspace, or configure Chrome integration. Use the Skill when you specifically want its command-line browsing and extraction workflow.
+Build the fixture UI with `VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build`, then run Playwright through `/tmp/forge-v2-gate.sh`. Tests and fleets set isolation flags and use explicit throwaway Chrome profiles. Cookie readers refuse the real default Chrome profile in that mode and refuse native Keychain/secret-service access without an injected synthetic key provider.
+
+The `agent-browser` Skill owns a separate CLI browser lifecycle. It does not join the Browser panel or share this engine’s tabs and profiles.

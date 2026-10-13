@@ -128,6 +128,10 @@ async function runTurn(turn, text) {
       if (!pinned || goal?.status !== 'active' || plan?.plan?.[0]?.status !== 'in_progress' || !phase) throw new Error('Native turn is missing its authoritative goal or plan');
       reply = `Codex context ${phase}: goal "${goal.objective}" (${goal.status}); plan "${plan.plan[0].step}" (${plan.plan[0].status}); pinned message kept.`;
     }
+    const browserOpen = /\[fixture:browser-open ([^\]]+)\]/.exec(text);
+    if (browserOpen) { await dynamicTool(turn, 'browser_open', { url: browserOpen[1], reuseExistingTab: false }); reply = `fixture:${fixture.instanceId}:real browser opened`; }
+    const browserClick = /\[fixture:browser-click ([^\]]+)\]/.exec(text);
+    if (browserClick) { await dynamicTool(turn, 'browser_click', { selector: browserClick[1], timeoutMs: 15000 }); reply = `fixture:${fixture.instanceId}:real browser clicked`; }
     if (text.includes('[fixture:detail]')) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
       await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });

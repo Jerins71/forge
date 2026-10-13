@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, powerMonitor, protocol, safeStorage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, net, protocol, safeStorage, shell } from 'electron'
 import { fork, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
@@ -7,7 +7,7 @@ import { installManagedHostsIpc, MANAGED_HOSTS_CHANGED_CHANNEL } from './managed
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { checkForUpdatesManually, downloadUpdateManually, installUpdateManually, initAutoUpdater, getBetaChannel, setBetaChannel, type UpdateQuiesceHook } from './auto-updater.js'
+import { checkForUpdatesManually, downloadUpdateManually, installUpdateManually, initAutoUpdater, getBetaChannel, setBetaChannel } from './auto-updater.js'
 import { installCli, verifyCliInstall, writeInstallHint, type CliInstallResult } from './cli-install.js'
 import { buildCommandCenterRouteUrl, buildSkillImportRouteUrl, findCommandCenterDeepLinkInArgs, findSkillImportUrlInArgs, parseCommandCenterDeepLink, parseSkillImportDeepLink, shouldRegisterExternalDeepLinkProtocol } from './deep-link.js'
 import { fixPath } from './fix-path.js'
@@ -27,16 +27,7 @@ import { createBackendForkOptions, resolveBackendExposurePolicy, type DesktopEnv
 import { readSettings } from './electron-settings.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
 import { PackagedRemoteUiServer, resolvePackagedRemoteUiHost, startOptionalPackagedRemoteUi } from './packaged-remote-ui-server.js'
-import type { BrowserAutomationRequest, BrowserTabSnapshot } from '@forge/protocol'
-import { BrowserAutomationManager } from './browser/browser-automation-manager.js'
-import { installBrowserIpc } from './browser/browser-ipc.js'
-import { BrowserSessionRegistry } from './browser/browser-session.js'
-import { ManagedBrowserViewHost } from './browser/managed-browser-view-host.js'
-import { installBrowserWorkspaceIpc } from './browser/browser-workspace-ipc.js'
-import { BrowserPreviewHost } from './browser/browser-preview-host.js'
-import { installBrowserPreviewIpc } from './browser/browser-preview-ipc.js'
-import { isDockManagedBrowserShortcut, isManagedBrowserPopoutAvailable } from './browser/managed-browser-platform.js'
-import type { ElectronWindowRole, ManagedBrowserWorkspaceMode } from './browser/browser-bridge-contract.js'
+import { DesktopBrowserHost } from './browser/desktop-browser-host.js'
 import { LifecycleLog } from './lifecycle-log.js'
 import { rotateLogFileIfLarge } from './log-rotation.js'
 import { installElectronDevelopmentProcessControl } from './dev-process-control.js'
@@ -51,12 +42,6 @@ import { validateAbsoluteLocalFilePath } from './open-path.js'
 import { installOpenPdfIpc } from './open-pdf.js'
 import { installOpenHtmlIpc } from './open-html.js'
 import { handleMainRendererWindowOpen, isUnsafeRendererWindowOpenUrl } from './window-open-policy.js'
-import { ExternalChromeDeployer } from './external-chrome/deployer.js'
-import { ExternalChromeDeploymentRecovery } from './external-chrome/recovery.js'
-import { ExternalChromeHostCoordinator } from './external-chrome/coordinator.js'
-import { resolveExternalChromeResources, type ExternalChromeResourceLocation } from './external-chrome/resources.js'
-import { ExternalChromeTargetAdapter } from './browser/external-chrome-target-adapter.js'
-import { installExternalChromeIpc } from './external-chrome/ipc.js'
 import { getStreamDeckPluginStatus, resolveStreamDeckAppPath, resolveStreamDeckPluginPath } from './stream-deck-install.js'
 
 // Load .env from repo root so FORGE_PORT etc. are available in main process
@@ -89,6 +74,8 @@ const APP_PROTOCOL_HOST = 'forge'
 const EXTERNAL_PROTOCOL_SCHEME = 'forge'
 const ELECTRON_STARTED_AT = new Date(Date.now() - process.uptime() * 1_000).toISOString()
 
+type ElectronWindowRole = 'main'
+
 type BackendReadyMessage = {
   type: 'ready'
   port: number
@@ -106,34 +93,20 @@ type BackendBootstrap = {
   appRuntime: 'development' | 'installed'
   appStartedAt: string
   windowRole: ElectronWindowRole
-  managedBrowserPopoutAvailable: boolean
   secureControlToken: string
   /** Backend-resolved, post-migration canonical root. Optional for old Desktop clients. */
   dataDir?: string
 }
 
+const desktopBrowserHost = new DesktopBrowserHost()
 let mainWindow: BrowserWindow | null = null
 let mainRendererRecovery: MainRendererRecoveryController | null = null
-let browserPopoutWindow: BrowserWindow | null = null
-let browserPreviewHost: BrowserPreviewHost | null = null
-let browserViewHost: ManagedBrowserViewHost | null = null
-let browserWorkspaceIpc: ReturnType<typeof installBrowserWorkspaceIpc> | null = null
-let disposeBrowserPreviewIpc: (() => void) | null = null
-let disposeBrowserPreviewListeners: (() => void) | null = null
-let browserWorkspaceMode: ManagedBrowserWorkspaceMode = isManagedBrowserPopoutAvailable() ? 'docked' : 'unavailable'
-let browserTransition: Promise<ManagedBrowserWorkspaceMode> = Promise.resolve(browserWorkspaceMode)
-let allowPopoutClose = false
 let mainWindowClosing = false
 let backendBootstrap: BackendBootstrap | null = null
 let appIsQuitting = false
 let appQuitCleanupComplete = false
 let appProtocolRegistered = false
-let disposeBrowserHost: (() => void) | null = null
-let disposeExternalChromeIpc: (() => void) | null = null
 let disposeOpenPdfIpc: (() => void) | null = null
-let externalChromeCoordinator: ExternalChromeHostCoordinator | null = null
-let externalChromeDeployer: ExternalChromeDeployer | null = null
-const browserSessions = new BrowserSessionRegistry()
 let pendingSkillImportUrl: string | null = findSkillImportUrlInArgs(process.argv)
 let pendingCommandCenterDeepLink: string | null = findCommandCenterDeepLinkInArgs(process.argv)
 const lifecycleLog = new LifecycleLog({
@@ -166,9 +139,6 @@ const managedHosts = createManagedHostService({
   onChanged: statuses => sendToRendererWindow(mainWindow, MANAGED_HOSTS_CHANGED_CHANNEL, statuses),
 })
 const handledTerminationSignals = new Set<NodeJS.Signals>()
-const externalChromeUpdateQuiesceHook: UpdateQuiesceHook = {
-  quiesce: async () => externalChromeCoordinator?.quiesce('desktop-update'),
-}
 
 app.commandLine.appendSwitch('disable-background-timer-throttling')
 
@@ -357,6 +327,7 @@ class BackendSupervisor {
       const child = fork(backendEntry, [], forkOptions)
 
       this.child = child
+      desktopBrowserHost.attach(child)
       const secureControlPipe = child.stdio[4]
       if (!secureControlPipe || !('end' in secureControlPipe)) {
         child.kill()
@@ -624,23 +595,14 @@ async function stopPackagedRemoteUiServer(): Promise<void> {
 async function prepareQuitForUpdate(): Promise<void> {
   if (!appIsQuitting) {
     appIsQuitting = true
-    allowPopoutClose = true
-    if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) browserPopoutWindow.close()
-    disposeBrowserPreviewRuntime()
+    desktopBrowserHost.hide()
     lifecycleLog.record('electron_quit_prepared_for_update')
     sleepBlockerService?.dispose()
-    browserWorkspaceIpc?.dispose()
-    browserWorkspaceIpc = null
     mainRendererRecovery?.dispose()
     mainRendererRecovery = null
-    disposeBrowserHost?.()
-    disposeBrowserHost = null
-    disposeExternalChromeIpc?.()
-    disposeExternalChromeIpc = null
     disposeOpenPdfIpc?.()
     disposeOpenPdfIpc = null
     await managedHosts.dispose()
-    await externalChromeCoordinator?.quiesce('desktop-update')
     await stopPackagedRemoteUiServer()
     await backendSupervisor.stop()
     appQuitCleanupComplete = true
@@ -714,31 +676,8 @@ if (!hasSingleInstanceLock) {
   })
 
   ipcMain.on(BACKEND_READY_CHANNEL, (event) => {
-    const bootstrap = backendBootstrap ?? backendSupervisor.bootstrap
-    if (event.senderFrame === null || event.senderFrame !== event.sender.mainFrame) {
-      event.returnValue = null
-      return
-    }
-    const senderId = event.sender.id
-    const windowRole: ElectronWindowRole | null = mainWindow && !mainWindow.isDestroyed() && senderId === mainWindow.webContents.id
-      ? 'main'
-      : browserPopoutWindow && !browserPopoutWindow.isDestroyed() && senderId === browserPopoutWindow.webContents.id
-        ? 'managed-browser-popout'
-        : null
-    if (windowRole === null) {
-      event.returnValue = null
-      return
-    }
-    event.returnValue = windowRole === 'main'
-      ? { ...bootstrap, windowRole, managedBrowserPopoutAvailable: isManagedBrowserPopoutAvailable() }
-      : {
-          version: bootstrap.version,
-          platform: bootstrap.platform,
-          appRuntime: bootstrap.appRuntime,
-          appStartedAt: bootstrap.appStartedAt,
-          windowRole,
-          managedBrowserPopoutAvailable: isManagedBrowserPopoutAvailable(),
-        }
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) { event.returnValue = null; return }
+    event.returnValue = backendBootstrap ?? backendSupervisor.bootstrap
   })
 
   installEnvironmentCredentialsIpc({ ipcMain, service: environmentCredentials, isTrustedSender: isTrustedMainRenderer })
@@ -750,6 +689,16 @@ if (!hasSingleInstanceLock) {
     mainRendererRecovery?.markReady(event.sender)
   })
 
+  const browserRenderer = (event: Electron.IpcMainInvokeEvent): BrowserWindow => {
+    if (!mainWindow || mainWindow.isDestroyed() || !isTrustedMainRenderer(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('Browser presentation requires the Forge main renderer.')
+    return mainWindow
+  }
+  ipcMain.handle('forge:browser-engine:present', (event, input: Parameters<import('@forge/protocol').BrowserEngineDesktopBridge['present']>[0]) => {
+    const window = browserRenderer(event)
+    if (!input || typeof input.tabId !== 'string' || !input.bounds) throw new Error('Invalid browser presentation.')
+    desktopBrowserHost.present(window, input)
+  })
+  ipcMain.handle('forge:browser-engine:hide', event => { browserRenderer(event); desktopBrowserHost.hide() })
   ipcMain.handle('bridge:showOpenDialog', async (_event, options: Electron.OpenDialogOptions) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       return dialog.showOpenDialog(mainWindow, options)
@@ -920,27 +869,6 @@ if (!hasSingleInstanceLock) {
 
     await secureVaultStartupInitialization
 
-    const externalChromeResources = resolveExternalChromeResources({
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-      developmentAppRoot: path.resolve(__dirname, '..'),
-    })
-    externalChromeDeployer = await deployExternalChrome(externalChromeResources)
-    externalChromeCoordinator = new ExternalChromeHostCoordinator({
-      dataRoot: backendSupervisor.bootstrap.dataDir ?? resolveLegacyForgeDataRoot(),
-      desktopVersion: app.getVersion(),
-      packagedManifestPath: path.join(externalChromeResources.root, 'package-manifest.json'),
-      ...(externalChromeResources.development ? { allowDevelopmentHost: true } : {}),
-      ...(externalChromeDeployer ? {
-        rollbackController: externalChromeDeployer,
-        repairDeployment: () => new ExternalChromeDeploymentRecovery(externalChromeDeployer!).repair(),
-        deploymentVerifier: externalChromeDeployer,
-      } : {}),
-    })
-    await externalChromeCoordinator.resumeIfEnabled().catch((error) => {
-      console.warn('[external-chrome] Previously enabled coordinator could not resume', error instanceof Error ? error.message : String(error))
-    })
-
     // Write CLI install hint on every launch so the shim can find the current app
     writeInstallHint()
 
@@ -954,109 +882,10 @@ if (!hasSingleInstanceLock) {
         lifecycleLog.record(`electron_main_renderer_${event.type}`, event)
       },
     })
-    const automaticChromeTransport = externalChromeCoordinator.transport()
-    const browserManager = new BrowserAutomationManager({
-      approvedDataRoot: backendSupervisor.bootstrap.dataDir ?? resolveLegacyForgeDataRoot(),
-      sendToRenderer: (channel, payload) => {
-        sendToRendererWindow(mainWindow, channel, payload)
-      },
-      externalChromeAdapter: new ExternalChromeTargetAdapter(automaticChromeTransport),
-      ensureManagedTarget: async (request) => {
-        const host = browserViewHost
-        if (!host) return null
-        const tab = createAutomaticManagedTab(request)
-        await host.ensureProvisional(tab, host.currentWorkspaceEpoch)
-        await host.commitProvisional(tab.tabId, host.currentWorkspaceEpoch)
-        return tab.tabId
-      },
-      captureExternalSnapshotContentEpoch: () => browserPreviewHost?.currentContentEpoch ?? Number.NaN,
-      observeSuccessfulExternalSnapshot: (observation) => browserPreviewHost?.observeExternalSnapshot(observation),
-      observeAgentControl: (observation) => browserPreviewHost?.observeAgentControl(observation),
-    })
-    browserViewHost = new ManagedBrowserViewHost({
-      manager: browserManager,
-      sessions: browserSessions,
-      guestPreloadPath: path.join(__dirname, 'guest-preload.js'),
-      onGuestBeforeInput: handleManagedBrowserCloseShortcut,
-      onGuestCrash: (tabId, reason) => {
-        sendToRendererWindow(mainWindow, 'forge:browser-guest-crashed', { tabId, reason })
-      },
-    })
-    browserPreviewHost = new BrowserPreviewHost({
-      manager: browserManager,
-      getWindow: () => mainWindow,
-    })
-    disposeBrowserHost = installBrowserIpc({ ipcMain, mainWindow, manager: browserManager, viewHost: browserViewHost })
-    disposeBrowserPreviewIpc = installBrowserPreviewIpc({
-      ipcMain,
-      getMainWindow: () => mainWindow,
-      host: browserPreviewHost,
-    })
-    disposeExternalChromeIpc = installExternalChromeIpc({
-      ipcMain,
-      mainWindow,
-      coordinator: externalChromeCoordinator,
-      revealExtensionFolder: async (validatedPath) => {
-        const error = await shell.openPath(validatedPath)
-        if (error) throw new Error(error)
-      },
-      onError: (error) => console.warn('[external-chrome] Coordinator operation failed', error instanceof Error ? error.message : String(error)),
-    })
-    browserWorkspaceIpc = installBrowserWorkspaceIpc({
-      ipcMain,
-      getMainWindow: () => mainWindow,
-      getPopoutWindow: () => browserPopoutWindow,
-      viewHost: browserViewHost,
-      getMode: () => browserWorkspaceMode,
-      popOut: popOutManagedBrowser,
-      dock: dockManagedBrowser,
-      bringToFront: bringManagedBrowserToFront,
-      publishPreviewScope: (publication) => browserPreviewHost?.publishScope(publication),
-    })
-    let previewScreenLocked = false
-    let previewSuspended = false
-    const clearPreviewForLock = (): void => {
-      previewScreenLocked = true
-      browserPreviewHost?.clearSensitiveContent()
-    }
-    const clearPreviewForSuspend = (): void => {
-      previewSuspended = true
-      browserPreviewHost?.clearSensitiveContent()
-    }
-    const restorePreviewAfterUnlock = (): void => {
-      previewScreenLocked = false
-      if (!previewSuspended) browserPreviewHost?.restoreSensitiveContent()
-    }
-    const restorePreviewAfterResume = (): void => {
-      previewSuspended = false
-      if (!previewScreenLocked) browserPreviewHost?.restoreSensitiveContent()
-    }
-    const previewVisibilityChanged = (): void => browserPreviewHost?.handleWindowVisibilityChanged()
-    const previewRendererWindow = mainWindow
-    powerMonitor.on('lock-screen', clearPreviewForLock)
-    powerMonitor.on('suspend', clearPreviewForSuspend)
-    powerMonitor.on('unlock-screen', restorePreviewAfterUnlock)
-    powerMonitor.on('resume', restorePreviewAfterResume)
-    previewRendererWindow?.on('show', previewVisibilityChanged)
-    previewRendererWindow?.on('hide', previewVisibilityChanged)
-    previewRendererWindow?.on('minimize', previewVisibilityChanged)
-    previewRendererWindow?.on('restore', previewVisibilityChanged)
-    disposeBrowserPreviewListeners = () => {
-      powerMonitor.off('lock-screen', clearPreviewForLock)
-      powerMonitor.off('suspend', clearPreviewForSuspend)
-      powerMonitor.off('unlock-screen', restorePreviewAfterUnlock)
-      powerMonitor.off('resume', restorePreviewAfterResume)
-      previewRendererWindow?.off('show', previewVisibilityChanged)
-      previewRendererWindow?.off('hide', previewVisibilityChanged)
-      previewRendererWindow?.off('minimize', previewVisibilityChanged)
-      previewRendererWindow?.off('restore', previewVisibilityChanged)
-    }
-    installManagedBrowserFocusAggregation(mainWindow)
     initAutoUpdater({
       mainWindow,
       readActivity: () => readPrimaryEnvironmentActivity(environmentCredentials),
       prepareQuitForUpdate,
-      quiesceHook: externalChromeUpdateQuiesceHook,
     })
     sleepBlockerService = new SleepBlockerService({
       readActivity: () => readPrimaryEnvironmentActivity(environmentCredentials),
@@ -1100,23 +929,15 @@ if (!hasSingleInstanceLock) {
 
     event.preventDefault()
     appIsQuitting = true
-    allowPopoutClose = true
-    if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) browserPopoutWindow.close()
-    disposeBrowserPreviewRuntime()
+    desktopBrowserHost.hide()
     sleepBlockerService?.dispose()
-    browserWorkspaceIpc?.dispose()
-    browserWorkspaceIpc = null
     mainRendererRecovery?.dispose()
     mainRendererRecovery = null
-    disposeBrowserHost?.()
-    disposeBrowserHost = null
-    disposeExternalChromeIpc?.()
-    disposeExternalChromeIpc = null
     disposeOpenPdfIpc?.()
     disposeOpenPdfIpc = null
 
-    void managedHosts.dispose().then(() => externalChromeCoordinator?.quiesce('desktop-quit') ?? Promise.resolve()).catch((error) => {
-      console.warn('[external-chrome] Quit quiesce failed', error instanceof Error ? error.message : String(error))
+    void managedHosts.dispose().catch((error) => {
+      console.warn('[managed-hosts] Quit cleanup failed', error instanceof Error ? error.message : String(error))
     }).finally(() => stopPackagedRemoteUiServer()).finally(() => backendSupervisor.stop()).finally(() => {
       lifecycleLog.record('electron_exit_requested', { code: 0 })
       app.exit(0)
@@ -1156,6 +977,8 @@ function createMainWindow(): BrowserWindow {
     },
   })
 
+  desktopBrowserHost.trackWindow(window)
+
   trackWindowState(window)
 
   window.once('ready-to-show', () => {
@@ -1170,24 +993,12 @@ function createMainWindow(): BrowserWindow {
 
   window.on('close', () => {
     mainWindowClosing = true
-    if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) {
-      allowPopoutClose = true
-      browserPopoutWindow.close()
-    }
-    disposeBrowserPreviewRuntime()
+    desktopBrowserHost.hide()
   })
   window.on('closed', () => {
     if (mainWindow === window) {
       mainRendererRecovery?.dispose()
       mainRendererRecovery = null
-      browserWorkspaceIpc?.dispose()
-      browserWorkspaceIpc = null
-      disposeBrowserPreviewRuntime()
-      disposeBrowserHost?.()
-      disposeBrowserHost = null
-      disposeExternalChromeIpc?.()
-      disposeExternalChromeIpc = null
-      browserViewHost = null
       mainWindow = null
     }
   })
@@ -1236,175 +1047,6 @@ function createMainWindow(): BrowserWindow {
   })
 
   return window
-}
-
-function disposeBrowserPreviewRuntime(): void {
-  disposeBrowserPreviewListeners?.()
-  disposeBrowserPreviewListeners = null
-  disposeBrowserPreviewIpc?.()
-  disposeBrowserPreviewIpc = null
-  browserPreviewHost?.dispose()
-  browserPreviewHost = null
-}
-
-async function createBrowserPopoutWindow(): Promise<BrowserWindow> {
-  if (browserPopoutWindow && !browserPopoutWindow.isDestroyed()) return browserPopoutWindow
-  const saved = loadWindowState({
-    key: 'managed-browser-window-state',
-    minWidth: 720,
-    minHeight: 560,
-    defaultState: { width: 1180, height: 820, isMaximized: false, isFullScreen: false },
-  })
-  const window = new BrowserWindow({
-    title: 'Forge Automatic Browser',
-    width: saved.width,
-    height: saved.height,
-    ...(saved.x !== undefined && saved.y !== undefined ? { x: saved.x, y: saved.y } : {}),
-    minWidth: 720,
-    minHeight: 560,
-    show: false,
-    ...(process.platform !== 'darwin' && {
-      autoHideMenuBar: true,
-    }),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      webviewTag: false,
-      backgroundThrottling: false,
-    },
-  })
-  browserPopoutWindow = window
-  trackWindowState(window, { key: 'managed-browser-window-state', minWidth: 720, minHeight: 560 })
-  installManagedBrowserFocusAggregation(window)
-  window.on('close', (event) => {
-    if (allowPopoutClose || appIsQuitting || mainWindowClosing) return
-    event.preventDefault()
-    const epoch = browserWorkspaceIpc?.getProjection()?.workspaceEpoch
-    if (epoch !== undefined) void dockManagedBrowser(epoch).catch((error) => console.error('Failed to dock Automatic Browser', error))
-  })
-  window.on('closed', () => {
-    if (browserPopoutWindow === window) browserPopoutWindow = null
-    if (!allowPopoutClose && !appIsQuitting && !mainWindowClosing && browserWorkspaceMode === 'popped-out') {
-      const epoch = browserWorkspaceIpc?.getProjection()?.workspaceEpoch
-      if (epoch !== undefined) void dockManagedBrowser(epoch).catch(() => undefined)
-    }
-  })
-  const recover = (): void => {
-    if (appIsQuitting || mainWindowClosing) return
-    const epoch = browserWorkspaceIpc?.getProjection()?.workspaceEpoch
-    if (epoch !== undefined) void dockManagedBrowser(epoch).catch(() => undefined)
-  }
-  window.webContents.on('render-process-gone', recover)
-  window.webContents.on('did-fail-load', recover)
-  window.webContents.on('before-input-event', handleManagedBrowserCloseShortcut)
-  await loadRenderer(window)
-  return window
-}
-
-function popOutManagedBrowser(epoch: number): Promise<ManagedBrowserWorkspaceMode> {
-  const run = async (): Promise<ManagedBrowserWorkspaceMode> => {
-    if (browserWorkspaceMode === 'popped-out' && browserPopoutWindow && !browserPopoutWindow.isDestroyed()) {
-      bringManagedBrowserToFront()
-      return browserWorkspaceMode
-    }
-    const host = browserViewHost
-    if (!host) throw new Error('Automatic Browser host is unavailable')
-    browserWorkspaceMode = 'opening'
-    browserWorkspaceIpc?.publishMode(browserWorkspaceMode)
-    const window = await createBrowserPopoutWindow()
-    await waitForBrowserTarget('popout', epoch)
-    const transferred = await host.transferOwner('popout', epoch)
-    if (!transferred) throw new Error('Automatic Browser pop-out viewport was not physically ready')
-    if (window.isMinimized()) window.restore()
-    window.show()
-    window.focus()
-    browserWorkspaceMode = 'popped-out'
-    browserWorkspaceIpc?.publishMode(browserWorkspaceMode)
-    publishManagedBrowserFocus()
-    return browserWorkspaceMode
-  }
-  const result = browserTransition.then(run, run)
-  browserTransition = result.catch(() => {
-    browserWorkspaceMode = isManagedBrowserPopoutAvailable() ? 'docked' : 'unavailable'
-    browserWorkspaceIpc?.publishMode(browserWorkspaceMode)
-    return browserWorkspaceMode
-  })
-  return result
-}
-
-function dockManagedBrowser(epoch: number): Promise<ManagedBrowserWorkspaceMode> {
-  const run = async (): Promise<ManagedBrowserWorkspaceMode> => {
-    if (browserWorkspaceMode === 'docked' && (!browserPopoutWindow || browserPopoutWindow.isDestroyed())) {
-      focusMainWindow()
-      return browserWorkspaceMode
-    }
-    const host = browserViewHost
-    if (!host) throw new Error('Automatic Browser host is unavailable')
-    browserWorkspaceMode = 'docking'
-    browserWorkspaceIpc?.publishMode(browserWorkspaceMode)
-    await waitForBrowserTarget('docked', epoch)
-    const transferred = await host.transferOwner('docked', epoch)
-    if (!transferred) throw new Error('Automatic Browser dock viewport was not physically ready')
-    const popout = browserPopoutWindow
-    if (popout && !popout.isDestroyed()) {
-      allowPopoutClose = true
-      popout.close()
-      allowPopoutClose = false
-    }
-    browserWorkspaceMode = 'docked'
-    browserWorkspaceIpc?.publishMode(browserWorkspaceMode)
-    focusMainWindow()
-    publishManagedBrowserFocus()
-    return browserWorkspaceMode
-  }
-  const result = browserTransition.then(run, run)
-  browserTransition = result.catch(() => browserWorkspaceMode)
-  return result
-}
-
-async function waitForBrowserTarget(owner: 'docked' | 'popout', epoch: number): Promise<void> {
-  const deadline = Date.now() + 5_000
-  while (Date.now() < deadline) {
-    if (browserViewHost?.hasPresentationTarget(owner, epoch)) return
-    await new Promise((resolve) => setTimeout(resolve, 25))
-  }
-  throw new Error(`Automatic Browser ${owner} viewport did not become ready`)
-}
-
-function handleManagedBrowserCloseShortcut(
-  event: { preventDefault(): void },
-  input: { type: string; key: string; alt?: boolean; control?: boolean; meta?: boolean; shift?: boolean },
-): void {
-  if (browserWorkspaceMode !== 'popped-out' && browserWorkspaceMode !== 'opening') return
-  if (!isDockManagedBrowserShortcut(input)) return
-  event.preventDefault()
-  const epoch = browserWorkspaceIpc?.getProjection()?.workspaceEpoch
-  if (epoch !== undefined) void dockManagedBrowser(epoch).catch(() => undefined)
-}
-
-function bringManagedBrowserToFront(): void {
-  const target = browserWorkspaceMode === 'popped-out' ? browserPopoutWindow : mainWindow
-  if (!target || target.isDestroyed()) return
-  if (target.isMinimized()) target.restore()
-  target.show()
-  target.focus()
-}
-
-function installManagedBrowserFocusAggregation(window: BrowserWindow): void {
-  window.on('focus', publishManagedBrowserFocus)
-  window.on('blur', publishManagedBrowserFocus)
-  window.on('show', publishManagedBrowserFocus)
-  window.on('hide', publishManagedBrowserFocus)
-  window.on('minimize', publishManagedBrowserFocus)
-  window.on('restore', publishManagedBrowserFocus)
-}
-
-function publishManagedBrowserFocus(): void {
-  const ownerWindow = browserWorkspaceMode === 'popped-out' ? browserPopoutWindow : mainWindow
-  const focused = Boolean(ownerWindow && !ownerWindow.isDestroyed() && ownerWindow.isVisible() && !ownerWindow.isMinimized() && ownerWindow.isFocused())
-  browserWorkspaceIpc?.publishFocus(focused)
 }
 
 function sendTerminalShortcut(action: 'toggle' | 'new' | 'next' | 'prev'): void {
@@ -1592,17 +1234,6 @@ function createApplicationMenu(): void {
     submenu: [
       { role: 'minimize', ...(isMac ? { accelerator: 'CmdOrCtrl+M' } : {}) },
       { role: 'zoom' },
-      {
-        label: 'Pop Out / Dock Automatic Browser',
-        accelerator: 'CmdOrCtrl+Shift+B',
-        enabled: isManagedBrowserPopoutAvailable(),
-        click: () => {
-          const epoch = browserWorkspaceIpc?.getProjection()?.workspaceEpoch
-          if (epoch === undefined) return
-          if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') void dockManagedBrowser(epoch)
-          else void popOutManagedBrowser(epoch)
-        },
-      },
       ...(isMac ? [
         { type: 'separator' as const },
         { role: 'front' as const },
@@ -1669,35 +1300,6 @@ function isTrustedMainRenderer(event: unknown): boolean {
   return isTrustedRendererUrl(mainWindow.webContents.getURL())
 }
 
-function createAutomaticManagedTab(request: BrowserAutomationRequest): BrowserTabSnapshot {
-  const now = new Date().toISOString()
-  return {
-    targetAffinity: 'managed-electron',
-    tabId: `tab-${randomBytes(12).toString('hex')}`,
-    sessionAgentId: request.sessionAgentId,
-    profileId: request.profileId,
-    // Provision one initialized neutral renderer. The managed open operation
-    // owns the requested URL navigation after the target is registered.
-    url: 'about:blank',
-    title: 'New tab',
-    lifecycle: 'restoring',
-    loading: false,
-    live: false,
-    canGoBack: false,
-    canGoForward: false,
-    zoomFactor: 1,
-    controller: 'none',
-    agentCursor: null,
-    recording: null,
-    viewportSetting: { mode: 'fill' },
-    renderedViewport: null,
-    physicalVisible: false,
-    error: null,
-    createdAt: now,
-    updatedAt: now,
-  }
-}
-
 function buildBackendBootstrap(
   port: number,
   dataDir: string | undefined,
@@ -1713,7 +1315,6 @@ function buildBackendBootstrap(
     appRuntime: app.isPackaged ? 'installed' : 'development',
     appStartedAt: ELECTRON_STARTED_AT,
     windowRole: 'main',
-    managedBrowserPopoutAvailable: isManagedBrowserPopoutAvailable(),
     secureControlToken,
     ...(dataDir ? { dataDir } : {}),
   }
@@ -1834,36 +1435,6 @@ function assertPathExists(targetPath: string, label: string): void {
  */
 function resolveDefaultBackendPort(): number {
   return DEFAULT_BACKEND_PORT
-}
-
-async function deployExternalChrome(resources: ExternalChromeResourceLocation): Promise<ExternalChromeDeployer | null> {
-  const dataRoot = backendSupervisor.bootstrap.dataDir
-  if (!dataRoot) {
-    console.warn('[external-chrome] Backend did not report a canonical data root; deployment skipped for compatibility')
-    return null
-  }
-  const deployer = new ExternalChromeDeployer({
-    dataRoot,
-    resourcesRoot: resources.root,
-    ...(resources.development ? { allowDevelopmentHost: true } : {}),
-  })
-  try {
-    await new ExternalChromeDeploymentRecovery(deployer).deployAtStartup({ development: resources.development })
-  } catch (error) {
-    // External Chrome is optional; deployment failure must not disable the embedded browser or Desktop.
-    console.warn('[external-chrome] Resource deployment failed', error instanceof Error ? error.message : String(error))
-  }
-  return deployer
-}
-
-function resolveLegacyForgeDataRoot(): string {
-  const configured = process.env.FORGE_DATA_DIR ?? process.env.MIDDLEMAN_DATA_DIR
-  if (configured) return path.resolve(configured)
-  if (process.platform === 'win32') {
-    const localAppData = process.env.LOCALAPPDATA?.trim() || path.join(app.getPath('home'), 'AppData', 'Local')
-    return path.resolve(localAppData, 'forge')
-  }
-  return path.resolve(app.getPath('home'), '.forge')
 }
 
 function isBackendReadyMessage(value: unknown): value is BackendReadyMessage {

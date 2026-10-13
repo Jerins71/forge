@@ -17,7 +17,7 @@ import type {
   RestoreProfileResult,
   RestoreSessionResult,
 } from "./archive/archive-service.js";
-import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
+import type { BrowserLifecycle } from "./browser-automation/browser-lifecycle.js";
 import type { ForgeExtensionHost } from "./forge-extension-host.js";
 import type { SessionGoalCoordinator } from "./goals/session-goal-coordinator.js";
 import {
@@ -131,14 +131,7 @@ export interface SessionLifecycleCoordinatorOptions {
   };
   /** Retires session attention when a session becomes ineligible (archive). */
   reportAttentionSessionRetired?: (sessionAgentId: string) => void | Promise<void>;
-  browser: Pick<
-    BrowserAutomationService,
-    | "cancelSession"
-    | "releaseSessionForLifecycle"
-    | "archiveSession"
-    | "restoreSession"
-    | "deleteSession"
-  >;
+  browser: BrowserLifecycle;
   secureSessions: SecureSessionLifecyclePort;
   events: {
     emitAgentsSnapshot(): void;

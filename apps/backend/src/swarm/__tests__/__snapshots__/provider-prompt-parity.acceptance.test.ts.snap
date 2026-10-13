@@ -33,7 +33,7 @@ exports[`production prompt and tool boundary baseline > retains claude request b
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "76901c55104ab64ec1c163c8e094b601b1e84c601bc67195db73113fbc3fb63f",
+  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
 }
 `;
 
@@ -70,7 +70,7 @@ exports[`production prompt and tool boundary baseline > retains claude request b
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "76901c55104ab64ec1c163c8e094b601b1e84c601bc67195db73113fbc3fb63f",
+  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
 }
 `;
 
@@ -118,7 +118,7 @@ exports[`production prompt and tool boundary baseline > retains codex request by
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "76901c55104ab64ec1c163c8e094b601b1e84c601bc67195db73113fbc3fb63f",
+  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
 }
 `;
 
@@ -155,7 +155,7 @@ exports[`production prompt and tool boundary baseline > retains codex request by
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "76901c55104ab64ec1c163c8e094b601b1e84c601bc67195db73113fbc3fb63f",
+  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
 }
 `;
 
@@ -202,7 +202,7 @@ exports[`production prompt and tool boundary baseline > retains cursor-sdk reque
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "7b4f049e8888e930115c5353bdcdd7f1f14741c2b066e8c8e82df0ddacfd26bc",
+  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
 }
 `;
 
@@ -238,7 +238,7 @@ exports[`production prompt and tool boundary baseline > retains cursor-sdk reque
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "7b4f049e8888e930115c5353bdcdd7f1f14741c2b066e8c8e82df0ddacfd26bc",
+  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
 }
 `;
 
@@ -284,7 +284,7 @@ exports[`production prompt and tool boundary baseline > retains pi request bytes
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "7b4f049e8888e930115c5353bdcdd7f1f14741c2b066e8c8e82df0ddacfd26bc",
+  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
 }
 `;
 
@@ -320,7 +320,7 @@ exports[`production prompt and tool boundary baseline > retains pi request bytes
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "7b4f049e8888e930115c5353bdcdd7f1f14741c2b066e8c8e82df0ddacfd26bc",
+  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
 }
 `;
 

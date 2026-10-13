@@ -1,17 +1,14 @@
 import type { ServerEvent, TerminalDescriptor } from '@forge/protocol';
 import type { DetailFeatureStreamItem, RpcInput } from '@forge/protocol/environment-v2';
 import type { SwarmManager } from '../swarm/swarm-manager.js';
-import { BrowserAutomationService, isEligibleLocalBuilderManager } from '../swarm/browser-automation/index.js';
 import type { TerminalService } from '../terminal/terminal-service.js';
 import type { EnvironmentAccessPort, ControlService, Principal } from '../environment/control/control-types.js';
-import { createBrowserHostRpc, type BrowserHostRpc } from './rpc/browser-host-rpc.js';
-import { createBrowserWorkspaceRpc } from './rpc/browser-workspace-rpc.js';
+import { createBrowserEngineRpc } from "./rpc/browser-engine-rpc.js";
 import { projectDetailFeature } from './rpc/detail-feature-rpc.js';
 import { StreamQueue, StreamFault } from '../environment/streams/stream-budget.js';
 /** Typed session feature publication; sockets and durable projections belong to the environment runtime. */
 export class SessionFeaturePublisher {
     private readonly swarmManager: SwarmManager;
-    private readonly browserAutomationService: BrowserAutomationService;
     private readonly featureListeners = new Map<string, Set<(event: ServerEvent) => void>>();
     private readonly listTerminalsForSession: (sessionId: string) => TerminalDescriptor[];
     private environmentControl: {
@@ -19,18 +16,16 @@ export class SessionFeaturePublisher {
         control: ControlService;
         launchMaterialized?: (sessionId: string) => Promise<void>;
     } | null = null;
-    readonly browserHost: BrowserHostRpc;
-    browser!: ReturnType<typeof createBrowserWorkspaceRpc>;
+    readonly browserEngine?: ReturnType<typeof createBrowserEngineRpc>;
     constructor(options: {
         swarmManager: SwarmManager;
-        browserAutomationService?: BrowserAutomationService;
+        browserEngine?: import("../swarm/browser-automation/browser-engine.js").BrowserEngine;
         terminalService?: TerminalService | null;
         listTerminalsForSession?: (id: string) => TerminalDescriptor[];
     }) {
         this.swarmManager = options.swarmManager;
-        this.browserAutomationService = options.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
+        this.browserEngine = options.browserEngine && createBrowserEngineRpc(options.browserEngine, options.browserEngine.cookies);
         this.listTerminalsForSession = options.listTerminalsForSession ?? (id => options.terminalService?.listTerminals(id) ?? []);
-        this.browserHost = createBrowserHostRpc({ service: this.browserAutomationService, hydrateSessions: () => this.hydrateBrowserHostSessions(), resolveSession: id => this.resolveBrowserProfile(id) });
     }
     setEnvironmentControl(deps: {
         access: EnvironmentAccessPort;
@@ -38,7 +33,6 @@ export class SessionFeaturePublisher {
         launchMaterialized?: (sessionId: string) => Promise<void>;
     }): void {
         this.environmentControl = deps;
-        this.browser = createBrowserWorkspaceRpc({ service: this.browserAutomationService, host: this.browserHost, control: deps.control, resolveSession: id => this.resolveBrowserProfile(id) });
     }
     private resolveTerminalScopeAgentId(id: string): string | undefined {
         const target = this.swarmManager.getAgent(id);
@@ -163,14 +157,5 @@ export class SessionFeaturePublisher {
             if (mountedId === event.sessionAgentId || authority === owner)
                 this.publishFeatures(mountedId, event);
         }
-    }
-    private resolveBrowserProfile(id: string): string | undefined {
-        const descriptor = this.swarmManager.getAgent(id);
-        return descriptor && isEligibleLocalBuilderManager(descriptor) ? descriptor.profileId ?? descriptor.agentId : undefined;
-    }
-    private async hydrateBrowserHostSessions() {
-        return Promise.all(this.swarmManager.listAgents()
-            .filter(d => d.role === 'manager' && isEligibleLocalBuilderManager(d))
-            .map(d => this.browserAutomationService.getHostHydrationSnapshot(d.profileId ?? d.agentId, d.agentId)));
     }
 }

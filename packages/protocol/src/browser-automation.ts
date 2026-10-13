@@ -4,6 +4,8 @@
  * distribution must retain the corresponding third-party notice.
  */
 
+import type { BrowserEngineTab } from "./browser-engine-v2.js"
+
 export const BROWSER_AUTOMATION_OPERATIONS = [
   'status',
   'open',
@@ -22,33 +24,6 @@ export const BROWSER_AUTOMATION_OPERATIONS = [
 
 export type BrowserAutomationOperation = (typeof BROWSER_AUTOMATION_OPERATIONS)[number]
 
-export const BROWSER_TARGET_AFFINITIES = ['managed-electron', 'external-chrome'] as const
-export type BrowserTargetAffinity = (typeof BROWSER_TARGET_AFFINITIES)[number]
-export const BROWSER_HOST_PROTOCOL_VERSION = 2
-
-/** Whether a host's declared range can negotiate Forge's current browser protocol. */
-export function isBrowserHostProtocolCompatible(protocolVersions: { minimum: number; maximum: number } | undefined): boolean {
-  return !!protocolVersions
-    && protocolVersions.minimum <= BROWSER_HOST_PROTOCOL_VERSION
-    && protocolVersions.maximum >= BROWSER_HOST_PROTOCOL_VERSION
-}
-
-/** Request-scoped registration failures which clients must handle without emitting chat events. */
-
-/** Complete External Chrome functional surface; physical viewport and recording stay disabled. */
-export const EXTERNAL_CHROME_SUPPORTED_OPERATIONS = [
-  'status',
-  'open',
-  'navigate',
-  'snapshot',
-  'click',
-  'type',
-  'press',
-  'scroll',
-  'evaluate',
-  'waitFor',
-] as const satisfies readonly BrowserAutomationOperation[]
-
 export const BROWSER_AUTOMATION_DEFAULT_TIMEOUT_MS = 15_000
 export const BROWSER_AUTOMATION_MAX_TIMEOUT_MS = 60_000
 export const BROWSER_AUTOMATION_MAX_URL_LENGTH = 2_048
@@ -59,8 +34,6 @@ export const BROWSER_AUTOMATION_MAX_DIAGNOSTIC_ENTRIES = 200
 export const BROWSER_AUTOMATION_MAX_SCREENSHOT_WIDTH = 1_280
 export const BROWSER_AUTOMATION_MAX_SCREENSHOT_HEIGHT = 1_280
 export const BROWSER_AUTOMATION_MAX_SAFE_ACTIONS = 100
-/** Maximum profile-wide External Chrome candidates returned by one status call. */
-export const BROWSER_AUTOMATION_MAX_ELIGIBLE_TABS = 32
 export const BROWSER_VIEWPORT_MIN_DIMENSION = 240
 export const BROWSER_VIEWPORT_MAX_DIMENSION = 3_840
 export const BROWSER_VIEWPORT_MAX_AREA = 3_840 * 2_160
@@ -105,186 +78,6 @@ export interface BrowserRenderedViewport {
   deviceScaleFactor: number
 }
 
-export type BrowserController = 'human' | 'agent' | 'agent-idle' | 'none'
-export type BrowserTabLifecycle = 'restoring' | 'loading' | 'ready' | 'failed' | 'closed'
-/** Physical host mounting for a Forge browser session. Metadata may remain while unhosted. */
-export type BrowserSessionHostingState = 'hosted' | 'unhosted' | 'removed'
-
-export interface BrowserTabSnapshot {
-  /** Desktop-private implementation affinity. Callers may observe but never choose it. */
-  targetAffinity: BrowserTargetAffinity
-  tabId: string
-  sessionAgentId: string
-  profileId: string
-  url: string
-  title: string
-  lifecycle: BrowserTabLifecycle
-  loading: boolean
-  live: boolean
-  canGoBack: boolean
-  canGoForward: boolean
-  zoomFactor: number
-  controller: BrowserController
-  agentCursor: {
-    x: number
-    y: number
-    phase: 'move' | 'click'
-    sequence: number
-    createdAt: string
-  } | null
-  recording: {
-    recordingId: string
-    startedAt: string
-    mimeType: string
-  } | null
-  viewportSetting: BrowserViewportSetting
-  renderedViewport: BrowserRenderedViewport | null
-  /** Broker-reported physical webview presentation; absent in legacy persisted snapshots. */
-  physicalVisible?: boolean
-  error: { code: string; message: string } | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface BrowserSafeActionSummary {
-  id: string
-  operation: BrowserAutomationOperation
-  tabId: string | null
-  status: 'running' | 'succeeded' | 'failed' | 'interrupted'
-  url?: string
-  title?: string
-  dimensions?: { width: number; height: number }
-  artifactPath?: string
-  errorCode?: BrowserAutomationErrorCode
-  startedAt: string
-  completedAt?: string
-  elapsedMs?: number
-}
-
-export interface BrowserPanelRevealIntent {
-  /** Monotonic per-session token. A larger value always represents newer reveal intent. */
-  sequence: number
-  /** Last sequence presented by an authoritative Electron host. */
-  acknowledgedSequence: number
-  /** Tab that must be physically presented before this sequence is acknowledged. */
-  tabId: string | null
-}
-
-export type BrowserHostLifecycleReason = 'stop' | 'archive' | 'delete' | 'host-replaced' | 'desktop-quit' | 'desktop-update'
-
-/** Privacy-bounded durable acknowledgement state. Exact target authority stays in Desktop. */
-export interface BrowserHostCleanupTransaction {
-  requestId: string
-  kind: 'turn-ended' | 'release-session'
-  reason?: BrowserHostLifecycleReason
-  turnId?: string
-  hostId: string
-  hostGeneration: number
-  phase: 'pending' | 'acknowledged'
-}
-
-export interface BrowserSessionSnapshot {
-  schemaVersion: 2
-  hostCleanup?: BrowserHostCleanupTransaction
-  sessionAgentId: string
-  profileId: string
-  /** Controls whether the desktop host may mount physical webviews for this session. */
-  hostingState: BrowserSessionHostingState
-  tabs: BrowserTabSnapshot[]
-  activeTabId: string | null
-  defaultTabId: string | null
-  panelVisible: boolean
-  /** Durable reveal intent. Absence is a legacy snapshot with no pending reveal. */
-  panelReveal?: BrowserPanelRevealIntent
-  recentActions: BrowserSafeActionSummary[]
-  revision: number
-  createdAt: string
-  updatedAt: string
-}
-
-/**
- * Renderer → backend physical-tab report. Membership, selection, panel, and
- * action history remain backend-owned; only matched tab runtime fields merge.
- */
-export interface BrowserHostSessionStateReport {
-  sessionAgentId: string
-  profileId: string
-  /** Canonical revision the host based this report on. Mismatches are rejected. */
-  baseRevision: number
-  tabs: BrowserTabSnapshot[]
-}
-
-export type BrowserHostSessionStateReportResult =
-  | {
-      sessionAgentId: string
-      profileId: string
-      status: 'accepted' | 'revision-conflict'
-      /** Canonical state after acceptance, or the state the host must rebase onto. */
-      snapshot: BrowserSessionSnapshot
-    }
-  | {
-      sessionAgentId: string
-      profileId: string
-      status: 'rejected'
-      reason: 'invalid-report' | 'session-unavailable' | 'tab-unavailable'
-      snapshot?: BrowserSessionSnapshot
-    }
-
-export type BrowserHostStateReportResult =
-  | {
-      hostId: string
-      hostGeneration: number
-      status: 'processed'
-      sessions: BrowserHostSessionStateReportResult[]
-    }
-  | {
-      hostId: string
-      hostGeneration: number
-      status: 'stale-host-generation'
-      sessions: []
-    }
-
-export interface BrowserHostCapabilities {
-  /** Browser automation wire versions accepted by this host. */
-  protocolVersions?: { minimum: number; maximum: number }
-  supportedOperations: BrowserAutomationOperation[]
-  maxResponseBytes: number
-  features?: {
-    resize: boolean
-    recording: boolean
-    capturePage: boolean
-    downloadEvents: boolean
-    downloadArtifacts: boolean
-    downloadOpen: boolean
-    /** Host honors requiredTargetAffinity for local managed-tab opens. */
-    managedOpenRouting?: boolean
-  }
-  /** Runtime versions are host-specific; External Chrome need not emulate Electron fields. */
-  runtimeVersions?: {
-    electron?: string
-    chromium?: string
-    playwright?: string
-    chrome?: string
-    extension?: string
-  }
-}
-
-export interface BrowserHostRegistration {
-  hostId: string
-  clientInstanceId: string
-  capabilities: BrowserHostCapabilities
-  registeredAt: string
-}
-
-export interface BrowserHostConnectionSnapshot {
-  connected: boolean
-  hostId: string | null
-  hostGeneration: number | null
-  focused: boolean
-  capabilities: BrowserHostCapabilities | null
-  connectedAt: string | null
-}
-
 export type BrowserAutomationErrorCode =
   | 'unavailable-host'
   | 'unsupported-operation'
@@ -304,20 +97,13 @@ export type BrowserAutomationErrorCode =
   | 'result-too-large'
   | 'response-too-large'
   | 'host-disconnected'
-  | 'stale-host-generation'
   | 'malformed-response'
   | 'artifact-path-invalid'
   | 'recording-conflict'
-  | 'recording-requires-visible-tab'
   | 'recording-not-found'
   | 'request-cancelled'
   | 'execution-failed'
-  | 'lease-conflict'
-  | 'lease-lost'
   | 'restricted-target'
-  | 'debugger-unavailable'
-  | 'extension-update-required'
-  | 'chrome-policy-blocked'
 
 export interface BrowserAutomationFailure {
   code: BrowserAutomationErrorCode
@@ -400,53 +186,26 @@ export interface BrowserWaitForInput extends BrowserTabTargetInput {
 
 export type BrowserRecordingStartInput = BrowserTabTargetInput
 
-/** Canonical, directly selectable External Chrome tab advertised by browser_status. */
-export interface BrowserEligibleTab {
-  targetAffinity: 'external-chrome'
-  /** Stable canonical ID accepted by browser_open({ tabId }). */
-  tabId: string
-  /** Opaque stable identity of the authenticated Chrome profile runtime. */
-  browserProfileId: string
-  /** Opaque stable identity of the containing normal Chrome window. */
-  windowId: string
-  title: string
-  url: string
-  /** Whether this is the active tab in its Chrome window. */
-  active: boolean
-  /** Current Chrome window focus; false after focus moves to Forge or another app. */
-  windowFocused: boolean
-  /** Chrome's bounded last-access timestamp, used for deterministic default selection. */
-  lastAccessedAt: string
-}
-
 export interface BrowserRecordingStopInput extends BrowserTabTargetInput {
   recordingId?: string
 }
 
 export interface BrowserAutomationStatusResult {
   available: boolean
-  host: BrowserHostConnectionSnapshot
-  /** Legacy alias for physicalTabVisible. It is never canonical reveal intent. */
-  panelVisible: boolean
-  /** Canonical workspace reveal intent persisted by the backend. */
-  panelRevealRequested: boolean
-  /** Electron-authoritative physical presentation acknowledgement for selectedTab. */
-  physicalTabVisible: boolean
-  selectedTab: BrowserTabSnapshot | null
-  /** Ranked eligible tabs across every authenticated ready External Chrome profile. */
-  eligibleTabs: BrowserEligibleTab[]
-  /** True when the canonical inventory exceeded its public bound. */
-  eligibleTabsTruncated: boolean
+  browserEngineState: 'ready' | 'missing' | 'installing' | 'failed'
+  browserEngineMessage?: string
+  selectedTab: BrowserEngineTab | null
+  tabs: BrowserEngineTab[]
 }
 
 export interface BrowserOpenResult {
-  tab: BrowserTabSnapshot
+  tab: BrowserEngineTab
   created: boolean
   panelRevealRequested: boolean
 }
 
 export interface BrowserNavigateResult {
-  tab: BrowserTabSnapshot
+  tab: BrowserEngineTab
   readiness: BrowserNavigateInput['readiness']
 }
 
@@ -637,80 +396,6 @@ export type BrowserAutomationResult = {
     result: BrowserAutomationResultByOperation[Operation]
   }
 }[BrowserAutomationOperation]
-
-interface BrowserAutomationRequestRouting {
-  requestId: string
-  sessionAgentId: string
-  profileId: string
-  /** Resolved logical target, or null when Desktop must ensure one. */
-  tabId: string | null
-  /**
-   * Hard local-host allocation requirement for an untargeted open. The in-app
-   * Browser workspace uses this to create an embedded tab; agent browser tools
-   * omit it and retain Automatic Browser selection.
-   */
-  requiredTargetAffinity?: 'managed-electron'
-  hostId: string
-  hostGeneration: number
-  deadlineAt: string
-  /** Non-null only for operations authorized to write an artifact. */
-  artifactDirectory: string | null
-}
-
-export type BrowserAutomationRequest = {
-  [Operation in BrowserAutomationOperation]: BrowserAutomationRequestRouting & {
-    operation: Operation
-    input: BrowserAutomationInputByOperation[Operation]
-  }
-}[BrowserAutomationOperation]
-
-interface BrowserAutomationResponseRouting {
-  requestId: string
-  sessionAgentId: string
-  profileId: string
-  tabId: string | null
-  hostId: string
-  hostGeneration: number
-  elapsedMs: number
-  updatedTab?: BrowserTabSnapshot
-}
-
-export type BrowserAutomationSuccessResponse = {
-  [Operation in BrowserAutomationOperation]: BrowserAutomationResponseRouting & {
-    ok: true
-    operation: Operation
-    result: BrowserAutomationResultByOperation[Operation]
-    error?: never
-  }
-}[BrowserAutomationOperation]
-
-export type BrowserAutomationErrorResponse = BrowserAutomationResponseRouting & {
-  ok: false
-  operation: BrowserAutomationOperation
-  result?: never
-  error: BrowserAutomationFailure
-}
-
-export type BrowserAutomationResponse = BrowserAutomationSuccessResponse | BrowserAutomationErrorResponse
-
-interface BrowserHostLifecycleRouting {
-  requestId: string
-  sessionAgentId: string
-  profileId: string
-  hostId: string
-  hostGeneration: number
-}
-
-export type BrowserHostLifecycleRequest = BrowserHostLifecycleRouting & (
-  | { kind: 'turn-ended'; turnId: string }
-  | { kind: 'release-session'; reason: BrowserHostLifecycleReason }
-)
-
-export type BrowserHostLifecycleResponse = BrowserHostLifecycleRouting & (
-  | { ok: true; kind: 'turn-ended'; turnId: string }
-  | { ok: true; kind: 'release-session'; reason: BrowserHostLifecycleReason }
-  | { ok: false; kind: 'turn-ended' | 'release-session'; error: BrowserAutomationFailure }
-)
 
 export class BrowserAutomationContractError extends Error {
   readonly operation: BrowserAutomationOperation

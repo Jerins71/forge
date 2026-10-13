@@ -87,18 +87,6 @@
         "tailwindcss"
       ]
     },
-    "apps/chrome-extension": {
-      "entry": [
-        "src/payload/content-script/index.ts",
-        "src/payload/service-worker/index.ts",
-        "src/shell/service-worker-bootstrap.ts"
-      ],
-      "project": [
-        "src/**/*.ts",
-        "scripts/**/*.mjs",
-        "tests/**/*.ts"
-      ]
-    },
     "apps/electron": {
       "entry": [
         "src/main.ts",
@@ -106,18 +94,18 @@
         "src/auto-updater.ts",
         "src/environment-fixture-main.ts",
         "src/managed-hosts-dev1-smoke.ts",
-        "src/browser/fixture-smoke-main.ts",
-        "src/browser/popout-reparent-fixture-main.ts",
-        "src/browser/managed-browser-popout-fixture-main.ts",
-        "src/browser/preview-capture-fixture-main.ts",
-        "src/browser/guest-preload.ts",
         "scripts/**/*.mjs",
         "src/**/*.test.ts",
-        "src/**/__tests__/**/*.ts"
+        "src/**/__tests__/**/*.ts",
+        "src/browser/browser-engine-fixture-main.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",
         "scripts/**/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "@napi-rs/keyring",
+        "koffi"
       ]
     },
     "packages/protocol": {

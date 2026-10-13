@@ -2,7 +2,7 @@
 
 ## T3 Code
 
-Forge browser automation includes source adapted from T3 Code commit 9a0a07167f0623c3a7db0ffeff2e3939760309df.
+Forge browser automation includes operation semantics and viewport presets adapted from T3 Code commit 9a0a07167f0623c3a7db0ffeff2e3939760309df and the private CDP relay and Chrome for Testing release pins from df26ef99.
 
 MIT License
 
@@ -19,14 +19,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | Forge file | T3 Code reference |
 | --- | --- |
 | `packages/protocol/src/browser-automation.ts` | Browser operation semantics, bounds, and viewport presets at `9a0a07167f0623c3a7db0ffeff2e3939760309df` |
-| `apps/electron/src/browser/managed-electron-target-adapter.ts` | `apps/desktop/src/preview/Manager.ts` |
-| `apps/electron/src/browser/browser-session.ts` | `apps/desktop/src/preview/BrowserSession.ts` |
-| `apps/electron/src/browser/playwright-injected-runtime.ts` | `apps/desktop/src/preview/PlaywrightInjectedRuntime.ts` |
-| `apps/electron/src/browser/guest-preload.ts` | GuestProtocol / PickPreload |
-| `apps/electron/src/browser/browser-webview-security.ts` | `DesktopWindow.ts` |
-| `apps/electron/src/browser/browser-keyboard.ts` | `PreviewKeyboard.ts` |
-| `apps/electron/src/browser/trusted-browser-bridge.ts` | `browserRecording.ts` |
+| `apps/electron/src/browser/desktop-browser-host.ts` | Profile partition identity and permission policy from `BrowserSession.ts` at `9a0a07167f0623c3a7db0ffeff2e3939760309df` |
+| `apps/electron/src/browser/cdp-relay.ts` | `apps/desktop/src/preview/CdpRelay.ts` at `df26ef99` |
+| `apps/backend/src/swarm/browser-automation/headless-browser.ts` | Chrome for Testing version, archive sizes and hashes in `PreviewBrowser.ts` at `df26ef99` |
 
 ## Playwright
 
-playwright-core 1.60.0 is distributed with its LICENSE, NOTICE, and ThirdPartyNotices.txt files under `browser-runtime/playwright-core/`.
+playwright-core 1.63.0 is distributed with its LICENSE, NOTICE, and ThirdPartyNotices.txt files in the backend runtime dependency directory. Chrome for Testing and FFmpeg are installed on demand from their upstream distributions.

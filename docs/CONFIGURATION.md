@@ -44,9 +44,7 @@ Skill API keys can also be configured in the dashboard under **Settings → Skil
 
 ### Browser automation
 
-Forge Desktop provides one local Automatic Browser that can use an embedded browser or an optional Chrome-backed tab. It is not a Skill, and there is no host preference to configure.
-
-Optional Chrome setup and repair live under **Settings → Use Chrome with Forge**. Complete setup for every Chrome profile and `FORGE_DATA_DIR` you intend to use. Browser recording remains embedded-only.
+Forge’s Browser panel and built-in tools share a Playwright engine in each environment. Desktop uses embedded Electron tabs; standalone and remote backends use a pinned headless shell with a live view. See [Browser automation](BROWSER_AUTOMATION.md) for installation, Linux dependencies, and explicit cookie import.
 
 Ordinary web clients have no local browser host. See [Browser automation](BROWSER_AUTOMATION.md) for setup, behavior, persistence, and security boundaries.
 
@@ -385,17 +383,7 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 <data-dir>/
 ├── integrations/bitwarden-cli/            # Versioned Forge-managed Bitwarden CLI
 ├── runtimes/claude/<version>/             # Claude Code downloaded by Settings → About → Agent runtimes
-├── integrations/external-chrome/          # Optional Chrome adapter deployment for this data directory
-│   ├── extension/                         # Stable Chrome Load unpacked folder
-│   │   ├── current.json                   # Verified selected payload
-│   │   └── payloads/                      # Immutable version/hash payload directories
-│   ├── native-host/                       # Deployed native relay executable
-│   ├── native-host-manifests/             # Canonical Forge-owned host manifest
-│   ├── auth/                              # Private local relay authentication
-│   ├── run/                               # Expiring current-user rendezvous
-│   ├── state/                             # Install/ownership/exact-authority recovery state
-│   ├── deployment/                        # Atomic deployment journal/state
-│   └── deploy.lock                        # Serialized deployment lock
+├── runtimes/browser/                     # Verified headless shell and recording encoder cache
 ├── shared/
 │   ├── config/                            # Shared settings and credentials
 │   │   ├── auth/
@@ -443,6 +431,8 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   │   └── profiles/<profileId>.md        # Preserved legacy profile knowledge
 │   └── specialists/                       # Global specialist definitions
 ├── profiles/<profileId>/
+│   ├── browser/profile/                   # Headless project cookies and site storage
+│   ├── browser/imported-sites.json         # Domain-only cookie import audit
 │   ├── memory.md                          # Canonical profile memory
 │   ├── merge-audit.log
 │   ├── unread-state.json
@@ -466,14 +456,14 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │       ├── meta.json
 │       ├── feedback.jsonl
 │       ├── pinned-messages.json
-│       ├── browser.json                    # Logical browser tab and action metadata
+│       ├── browser.json                    # Browser engine tab metadata
 │       ├── plan.json
 │       ├── plan-history.ndjson
 │       ├── plan-usage.ndjson
 │       ├── goal.json
 │       ├── goal-history.ndjson
 │       ├── artifacts/                     # Session non-repo artifacts/exports
-│       │   └── browser/                    # Completed embedded-browser recordings
+│       │   └── browser/                    # Completed browser recordings
 │       ├── cursor-sdk-state/<sessionId>/   # Manager Cursor SDK state root
 │       ├── terminals/<terminalId>/
 │       │   ├── meta.json
@@ -496,29 +486,11 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 └── uploads/                                # Uploaded attachments
 ```
 
-`browser.json` is per session. It stores logical browser tabs, the active/default tab, UI state, bounded action summaries, cleanup acknowledgement, and revision/timestamp metadata; it contains no selected host preference. For Chrome-backed tabs, persistence clears page URL/title and error detail and removes page-identifying URL/title fields from action summaries. Older browser state migrates conservatively rather than treating stale Chrome control hints as current authority.
+`browser.json` stores each session’s logical tabs, active tab, viewport, and revision metadata. Transient screenshots, screencast frames, agent activity, and cookie values are not stored in it.
 
-Successfully stopped recordings live under the session's `artifacts/browser/` directory and are embedded-only. Embedded screenshot previews are transient; a Chrome snapshot can return a bounded PNG to the active operation, but neither path writes a standalone screenshot artifact.
+Successfully stopped recordings live under the session’s `artifacts/browser/` directory for both desktop and headless tabs. Screenshots and live screencast frames remain transient.
 
-Embedded-browser cookies and site storage live in a persistent, profile-scoped Electron partition shared by sessions in that Forge profile; it is not represented in the server data tree above and can outlive session deletion. There is currently no shipped clear-data control. Chrome site identity remains in Chrome's own profile; Forge does not copy Chrome credentials, profile databases, official profile names, bookmarks, history, or top sites.
-
-### Chrome adapter local integration
-
-The `integrations/external-chrome/` tree belongs to exactly one Forge data directory. `extension/` is the stable folder users select with Chrome's **Load unpacked**; compatible updates change the verified `current.json` and payload contents rather than asking users to select another directory. Loading that folder remains per Chrome profile, so repeat setup for every Chrome profile and every `FORGE_DATA_DIR`.
-
-Forge Desktop registers native host `com.forge.external_chrome` for the current user. The canonical manifest remains under the data directory and points to that data directory's deployed native relay. The OS registration targets are:
-
-- macOS: `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.forge.external_chrome.json`
-- Linux: `~/.config/google-chrome/NativeMessagingHosts/com.forge.external_chrome.json`
-- Windows: `HKCU\\Software\\Google\\Chrome\\NativeMessagingHosts\\com.forge.external_chrome` (default value points to the canonical manifest)
-
-These are registration and diagnostic paths, not evidence that headed Chrome or the integration has been qualified on every platform. Do not hand-edit or overwrite them. **Settings → Use Chrome with Forge** can show status, enable setup, reveal the validated extension folder, and offer **Repair** when the coordinator proves that mutation is safe. Chrome has one current-user registration target for this host name, so another active Forge data directory can conflict; quiesce the other owner before qualified repair.
-
-`auth/`, `run/`, and `state/` contain sensitive current-user authentication, rendezvous, ownership, and exact per-tab release-recovery material. Protect them and backups like credentials. Chrome tabs remain open when Forge releases operation authority or performs session lifecycle cleanup.
-
-Compatible connected instances can reload an authenticated payload after Desktop updates. Manually reload the unpacked extension only when **Settings → Use Chrome with Forge → Advanced diagnostics → Recovery** reports `manual-extension-reload`.
-
-The native relay's packaged manifest records target/architecture and signature verification state. See [Browser automation](BROWSER_AUTOMATION.md#optional-chrome-setup) for setup and troubleshooting, and the [Electron guide](../apps/electron/README.md#optional-chrome-adapter-packaging-and-validation) for maintainer release and qualification gates.
+Headless project cookies and site storage stay under that environment’s data directory. Desktop uses persistent Electron project partitions in its own user-data directory. Session deletion does not delete a shared project profile. Cookie import previews site domains and applies only the user’s selections; **Forget site** removes imported site cookies. An explicit one-time send is required to copy selected cookies to another environment.
 
 `shared/config/secrets.json` stores sensitive values as ordinary JSON; Forge does not application-encrypt that file at rest. Protect the data directory and every backup with appropriate operating-system or storage access controls, and handle copied `secrets.json` files as secrets.
 

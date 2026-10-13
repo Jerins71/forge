@@ -114,7 +114,7 @@ export async function createAuthOnlyTestEnvironment(host: string, port: number):
       const deps = { database, subscribeCommitted: eventSink.subscribe, getDescriptor: identity.descriptor };
       const terminalTransport = { issueTicket: unavailable, attach: unavailable, input: async () => unavailable(), resize: async () => unavailable(), closeDevice: async () => {} };
       rpc = createEnvironmentRpcServer({ access, control, shellStream: createShellStream(deps), detailStream: createDetailStream(deps),
-        browserHost: sessionFeatures.browserHost, terminalTransport });
+        terminalTransport });
       return { rpc, terminalTransport };
     },
     async stop() { await rpc?.stop(); access.dispose(); eventSink.close(); if (database.open) database.close(); },

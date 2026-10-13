@@ -91,6 +91,7 @@ export interface EnvironmentClient {
     method: M,
     input: RpcInput<M>,
     observer: StreamObserver<RpcStreamItem<M>>,
+    onSubscribed?: (id: string) => void,
   ): Unsubscribe
   acquireDetail(sessionId: string): {
     store: SelectorStore<DetailState>

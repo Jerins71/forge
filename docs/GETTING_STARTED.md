@@ -121,7 +121,7 @@ You can pin important messages to preserve them through compaction. Hover over a
 
 ### Workspace Rail and File Browser
 
-On desktop, Forge uses a left activity rail for Chat, Browser, Files, Source Control, Terminal, Cron/Schedules, and Artifacts/Dashboard. Chat returns to the current manager/session conversation, including from a selected worker route back to its parent manager thread. Browser opens one automatic local workspace for the current manager, showing either an embedded Forge view or a compact card for a Chrome-backed tab that remains in Chrome. Files opens as a left split pane beside the rail with a resizable file tree and file surface pane for editable text files or previews. Desktop header workspace buttons are hidden behind the rail; mobile keeps the header/drawer workspace actions. Browser, Files, Source Control, Artifacts/Dashboard, and Schedules switch mutually exclusively so panes do not stack or hide behind each other, while Terminal stays independent and persistent.
+On desktop, Forge uses a left activity rail for Chat, Files, Source Control, Terminal, Cron/Schedules, and Artifacts/Dashboard. Chat returns to the current manager/session conversation, including from a selected worker route back to its parent manager thread. Files opens as a left split pane beside the rail with a resizable file tree and file surface pane for editable text files or previews. Desktop header workspace buttons are hidden behind the rail; mobile keeps the header/drawer workspace actions. Files, Source Control, Artifacts/Dashboard, and Schedules switch mutually exclusively so panes do not stack or hide behind each other, while Terminal stays independent and persistent.
 
 Files uses tabs. Single-click a file to open or activate one replaceable italic preview tab; opening another file by single click replaces that preview if it is clean. Double-click to make a tab sticky. A preview also becomes sticky on its first edit, and newly created files open as sticky tabs. Sticky tabs coexist, so you can keep several files open while still using a separate preview tab.
 
@@ -139,13 +139,9 @@ When Source Control has a linked worktree selected, that worktree scopes Files b
 
 ### Browser Automation
 
-Forge Desktop provides one local Automatic Browser for the selected Builder manager. Select **Browser** in the desktop rail: embedded tabs render in Forge with navigation, viewport, transient screenshot, recording, and dock/pop-out controls. Chrome-backed targets stay entirely in Chrome and their transient references do not appear in the Browser workspace. Physical resize and recording are embedded-only. A trusted click, key press, scroll, or touch interrupts active agent control; Forge settles the in-flight command and requires a fresh snapshot before another mutation when the exact lease can safely remain attached-idle. Idle pointer movement is ignored, but a mismatched synthetic pointer move cancels an active sequence. Eligible page navigation is revalidated on the same target rather than silently migrating. **Take Control** is terminal human takeover. See [Browser automation](BROWSER_AUTOMATION.md) for lifecycle and troubleshooting details.
+Each session's browser opens in the **Browser panel** to the right of the chat: select the globe button in the chat header, or let it open by itself when an agent opens a page. Tabs are shared with the agent; the tab it is driving is marked with its current action, and clicking or typing in a page takes it over. Local tabs render natively in Forge Desktop, and tabs on another machine stream live. Each machine installs its browser the first time it is needed.
 
-Forge chooses the target automatically. When the Forge extension is enabled and authenticated, it grants profile-wide access to eligible ordinary web tabs. `browser_status` returns a bounded `eligibleTabs` inventory across ready authenticated profiles; its transient manager/model metadata is not shown in Browser workspace UI or persisted renderer state. Tabless `browser_open(reuseExistingTab: true)` (the default) selects the active or most recently accessed eligible tab without requiring Chrome or the operating system to be focused; passing an inventory `tabId` selects that exact tab. Non-open operations remain sticky, and normal supported navigation stays on the same Chrome-backed target. `reuseExistingTab: false`, or no eligible tab, may create an inactive neutral `about:blank` tab for one authorized initial navigation. An explicit Chrome-backed tab never migrates, and Chrome-internal or other restricted pages remain excluded by the platform capability.
-
-There is no Chrome profile confirmation prompt or picker. Optional Chrome use requires Chrome 125+, Developer Mode, and the pinned unpacked extension. Open **Settings → Use Chrome with Forge**, reveal and load the exact extension folder through `chrome://extensions`, confirm extension ID `fcchfcnadajoejfbiclihglkmbcfhajd`, then return to Settings to enable Chrome. Repeat setup for every Chrome profile and `FORGE_DATA_DIR` you intend to use. Use a dedicated Chrome profile containing only the accounts needed for Forge work.
-
-A connected Forge Desktop host is required. Ordinary web clients do not attempt local browser IPC. See [Browser automation](BROWSER_AUTOMATION.md) for the full behavior, persistence, permissions, repair, and troubleshooting reference.
+Each project has its own browser profile on each machine. Manage it under **Settings → Browser**: **Sign in once…** opens a site in the panel, **Import from Chrome…** brings sign-ins for sites you choose from your own Chrome (nothing is preselected, and sending them to another machine is opt-in), and **Forget** signs the project out of a site. See [Browser automation](BROWSER_AUTOMATION.md) for the engine, persistence, and security reference.
 
 ### Secure Sessions
 
@@ -562,11 +558,11 @@ Go to **Settings → Skills** to configure optional skill-backed agent capabilit
 
 - **Brave Search** — Paste your Brave API key here. Use Brave for exact or navigational lookup, country or freshness controls, and direct URL or page-content extraction. Agents use it when a task needs that kind of search; they do not search the web on every turn.
 - **Exa Search** — Paste your Exa API key here. Use Exa for semantic or conceptual discovery, unfamiliar topics, and multi-source research. Prefer Exa when the question needs a source landscape rather than a known page or exact phrasing.
-- **`agent-browser`** — Use the separately installed Vercel Labs CLI and its browser lifecycle; this is separate from Forge Desktop's Automatic Browser.
+- **`agent-browser`** — Use the separately installed Vercel Labs CLI and its browser lifecycle; this is separate from Forge's built-in browser.
 - **Custom skills** — Reusable custom skills can be scaffolded and validated with the built-in `create-skill` helper, which can create global skills, profile/project skills, or repository `.forge/skills` skills as needed.
 - **Skill sharing** — Share a user-created global or project skill to generate a temporary bearer link from the skill share service. Recipients can open the link or a `forge://skill-import` deep link, but Forge always shows a preview first and never auto-installs. Conflicts default to reject; replacing an existing directory or installing an override requires explicit confirmation. Built-in and repository skills are not shareable in v1.
 
-The Automatic Browser is not configured as a Skill and remains local to Forge Desktop. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**.
+The Browser panel is built in, not a Skill; its profiles and sign-ins live in **Settings → Browser**.
 
 ### System Prompt Preview
 

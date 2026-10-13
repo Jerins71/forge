@@ -208,8 +208,6 @@ function testWorkspace(file) {
     ['apps/backend/', 'apps/backend'],
     ['apps/ui/', 'apps/ui'],
     ['apps/electron/', 'apps/electron'],
-    ['apps/chrome-extension/', 'apps/chrome-extension'],
-    ['apps/native-messaging-host/', 'apps/native-messaging-host'],
     ['apps/stream-deck/', 'apps/stream-deck'],
     ['apps/skill-share-worker/', 'apps/skill-share-worker'],
     ['packages/protocol/', 'packages/protocol'],
@@ -226,8 +224,6 @@ export function classify(file) {
   if (file.startsWith('apps/backend/')) areas.add('backend');
   else if (file.startsWith('apps/ui/')) areas.add('ui');
   else if (file.startsWith('apps/electron/')) areas.add('electron');
-  else if (file.startsWith('apps/chrome-extension/')) areas.add('chrome-extension');
-  else if (file.startsWith('apps/native-messaging-host/')) areas.add('native-messaging-host');
   else if (file.startsWith('apps/stream-deck/')) areas.add('stream-deck');
   else if (file.startsWith('apps/skill-share-worker/')) areas.add('skill-share-worker');
   else if (file.startsWith('packages/protocol/')) {
@@ -263,8 +259,6 @@ function addWorkspaceChecks(checks, areas, mode) {
       if (areas.has('backend')) lintPaths.push('apps/backend');
       if (areas.has('ui')) lintPaths.push('apps/ui');
       if (areas.has('electron')) lintPaths.push('apps/electron');
-      if (areas.has('chrome-extension')) lintPaths.push('apps/chrome-extension');
-      if (areas.has('native-messaging-host')) lintPaths.push('apps/native-messaging-host');
       if (areas.has('stream-deck')) lintPaths.push('apps/stream-deck');
       if (areas.has('skill-share-worker')) lintPaths.push('apps/skill-share-worker');
       if (areas.has('protocol')) lintPaths.push('packages/protocol');
@@ -282,8 +276,6 @@ function addWorkspaceChecks(checks, areas, mode) {
     if (wantsAll || areas.has('cli')) add({ id: 'typecheck:cli', label: 'CLI typecheck', command: [pnpm, ['--filter', '@forge/cli', 'typecheck']] });
     if (wantsAll || areas.has('client-runtime')) add({ id: 'typecheck:client-runtime', label: 'Client runtime typecheck', command: [pnpm, ['--filter', '@forge/client-runtime', 'typecheck']] });
     if (wantsAll || areas.has('electron')) add({ id: 'typecheck:electron', label: 'Electron typecheck', command: [pnpm, ['--filter', '@forge/electron', 'typecheck']] });
-    if (wantsAll || areas.has('chrome-extension')) add({ id: 'typecheck:chrome-extension', label: 'Chrome extension typecheck', command: [pnpm, ['--filter', '@forge/chrome-extension', 'typecheck']] });
-    if (wantsAll || areas.has('native-messaging-host')) add({ id: 'typecheck:native-messaging-host', label: 'Native messaging host typecheck', command: [pnpm, ['--filter', '@forge/external-chrome-native-host', 'typecheck']] });
     if (wantsAll || areas.has('stream-deck')) add({ id: 'typecheck:stream-deck', label: 'Stream Deck typecheck', command: [pnpm, ['--filter', '@forge/stream-deck', 'typecheck']] });
     if (wantsAll || areas.has('skill-share-worker')) add({ id: 'typecheck:skill-share-worker', label: 'Skill-share worker typecheck', command: [pnpm, ['--filter', '@forge/skill-share-worker', 'typecheck']] });
   }
@@ -294,8 +286,6 @@ function addWorkspaceChecks(checks, areas, mode) {
     if (wantsAll || areas.has('cli')) add({ id: 'test:cli', label: 'CLI tests', command: [pnpm, ['--filter', '@forge/cli', 'test']] });
     if (wantsAll || areas.has('client-runtime')) add({ id: 'test:client-runtime', label: 'Client runtime test', command: [pnpm, ['--filter', '@forge/client-runtime', 'test']] });
     if (wantsAll || areas.has('electron')) add({ id: 'test:electron', label: 'Electron tests', command: [pnpm, ['--filter', '@forge/electron', 'test']] });
-    if (wantsAll || areas.has('chrome-extension')) add({ id: 'test:chrome-extension', label: 'Chrome extension tests', command: [pnpm, ['--filter', '@forge/chrome-extension', 'test']] });
-    if (wantsAll || areas.has('native-messaging-host')) add({ id: 'test:native-messaging-host', label: 'Native messaging host tests', command: [pnpm, ['--filter', '@forge/external-chrome-native-host', 'test']] });
     if (wantsAll || areas.has('stream-deck')) add({ id: 'test:stream-deck', label: 'Stream Deck tests', command: [pnpm, ['--filter', '@forge/stream-deck', 'test']] });
     if (wantsAll || areas.has('skill-share-worker')) add({ id: 'test:skill-share-worker', label: 'Skill-share worker tests', command: [pnpm, ['--filter', '@forge/skill-share-worker', 'test']] });
   }

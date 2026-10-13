@@ -1,42 +1,31 @@
-Forge Desktop presents one **Automatic Browser** experience for local Builder managers. The Automatic Browser is not a Skill.
+Each session has a **Browser panel** that opens to the right of the chat. Agents and you share the same tabs: when an agent opens a page, the panel opens by itself so you can watch it work.
 
-On Windows, Automatic Browser and External Chrome remain available as a beta feature with known issues. Setup, repair, and the hash-pinned native-host trust model are unchanged.
+## Opening and sizing the panel
 
-Forge chooses the available local target automatically:
+- Click the globe button in the chat header to open or close the panel. A dot on the button means an agent is driving a tab right now.
+- Drag the panel's left edge to resize it (arrow keys work when the edge is focused; double-click resets it). The width is remembered for this window, and whether the panel is open is remembered for each session.
+- On narrow windows the panel floats over the chat instead of squeezing it. Press Esc to close it.
 
-- A Chrome-backed target stays entirely in Chrome. Its transient reference is not shown as a tab or card in the Browser workspace.
-- An embedded tab appears inside Forge and includes navigation, viewport, screenshot, recording, and dock/pop-out controls.
+## Tabs and navigation
 
-When the Forge extension is enabled and authenticated, Forge can access eligible ordinary web tabs across that Chrome profile. `browser_status` provides a bounded **eligibleTabs** inventory across ready authenticated profiles; its bounded URL/title/profile/window/activity/focus/last-access details may transiently reach the manager/model for selection, but are not shown in Browser workspace UI or copied into canonical renderer state and are redacted from persistence. For a tabless `browser_open` (reuse enabled by default), Forge selects the active or most recently accessed eligible tab without requiring Chrome or the operating system to be focused. Pass an inventory `tabId` to select that exact tab. With `reuseExistingTab: false`, or when no eligible tab exists, Forge may create an inactive neutral `about:blank` tab for one authorized initial navigation. After an open selects a logical tab, non-open operations remain sticky; explicit Chrome-backed tabs do not migrate and unsupported operations fail on that tab.
+The tab strip lists the session's pages. The tab an agent is driving carries a bot marker, and a strip under the address bar says what the agent is doing, for example *Clicking “Sign in”*. Use back, forward, reload and the address bar as in any browser; type a site name or a search. The arrow at the end of the address bar opens the page in your own browser.
 
-Normal supported navigation stays on the same Chrome-backed tab. Forge may briefly retain internal control between nearby actions, but you do not attach or release anything yourself. A trusted click, key press, touch, or wheel gesture interrupts agent control; Forge settles the in-flight command and requires a fresh snapshot before another potentially changing action. Ordinary idle pointer movement does not interrupt. **Take Control** releases the exact Chrome authority for terminal human takeover. DevTools or another debugger, a restricted or unproven target, a lost tab, transport uncertainty, timeout, update, turn end, or shutdown can also interrupt and reconcile it. Forge never silently migrates an explicit Chrome target or replays an action that may have changed the page; retry only after inspecting the current tab.
+## Stepping in
 
-There is no Chrome profile confirmation prompt or picker, host picker, tab attachment flow, or lease-management UI. Chrome-internal and other restricted pages remain excluded by the platform capability.
+Clicking, scrolling or typing in a tab takes it from the agent: the agent's current action stops, and it carries on from what it sees next. Opening or watching the panel never interrupts an agent.
 
-## Automatic floating previews
+On this computer the page is the real browser tab, placed inside the panel. For a session on another machine the page is streamed live; your mouse, keyboard and paste are sent to that machine. Press **Shift+Esc** to move keyboard focus back to Forge.
 
-When the agent starts using an exact embedded or Chrome-backed tab, Forge automatically shows a small read-only thumbnail over Chat. There is no Preview button and no separate Preview window. Up to four thumbnails overlap in a compact frameless stack that you can drag as one cluster. Opening the Browser workspace temporarily hides the cluster without dropping its subscription.
+## Machines without a browser
 
-A managed preview joins from main-process agent-control state, not from the Chrome inventory or a renderer button. A Chrome preview appears only after a successful exact-target snapshot supplies real pixels; control state alone never shows an empty placeholder. It stays visible between nearby actions and clears at turn end, terminal **Take Control**, tab removal, session cleanup, or a selected workspace/host change.
+A machine installs its browser the first time an agent needs one. If it has none yet, the panel says so and offers **Set up**; if setup fails, **Try again** shows what went wrong.
 
-An embedded thumbnail normally updates from bounded native-viewport capture. Forge does not move, focus, unhide, reparent, resize, or keep the source awake to manufacture it, and capture waits rather than competing with active automation or recording.
+## Sign-ins and profiles
 
-A Chrome thumbnail is not live and does not poll. It mirrors only the latest successful agent snapshot of that exact tab and disappears when the retained image is discarded after five minutes. Showing the thumbnail does not attach the debugger, extend control, or request another snapshot.
+Each project has its own browser profile on each machine, so sign-ins stay with that project. Manage them in **Settings → Browser**:
 
-The floating stack is read-only and accepts no page clicks, typing, scrolling, refresh, recording, or Take Control. Screen lock and system suspend discard pixels and block new frames; unlock resumes automatic capture. Preview images stay in bounded local memory and are never saved to browser state, conversation history, or artifacts.
+- **Sign in once** opens a site in the panel; sign in there and agents in that project stay signed in.
+- **Import from Chrome…** reads the sites Chrome is signed in to and lets you choose which ones to bring. Nothing is selected for you, and passwords and the rest of your Chrome profile are never copied. You can also send the chosen sites to another machine; that is off unless you turn it on.
+- **Forget** removes a site's sign-in from the project's browser.
 
-## Chrome setup
-
-Open **Settings → Use Chrome with Forge** to set up each Chrome profile and Forge data directory, or to repair the integration. After setup, Forge creates or uses browser tabs automatically. Chrome-backed tabs do not show unsupported recording, viewport, screenshot-export, or dock/pop-out controls.
-
-## External Chrome snapshot size limits
-
-External Chrome adapts PNG capture to the page's device pixel ratio and viewport, without upscaling smaller pages. It will not claim success below its useful minimum capture size; if the image still cannot fit at that floor, the snapshot fails with a typed `response-too-large` result. The PNG is not silently dropped. When the complete successful snapshot response would exceed its bounded relay envelope, Forge deterministically omits optional diagnostics, accessibility nodes, visible-text characters, and interactive elements as needed to fit. The response reports positive omission counts in `compaction.omitted`; `compaction` is absent when nothing was omitted.
-
-If the screenshot alone cannot fit, Forge returns the typed, non-retryable `response-too-large` failure. It does not drop the image or send an oversized response; callers should rely on the error code and retryability rather than optional diagnostic details.
-
-## Privacy and persistence
-
-Chrome page URLs/titles, tab error detail, and page-identifying action fields are redacted before persistence. Embedded-browser cookies and site storage use Forge's persistent local browser partition. Successfully stopped embedded recordings persist under the session's `artifacts/browser/` directory.
-
-Canonical logical browser state is persisted separately from conversation history and reaches the UI through live updates and selected-session bootstrap snapshots; transient `eligibleTabs` inventory is not part of that state, and conversation replay does not reconstruct it. Clearing conversation history does not clear browser state. Archive remains fail-closed when a browser release cannot be acknowledged; deletion is terminal and treats browser revocation as best-effort, clearing Desktop/External Chrome session state and checkpoints so stale lifecycle state cannot block deletion. If release reconciliation is still pending, Forge blocks new Chrome control rather than guessing another tab.
+Browser pages, frames and imported cookies are not saved into conversation history or artifacts.
