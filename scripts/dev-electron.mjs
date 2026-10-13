@@ -139,7 +139,6 @@ export function createElectronDevelopmentSetupCommands({
     pnpmCommand('Protocol build', ['--filter', '@forge/protocol', 'build']),
     nodeScript('Electron runtime verification', ['apps', 'electron', 'scripts', 'verify-electron-runtime.mjs']),
     nodeScript('Electron native preparation', ['apps', 'electron', 'scripts', 'prepare-dev-native.mjs']),
-    nodeScript('External Chrome development preparation', ['apps', 'electron', 'scripts', 'prepare-external-chrome-dev.mjs']),
     nodeScript('Electron main-process build', ['apps', 'electron', 'esbuild.config.mjs']),
   ]
 }

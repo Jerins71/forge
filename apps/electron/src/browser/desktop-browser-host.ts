@@ -22,7 +22,8 @@ export class DesktopBrowserHost {
         void this.create(command, send).catch(() => send({ type: 'forge:browser:error', requestId: command.requestId, message: 'Desktop browser tab could not be created.' }))
       } else if (command.type === 'forge:browser:cdp' && typeof command.message === 'string' && command.message.length <= 16 * 1024 * 1024) this.tabs.get(command.tabId)?.relay.receive(command.message)
       else if (command.type === 'forge:browser:close') this.close(command.tabId)
-      else if (command.type === 'forge:browser:resize' && validViewport(command.viewport)) this.tabs.get(command.tabId)?.view.setBounds({ x: 0, y: 0, ...command.viewport })
+      // Playwright emulates viewport size through CDP. Presentation bounds belong
+      // only to the panel; an agent resize must never move the native view.
     }
     child.on('message', receive)
     const dispose = () => { child.off('message', receive); if (this.child === child) { this.hide(); for (const id of this.tabs.keys()) this.close(id); this.child = undefined } }
@@ -52,6 +53,12 @@ export class DesktopBrowserHost {
     wc.setWindowOpenHandler(() => ({ action: 'deny' }))
     wc.on('will-navigate', (event, target) => { if (!/^https?:\/\//i.test(target) && target !== 'about:blank') event.preventDefault() })
     await wc.loadURL('about:blank'); send({ type: 'forge:browser:created', requestId: command.requestId, tabId: command.tabId })
+  }
+  trackWindow(window: BrowserWindow) {
+    const hide = () => { if (this.presented?.window === window) this.hide() }
+    window.webContents.on('did-start-navigation', (_event, _url, _inPlace, isMainFrame) => { if (isMainFrame) hide() })
+    window.webContents.on('render-process-gone', hide)
+    window.once('closed', hide)
   }
   present(window: BrowserWindow, input: Parameters<BrowserEngineDesktopBridge['present']>[0]) {
     const tab = this.tabs.get(input.tabId); if (!tab) throw new Error('Desktop browser tab is unavailable.')

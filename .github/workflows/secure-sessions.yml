@@ -57,10 +57,8 @@ jobs:
       - name: Validate Windows Electron development preflight
         run: |
           pnpm --filter @forge/protocol build
-          pnpm --dir apps/electron exec vitest run scripts/__tests__/external-chrome-dev-staging.test.mjs
           pnpm --dir apps/electron verify:runtime
           pnpm --dir apps/electron prepare:dev-native
-          pnpm --dir apps/electron prepare:dev-external-chrome
           pnpm --dir apps/electron build
       - name: Build Windows-compatible packages
         run: pnpm build

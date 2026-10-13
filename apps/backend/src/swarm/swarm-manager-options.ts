@@ -1,5 +1,4 @@
 import type { ObservabilityFacade } from "../observability/observability-types.js";
-import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
 import type { CodexAppServerService } from "./codex-app-server/codex-app-server-service.js";
 import type { CodexAppServerServiceOptions } from "./codex-app-server/types.js";
 import type { CompactionRuntimeSettingsProvider } from "./compaction-runtime-settings-provider.js";
@@ -20,5 +19,4 @@ export interface SwarmManagerOptions {
   terminateExternalThreadSidecarTurn?: ExternalThreadTerminateCleanupCallback;
   compactionRuntimeSettingsProvider?: CompactionRuntimeSettingsProvider;
   browserEngine?: import("./browser-automation/browser-engine.js").BrowserEngine;
-  browserAutomationService?: BrowserAutomationService;
 }

@@ -5,7 +5,6 @@ import type {
 } from '@forge/protocol/environment-v2'
 export type DetailTransientEvent = import('@forge/protocol/environment-v2').DetailFeatureEvent
 export interface DetailState {
-  browser: import('@forge/protocol').BrowserSessionSnapshot | null
   projection: Static<typeof DetailSnapshotSchema> | null
   cursor: StreamCursor | null
   freshness: 'cached' | 'synchronizing' | 'live' | 'unavailable'

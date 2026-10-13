@@ -19,7 +19,6 @@ interface Entry {
 }
 const empty = (): DetailState => ({
   projection: null,
-  browser: null,
   cursor: null,
   freshness: 'unavailable',
   transient: new Map(),
@@ -292,19 +291,9 @@ export class DetailCache {
         }, error: () => {},
       },
     )
-    const browser = this.supervisor.subscribe('browser.subscribe', () => ({ sessionId }), {
-      next: ({ snapshot }) => {
-        if (!entry.refs) return
-        const state = entry.store.getSnapshot()
-        if (state.browser && state.browser.revision > snapshot.revision) return
-        entry.store.set({ ...state, browser: snapshot })
-        this.measure(entry)
-      }, error: () => {},
-    })
     entry.release = () => {
       durable()
       features()
-      browser()
       pending = []
       transientBatch.clear()
     }
@@ -312,7 +301,7 @@ export class DetailCache {
   private measure(entry: Entry): void {
     const state = entry.store.getSnapshot()
     entry.bytes = new TextEncoder().encode(
-      JSON.stringify([state.projection, state.browser, [...state.transient]]),
+      JSON.stringify([state.projection, [...state.transient]]),
     ).byteLength
     this.evict()
   }

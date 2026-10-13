@@ -21,6 +21,7 @@ const releases = {
 export const LINUX_BROWSER_PACKAGES = 'libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2'
 export interface BrowserSetupState { browserEngineState: 'ready' | 'missing' | 'installing' | 'failed'; browserEngineMessage?: string }
 function platformKey(): keyof typeof releases {
+  if (!['x64', 'arm64', ...(process.platform === 'win32' ? ['ia32'] : [])].includes(process.arch)) throw new Error(`Chrome headless shell does not support ${process.platform}-${process.arch}.`)
   const key = process.platform === 'darwin' ? `mac-${process.arch === 'arm64' ? 'arm64' : 'x64'}` : process.platform === 'win32' ? process.arch === 'ia32' ? 'win32' : 'win64' : process.platform === 'linux' ? process.arch === 'arm64' ? 'linux-arm64' : 'linux64' : undefined
   if (!key || !(key in releases)) throw new Error(`Chrome headless shell does not support ${process.platform}-${process.arch}.`)
   return key as keyof typeof releases
@@ -69,6 +70,8 @@ export class HeadlessBrowser {
         if (!response.ok || !response.body) throw new Error(`Browser download failed (${response.status}). Retry setup.`)
         const part = join(staging, 'download.zip'); let bytes = 0
         async function* bounded() { for await (const chunk of Readable.fromWeb(response.body! as Parameters<typeof Readable.fromWeb>[0])) { bytes += chunk.length; if (bytes > releases[platform][0]) throw new Error('Browser archive exceeds its pinned length.'); yield chunk } }
+        // The archive streams to disk with a size cap; the whole-file helper would buffer it.
+        // eslint-disable-next-line no-restricted-syntax
         await pipeline(bounded(), createWriteStream(part, { mode: 0o600 })); await rename(part, archive)
       }
       const [length, sha256] = releases[platform]; const hash = createHash('sha256'); let bytes = 0
@@ -79,6 +82,8 @@ export class HeadlessBrowser {
       if (process.platform !== 'win32') await chmod(join(staging, folder, 'chrome-headless-shell'), 0o755)
       await mkdir(join(root, HEADLESS_CHROME_VERSION), { recursive: true, mode: 0o700 })
       // Concurrent environments may share only the binary cache, never profiles.
+      // Atomically install the entire verified directory, including its executable and marker.
+      // eslint-disable-next-line no-restricted-syntax
       try { await rename(staging, target) } catch (error) { if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; if (!this.cachedExecutable()) { await rm(target, { recursive: true, force: true }); await rename(staging, target) } }
       return executable
     } finally { await rm(staging, { recursive: true, force: true }) }

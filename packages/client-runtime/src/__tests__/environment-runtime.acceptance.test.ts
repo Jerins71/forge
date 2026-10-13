@@ -458,7 +458,7 @@ describe('environment runtime acceptance', () => {
       () =>
         [...s.subscriptions.values()].filter(
           (x) => x.method !== 'shell.subscribe',
-        ).length === 3,
+        ).length === 2,
     )
     const oldDurable = [...s.subscriptions].find(
       ([, x]) => x.method === 'session.subscribe',
@@ -479,11 +479,6 @@ describe('environment runtime acceptance', () => {
           (x) => x.method === 'session.subscribe',
         ),
     )
-    expect(
-      [...s.subscriptions.values()].filter(
-        (x) => x.method === 'browser.subscribe',
-      ),
-    ).toHaveLength(1)
     a.release()
     expect(
       [...s.subscriptions.values()].filter(
