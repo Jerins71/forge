@@ -441,6 +441,19 @@ export function useSessionActions({
     })()
   }, [clientRef, setState])
 
+  const handleRegenerateSessionTitle = useCallback(async (agentId: string) => {
+    const client = clientRef.current
+    if (!client) return
+    try {
+      await client.regenerateSessionTitle(agentId)
+    } catch (error) {
+      setState((prev) => ({
+        ...prev,
+        lastError: `Failed to regenerate title: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      }))
+    }
+  }, [clientRef, setState])
+
   const handlePinSession = useCallback((agentId: string, pinned: boolean) => {
     const client = clientRef.current
     if (!client) return
@@ -779,6 +792,7 @@ export function useSessionActions({
     handleRestoreSession,
     handleRestoreProfile,
     handleRenameSession,
+    handleRegenerateSessionTitle,
     handlePinSession,
     handleRenameProfile,
     handleForkSession,

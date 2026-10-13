@@ -48,20 +48,23 @@ export function RemoteSessionMenu({ environmentId, sessionId, children }: {
   const run = useCallback((operation: (client: ReturnType<NonNullable<ReturnType<typeof originRegistry.getOrigin>>['getClient']>) => Promise<unknown> | void) => {
     setError(null)
     const origin = originRegistry.getOrigin(environmentId)
-    if (!origin) { setError(`${label} is not connected.`); return }
-    void Promise.resolve().then(() => operation(origin.getClient())).then(() => setRenaming(false)).catch(e => setError(
+    if (!origin) { setError(`${label} is not connected.`); return Promise.resolve() }
+    return Promise.resolve().then(() => operation(origin.getClient())).then(() => setRenaming(false)).catch(e => setError(
       // The machine decides what this device may do; say so instead of repeating its protocol wording.
       (e as { code?: unknown })?.code === 'FORBIDDEN'
         ? `This device is not allowed to change sessions on ${label}. Pair it again with permission to operate sessions.`
         : e instanceof Error ? e.message : 'Session update failed'))
   }, [environmentId, label])
+  // An older machine cannot name a session again.
+  const canRegenerateTitle = Boolean(originRegistry.getOrigin(environmentId)?.getClient().canRegenerateSessionTitles())
   const actions = useMemo<SessionContextMenuActions>(() => ({
     onMarkUnread: () => run(client => client.markUnread(sessionId)),
     onPinSession: (_agentId, pinned) => run(client => client.pinSession(sessionId, pinned)),
     onRename: () => { setError(null); setRenaming(true) },
+    onRegenerateTitle: canRegenerateTitle ? () => run(client => client.regenerateSessionTitle(sessionId)) : undefined,
     onArchive: () => run(client => client.archiveSession(sessionId)),
     onDelete: () => { setError(null); setDeleting(true) },
-  }), [run, sessionId])
+  }), [canRegenerateTitle, run, sessionId])
 
   if (!row) return <>{children}</>
   return (

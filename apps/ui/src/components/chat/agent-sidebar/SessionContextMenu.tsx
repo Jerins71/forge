@@ -15,6 +15,7 @@ import {
   RotateCcw,
   Settings,
   Share2,
+  Sparkles,
   Terminal,
   Trash2,
 } from 'lucide-react'
@@ -30,6 +31,8 @@ export interface SessionContextMenuActions {
   onArchive?: () => void
   archiveDisabledReason?: string
   onRename?: () => void
+  /** Names the session again from its messages; resolves when done, reporting its own errors. */
+  onRegenerateTitle?: () => Promise<void>
   onFork?: () => void
   /** Why this session cannot be forked, read when the menu opens; Fork stays visible, disabled, with this tooltip. */
   getForkDisabledReason?: () => string | undefined
@@ -61,6 +64,7 @@ export function SessionContextMenu({
   const running = isSessionRunning(sessionAgent)
   // A provider's declaration can change without the row re-rendering, so it is read on open.
   const [forkDisabledReason, setForkDisabledReason] = useState<string | undefined>(undefined)
+  const [regeneratingTitle, setRegeneratingTitle] = useState(false)
   const isProjectAgent = Boolean(sessionAgent.projectAgent)
   const isRepoSourcedAgent = sessionAgent.projectAgent?.sourceKind === 'repo' || sessionAgent.projectAgent?.source?.type === 'repo'
   const isPinned = Boolean(sessionAgent.pinnedAt)
@@ -72,6 +76,7 @@ export function SessionContextMenu({
     onArchive,
     archiveDisabledReason,
     onRename,
+    onRegenerateTitle,
     onFork,
     getForkDisabledReason,
     onMarkUnread,
@@ -92,6 +97,7 @@ export function SessionContextMenu({
   // Pre-compute whether each context-menu group has visible items so
   // separators are only rendered between non-empty groups.
   const hasGroup2 = Boolean(onRename)
+    || Boolean(onRegenerateTitle)
     || (Boolean(onFork) && sessionAgent.sessionPurpose !== 'agent_creator')
     || (running && Boolean(onStop))
     || (!running && Boolean(onResume))
@@ -155,6 +161,18 @@ export function SessionContextMenu({
           <ContextMenuItem onClick={() => onRename()}>
             <Edit3 className="mr-2 size-3.5" />
             Rename
+          </ContextMenuItem>
+        ) : null}
+        {onRegenerateTitle ? (
+          <ContextMenuItem
+            disabled={regeneratingTitle}
+            onClick={() => {
+              setRegeneratingTitle(true)
+              void onRegenerateTitle().finally(() => setRegeneratingTitle(false))
+            }}
+          >
+            <Sparkles className="mr-2 size-3.5" />
+            {regeneratingTitle ? 'Regenerating title…' : 'Regenerate title'}
           </ContextMenuItem>
         ) : null}
         {onFork && sessionAgent.sessionPurpose !== 'agent_creator' ? (

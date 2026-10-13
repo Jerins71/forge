@@ -59,6 +59,8 @@ export interface AgentSidebarProps {
   onArchiveSession?: (agentId: string) => void
   onArchiveProfile?: (profileId: string) => void
   onRenameSession?: (agentId: string, label: string) => void
+  /** Absent when the environment cannot regenerate titles. */
+  onRegenerateSessionTitle?: (agentId: string) => Promise<void>
   onPinSession?: (agentId: string, pinned: boolean) => void
   onRenameProfile?: (profileId: string, displayName: string) => void
   onForkSession?: (sourceAgentId: string, name?: string) => void
@@ -121,6 +123,7 @@ export interface SessionContextMenuActionSource {
   onDeleteSession?: (agentId: string) => void
   onArchiveSession?: (agentId: string) => void
   onRequestRenameSession?: (agentId: string) => void
+  onRegenerateSessionTitle?: (agentId: string) => Promise<void>
   onForkSession?: (sourceAgentId: string) => void
   onMarkUnread?: (agentId: string) => void
   onPinSession?: (agentId: string, pinned: boolean) => void
@@ -156,6 +159,7 @@ export interface SessionRowItemProps {
   onArchive?: () => void
   archiveDisabledReason?: string
   onRename?: () => void
+  onRegenerateTitle?: () => Promise<void>
   onFork?: () => void
   getForkDisabledReason?: () => string | undefined
   onMarkUnread?: () => void
@@ -208,6 +212,7 @@ export interface ProfileGroupProps {
   onArchiveSession?: (agentId: string) => void
   onArchiveProfile?: (profileId: string) => void
   onRequestRenameSession?: (agentId: string) => void
+  onRegenerateSessionTitle?: (agentId: string) => Promise<void>
   onRequestRenameProfile?: (profileId: string) => void
   onForkSession?: (sourceAgentId: string) => void
   forkDisabledReasonFor?: (agentId: string) => string | undefined

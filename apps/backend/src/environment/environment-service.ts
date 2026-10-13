@@ -18,6 +18,7 @@ import type { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import type { TerminalService } from "../terminal/terminal-service.js";
 import type { SessionFeaturePublisher } from "../ws/session-feature-publisher.js";
 import { createEnvironmentRpcServer } from "../ws/rpc/rpc-server.js";
+import type { RpcDependencies } from "../ws/rpc/rpc-handlers.js";
 import { createTerminalRpcTransport } from "../terminal/terminal-rpc-transport.js";
 import { createEnvironmentArtifactRoutes } from "../ws/http/routes/environment-artifact-routes.js";
 import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOptions } from "./identity.js";
@@ -53,6 +54,7 @@ export interface EnvironmentService {
   composeTransport(
     sessionFeatures: SessionFeaturePublisher,
     terminalService: TerminalService | null,
+    sessionTitles?: RpcDependencies["sessionTitles"],
   ): {
     rpc: ReturnType<typeof createEnvironmentRpcServer>;
     terminalTransport: ReturnType<typeof createTerminalRpcTransport>;
@@ -200,7 +202,7 @@ export async function createEnvironmentService(options: {
         await swarmManager.hydrateArchivedLastUsed();
         await source.reconcileBeforeReady();
       },
-      composeTransport(sessionFeatures: SessionFeaturePublisher, terminalService: TerminalService | null) {
+      composeTransport(sessionFeatures: SessionFeaturePublisher, terminalService: TerminalService | null, sessionTitles?: RpcDependencies["sessionTitles"]) {
         if (rpc) throw new Error("Environment transport already composed");
         const dependencies: StreamDependencies = {
           database,
@@ -236,6 +238,7 @@ export async function createEnvironmentService(options: {
           lifecycle: createSessionLifecycleRpc({ swarmManager, control: owner.controlService }),
           sessionState: createSessionStateRpc({ swarmManager, control: owner.controlService, unreadTracker }),
           detailFeatures: createDetailFeatureRpc({ swarmManager, control: owner.controlService }),
+          sessionTitles,
           featureStream: { subscribe: (principal, input, signal) => sessionFeatures.detailFeatures(principal, input, signal) },
           shellStream,
           detailStream,

@@ -365,7 +365,9 @@ async function request(method, params = {}) {
       // Only [fixture:title] messages get a title, so other specs keep their first-prompt titles.
       // The delay lets the placeholder be seen first; the reply is quoted and punctuated the way a
       // real model often answers, so Forge's cleanup is exercised.
-      const named = text.includes('[fixture:title]');
+      // A regenerated title reads the thread's latest messages; [fixture:retitle] there names it again.
+      const retitled = text.includes('[fixture:retitle]');
+      const named = retitled || text.includes('[fixture:title]');
       setTimeout(() => {
         notify('turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
         if (!named) {
@@ -373,7 +375,7 @@ async function request(method, params = {}) {
           complete(turn, 'failed');
           return;
         }
-        notify('item/completed', { ...context(turn), item: { id: `${turn.id}-assistant`, type: 'agentMessage', text: '"Plan the fixture launch."', phase: 'final_answer' } });
+        notify('item/completed', { ...context(turn), item: { id: `${turn.id}-assistant`, type: 'agentMessage', text: retitled ? '"Ship the fixture rollout."' : '"Plan the fixture launch."', phase: 'final_answer' } });
         complete(turn);
       }, named ? 1500 : 15);
       return { turn: { id: turn.id, status: 'inProgress', items: [] } };

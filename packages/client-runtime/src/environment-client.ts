@@ -262,6 +262,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
   ): Promise<RpcOutput<M>> {
     if (method === 'worker.delete' && !this.descriptor()?.capabilities.workerDelete) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to delete workers')
     if (sessionLifecycleMethods.has(method) && !this.descriptor()?.capabilities.sessionLifecycle) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to control session lifecycle')
+    if (method === 'session.regenerateTitle' && !this.descriptor()?.capabilities.sessionTitles) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to regenerate titles')
     if (sessionStateMethods.has(method) && !this.descriptor()?.capabilities.sessionState) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use session state controls')
     if (requiresProjectPolicy(method) && !this.descriptor()?.capabilities.projectPolicy) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', 'Update this environment to use project policy controls')
     if (requiresContextTransfers(method, input) && !this.descriptor()?.capabilities.contextTransfers) throw new EnvironmentRuntimeError('PROTOCOL_MISMATCH', CONTEXT_TRANSFERS_UNAVAILABLE)

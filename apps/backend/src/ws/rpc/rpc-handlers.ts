@@ -12,6 +12,7 @@ export interface RpcDependencies {
   detailFeatures?: ReturnType<typeof import("./detail-feature-rpc.js").createDetailFeatureRpc>;
   featureStream?: { subscribe(principal: Principal, input: RpcInput<"session.features.subscribe">, signal: AbortSignal): AsyncIterable<import("@forge/protocol/environment-v2").DetailFeatureStreamItem> };
   projectAgents?: Pick<ProjectAgentRpc, "execute">;
+  sessionTitles?: Pick<import("../../swarm/session-titles.js").SessionTitleNamer, "regenerate">;
   access: EnvironmentAccessPort;
   control: ControlService;
   shellStream: Pick<EnvironmentStreamPort, "shell" | "shellPage"> & { descriptor(): EnvironmentDescriptor };
@@ -44,6 +45,9 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
     case "session.history": return deps.detailStream.history(principal, input as RpcInput<"session.history">);
     case "session.workers": return deps.detailStream.workers(principal, input as RpcInput<"session.workers">);
     case "session.content": return deps.detailStream.content(principal, input as RpcInput<"session.content">);
+    case "session.regenerateTitle":
+      if (!deps.sessionTitles) throw new StreamFault("UNAVAILABLE", "Session titles are unavailable");
+      return deps.sessionTitles.regenerate((input as RpcInput<"session.regenerateTitle">).sessionId).then(title => ({ title }));
     case "session.lineage.get":
       if(!deps.control.readLineage) throw new StreamFault("UNAVAILABLE","Lineage read service is unavailable");
       return deps.control.readLineage(principal,input as RpcInput<"session.lineage.get">);

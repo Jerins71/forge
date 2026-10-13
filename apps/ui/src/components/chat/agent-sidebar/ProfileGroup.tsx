@@ -71,6 +71,7 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   onArchiveSession,
   onArchiveProfile,
   onRequestRenameSession,
+  onRegenerateSessionTitle,
   onRequestRenameProfile,
   onForkSession,
   workerContinuation,
@@ -110,12 +111,12 @@ export const ProfileGroup = React.memo(function ProfileGroup({
   const [archivingAll, setArchivingAll] = useState(false)
   const remoteSessions = useRemoteSessions(environmentNavigation ? logicalGroup?.members : undefined, highlightQuery)
   const actionSource = React.useMemo<SessionContextMenuActionSource>(() => ({
-    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
+    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onRegenerateSessionTitle, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
     onToggleHideCliSessions, workerContinuation, forkDisabledReasonFor,
   }), [
-    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onForkSession,
+    onStopSession, onResumeSession, onDeleteSession, onArchiveSession, onRequestRenameSession, onRegenerateSessionTitle, onForkSession,
     onMarkUnread, onPinSession, onPromoteToProjectAgent, onOpenProjectAgentSharing, onOpenProjectAgentSettings,
     onDemoteProjectAgent, onChangeSessionModel, onUseProjectDefault, mutedAgents, onToggleMute, hideCliSessions,
     onToggleHideCliSessions, workerContinuation, forkDisabledReasonFor,
@@ -595,6 +596,7 @@ const ProfileSessionRow = React.memo(function ProfileSessionRow({
       onArchive={menuActions.onArchive}
       archiveDisabledReason={menuActions.archiveDisabledReason}
       onRename={menuActions.onRename}
+      onRegenerateTitle={menuActions.onRegenerateTitle}
       onFork={menuActions.onFork}
       getForkDisabledReason={menuActions.getForkDisabledReason}
       onMarkUnread={menuActions.onMarkUnread}

@@ -206,7 +206,7 @@ export class SwarmWebSocketServer {
 
   private ownsControlPidFile = false;
 
-  private sessionTitles?: SessionTitleNamer;
+  private readonly sessionTitles: SessionTitleNamer;
 
   private readonly onConversationMessage = (event: ServerEvent): void => {
     if (event.type !== "conversation_message" || isRetiredMessageSource(event.sourceContext)) return;
@@ -434,7 +434,8 @@ export class SwarmWebSocketServer {
 
       browserEngine: options.browserEngine,
     });
-    this.environmentTransport = this.environment?.composeTransport(this.sessionFeatures, this.terminalService);
+    this.sessionTitles = new SessionTitleNamer(this.swarmManager);
+    this.environmentTransport = this.environment?.composeTransport(this.sessionFeatures, this.terminalService, this.sessionTitles);
 
     this.repositorySettingsService = new RepositorySettingsService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
     this.repositoryProjectCreationService = this.repositorySettingsService
@@ -708,7 +709,6 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
-    this.sessionTitles = new SessionTitleNamer(this.swarmManager);
     this.swarmManager.on("conversation_message", this.sessionTitles.onConversationMessage);
     this.swarmManager.on("choice_request", this.onChoiceRequest);
     this.swarmManager.on("codex_elicitation_request", this.onCodexElicitation);
@@ -778,7 +778,7 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.off("conversation_message", this.onConversationMessage);
-    if (this.sessionTitles) this.swarmManager.off("conversation_message", this.sessionTitles.onConversationMessage);
+    this.swarmManager.off("conversation_message", this.sessionTitles.onConversationMessage);
     this.swarmManager.off("choice_request", this.onChoiceRequest);
     this.swarmManager.off("codex_elicitation_request", this.onCodexElicitation);
     this.swarmManager.off("codex_elicitation_dismissed", this.onCodexElicitation);

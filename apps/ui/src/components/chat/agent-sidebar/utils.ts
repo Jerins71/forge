@@ -103,6 +103,7 @@ export function buildSessionContextMenuActions(
     onArchive: source.onArchiveSession && !session.isDefault ? () => source.onArchiveSession?.(sid) : undefined,
     archiveDisabledReason: session.isDefault ? DEFAULT_SESSION_ARCHIVE_DISABLED_REASON : undefined,
     onRename: source.onRequestRenameSession ? () => source.onRequestRenameSession?.(sid) : undefined,
+    onRegenerateTitle: source.onRegenerateSessionTitle ? () => source.onRegenerateSessionTitle!(sid) : undefined,
     onFork: source.onForkSession ? () => source.onForkSession?.(sid) : undefined,
     getForkDisabledReason: source.forkDisabledReasonFor ? () => source.forkDisabledReasonFor?.(sid) : undefined,
     onMarkUnread: source.onMarkUnread ? () => source.onMarkUnread?.(sid) : undefined,

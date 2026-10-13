@@ -109,6 +109,8 @@ export const EnvironmentCapabilitiesSchema = O({
   sessionState: Type.Optional(Type.Boolean()),
   contextTransfers: Type.Optional(Type.Boolean()),
   resendUndelivered: Type.Optional(Type.Boolean()),
+  /** `session.regenerateTitle` names a session again from its messages. */
+  sessionTitles: Type.Optional(Type.Boolean()),
 })
 export type EnvironmentCapabilities = Static<typeof EnvironmentCapabilitiesSchema>
 export const EnvironmentDescriptorSchema = O({
@@ -486,6 +488,7 @@ export const rpcSchemas = {
   'project.delete': defineRpc(O({ commandId: V2Uuid, projectId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'project.reorder': defineRpc(O({ commandId: V2Uuid, projectIds: Type.Array(V2Id, { uniqueItems: true, maxItems: 100 }) }), CommandReceiptSchema, { receipt: true }),
   'session.update': defineRpc(Type.Object({ commandId: V2Uuid, sessionId: V2Id, title: Type.Optional(ShortText), pinned: Type.Optional(Type.Boolean()) }, { additionalProperties: false, minProperties: 3 }), CommandReceiptSchema, { receipt: true }),
+  'session.regenerateTitle': defineRpc(O({ sessionId: V2Id }), O({ title: ShortText })),
   'session.message.pin': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, itemId: V2Id, pinned: Type.Boolean() }), CommandReceiptSchema, { receipt: true }),
   'session.pins.clear': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id }), CommandReceiptSchema, { receipt: true }),
   'session.readState.set': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, read: Type.Boolean() }), CommandReceiptSchema, { receipt: true }),
@@ -551,7 +554,7 @@ export const rpcScopes = {
   'session.choose': 'session:operate', 'session.stop': 'session:operate', 'command.get': 'session:read',
   'project.create': 'workspace:write', 'project.update': 'workspace:write',
   'project.archive': 'workspace:write', 'project.restore': 'workspace:write', 'project.delete': 'workspace:write', 'project.reorder': 'workspace:write',
-  'session.update': 'session:operate', 'session.message.pin': 'session:operate', 'session.pins.clear': 'session:operate',
+  'session.update': 'session:operate', 'session.regenerateTitle': 'session:operate', 'session.message.pin': 'session:operate', 'session.pins.clear': 'session:operate',
   'session.readState.set': 'session:operate', 'project.readState.clear': 'session:operate', 'session.attention.dismiss': 'session:operate',
   'session.configure': 'session:operate',
   'workspace.directories.list': 'workspace:read', 'workspace.directories.validate': 'workspace:read', 'workspace.directories.create': 'workspace:write',

@@ -618,6 +618,17 @@ export class ManagerWsClient {
     return { agentId }
   }
 
+  /** Whether this environment can name a session again; older paired machines cannot. */
+  canRegenerateSessionTitles(): boolean {
+    return Boolean(this.environmentClient?.descriptor()?.capabilities.sessionTitles)
+  }
+
+  /** Names the session again from its messages, on its own environment; the shell carries the new title. */
+  async regenerateSessionTitle(agentId: string): Promise<string> {
+    if (!this.environmentClient) throw new Error('A paired environment is required')
+    return (await this.environmentClient.request('session.regenerateTitle', { sessionId: agentId })).title
+  }
+
   async pinSession(agentId: string, pinned: boolean): Promise<{ pinnedAt: string | null }> {
     const receipt = await this.sessionState('session.update', { sessionId: agentId, pinned })
     return { pinnedAt: receipt.result?.pinnedAt ?? null }

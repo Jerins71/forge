@@ -845,3 +845,73 @@ test('a new thread is named after its first message, here and on a paired machin
   assertions.autoTitles = { local, remote, renamed, failed, generated }
   expect(renderErrors).toEqual([])
 })
+
+test('Regenerate title names a thread again from its latest messages, live and after reload, here and on a paired machine; a failure keeps the title', async ({ page }) => {
+  const { a, b } = fleet
+  const localRow = (title: string) => page.getByRole('complementary').getByRole('list').getByRole('button').filter({ hasText: title })
+  const header = () => page.getByRole('heading', { level: 1 }).filter({ visible: true }).first()
+  const menuItems = () => page.getByRole('menu').getByRole('menuitem')
+  const first = 'Plan the database work'
+  const regenerated = 'Ship the fixture rollout'
+
+  // Auto-naming fails for this first message, so the thread keeps it as its title.
+  const key = await logicalGroupKey(page)
+  await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(key)}`)
+  // The picker remembers a paired machine chosen earlier; this thread runs here.
+  const runOn = page.getByTestId('run-on-picker')
+  if (!(await runOn.innerText()).includes('This machine')) {
+    await runOn.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('option').filter({ hasText: 'This machine' }).first().click()
+    await expect(runOn).toContainText('This machine')
+    await expect(runOn).toBeFocused()
+  }
+  const { sessionId: local } = await launchThread(page, a, first)
+  await expect(localRow(first)).toHaveCount(1)
+
+  // The item sits directly under Rename. A failed generation says why and keeps the title.
+  await localRow(first).click({ button: 'right' })
+  const names = await menuItems().allInnerTexts()
+  expect(names[names.indexOf('Rename') + 1]).toBe('Regenerate title')
+  await shot(page, 'regenerate-title-menu')
+  await page.getByRole('menuitem', { name: 'Regenerate title', exact: true }).click()
+  await expect(page.getByRole('alert').filter({ hasText: 'Failed to regenerate title' })).toBeVisible({ timeout: 30_000 })
+  await expect(localRow(first)).toHaveCount(1)
+  await expect(header()).toContainText(first)
+
+  // The thread moves on; regenerating reads its latest messages. While it runs, the item says so.
+  await send(page, 'Now write the rollout checklist [fixture:retitle]')
+  await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
+  await localRow(first).click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Regenerate title', exact: true }).click()
+  await localRow(first).click({ button: 'right' })
+  await expect(page.getByRole('menuitem', { name: 'Regenerating title…', exact: true })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(localRow(regenerated)).toHaveCount(1, { timeout: 30_000 })
+  await expect(header()).toContainText(regenerated)
+  await shot(page, 'regenerate-title-after')
+  await page.reload()
+  await expect(localRow(regenerated)).toHaveCount(1)
+  await expect(header()).toContainText(regenerated)
+  await expect.poll(async () => (await shellSession(a, local))?.title).toBe(regenerated)
+
+  // A paired machine regenerates its own session's title, with its own provider.
+  const session = await bootstrap(b)
+  const projectId = (await shellSession(b, b.sessionId))!.projectId
+  const remote = (await fixtureRpcOnce(b.baseUrl, session, 'session.launch', { commandId: randomUUID(), projectId, title: 'Remote regenerate start',
+    workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Remote regenerate start', artifactIds: [] } })).sessionId as string
+  await until(async () => (await shellSession(b, remote))?.status, status => status === 'idle', 30_000)
+  await fixtureRpcOnce(b.baseUrl, session, 'session.send', { commandId: randomUUID(), sessionId: remote, message: { text: 'Remote follow-up [fixture:retitle]', artifactIds: [] } })
+  await until(async () => (await shellSession(b, remote))?.status, status => status === 'idle', 30_000)
+  const remoteRow = () => page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${remote}"]`).filter({ visible: true })
+  await page.goto(fleet.uiUrl)
+  await expect(remoteRow()).toContainText('Remote regenerate start')
+  await remoteRow().click({ button: 'right' })
+  await page.getByRole('menuitem', { name: 'Regenerate title', exact: true }).click()
+  await expect.poll(async () => (await shellSession(b, remote))?.title, { timeout: 30_000 }).toBe(regenerated)
+  await expect(remoteRow()).toContainText(regenerated)
+  await page.reload()
+  await expect(remoteRow()).toContainText(regenerated)
+  assertions.regenerateTitle = { local, remote, title: regenerated }
+  expect(renderErrors).toEqual([])
+})

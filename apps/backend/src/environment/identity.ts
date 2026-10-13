@@ -61,6 +61,7 @@ const capabilities: EnvironmentCapabilities = {
   projectPolicy: true,
   contextTransfers: true,
   resendUndelivered: true,
+  sessionTitles: true,
 };
 /** A machine's short hostname ("dev1" for dev1.tailnet.ts.net), so paired environments are told apart. */
 export function defaultEnvironmentLabel(name: string): string {

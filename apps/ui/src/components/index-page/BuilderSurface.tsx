@@ -2100,6 +2100,7 @@ export function BuilderSurface({
         onArchiveSession={localSidebarSession.handleArchiveSession}
         onArchiveProfile={localSidebarSession.handleArchiveProfile}
         onRenameSession={localSidebarSession.handleRenameSession}
+        onRegenerateSessionTitle={primary.client.canRegenerateSessionTitles() ? localSidebarSession.handleRegenerateSessionTitle : undefined}
         onPinSession={localSidebarSession.handlePinSession}
         onRenameProfile={localSidebarSession.handleRenameProfile}
         onForkSession={localSidebarSession.handleForkSession}
