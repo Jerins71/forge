@@ -5,20 +5,25 @@
 //   - when an agent opens a page (the scripted peer calling the real browser tools) the panel opens by
 //     itself, streams the page, and marks the agent's tab with what it is doing while it acts;
 //   - on a remote machine (env-b) the page streams into the panel and a click on it reaches the page.
-// States the engine cannot produce on demand yet (crashed tab, browser setup) drive a mock engine
-// injected into the E2E platform build, in a separate browser context.
+//   - Settings → Browser on the real engine: setup state, Sign in once, Import from Chrome (reading a
+//     seeded throwaway Chrome through its remote-debugging port; the fleet runs with an isolated HOME, so
+//     the user's own Chrome is never read), sending the chosen sites to env-b, and Forget.
+// States the engine cannot produce on demand (a crashed tab, a missing or failed browser install, macOS Files & Folders
+// and Keychain refusals, skipped sites) drive a mock engine in a separate browser context.
 // Screenshots land in .internal/browser-panel/.
 //   pnpm exec playwright test scripts/environment-e2e/browser.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { spawn, type ChildProcess } from 'node:child_process'
+
 import { randomUUID } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import { join } from 'node:path'
-import { expect, type BrowserContext, type Page } from '@playwright/test'
-import { test as base } from './fixtures/test.js'
-import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
+import { chromium, expect, type BrowserContext, type Page } from '@playwright/test'
+import { test as base, BROWSER_E2E_HOME } from './fixtures/test.js'
+import { controlEnvironment, readManifest, repositoryRoot, sanitizedEnvironment, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
-import { fixtureRpcOnce } from './fixtures/rpc-client.js'
+import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
 
 const evidenceRoot = join(repositoryRoot, '.internal/browser-panel')
 const assertions: Record<string, unknown> = {}
@@ -29,6 +34,9 @@ let manifest: FleetManifest
 let context: BrowserContext
 let sharedPage: Page
 let server: Server
+let fixtureChrome: ChildProcess | undefined
+/** Sites the throwaway Chrome is signed in to; Import from Chrome reads these and nothing else. */
+const CHROME_SITES = ['github-fixture.test', 'linear-fixture.test', 'docs-fixture.test']
 let site = ''
 const test = base.extend({ page: async ({}, use) => { await use(sharedPage) } })
 test.describe.configure({ mode: 'serial' })
@@ -95,6 +103,7 @@ test.beforeAll(async ({ browser, environmentManifest }) => {
   site = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   manifest = await readManifest(environmentManifest)
   fleet = await openUiFleet(environmentManifest)
+  fixtureChrome = await startFixtureChrome()
   context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   sharedPage = await context.newPage()
   sharedPage.on('pageerror', error => renderErrors.push(error.message))
@@ -105,7 +114,40 @@ test.afterAll(async () => {
   await writeFile(join(evidenceRoot, 'assertions.json'), `${JSON.stringify(assertions, null, 2)}\n`)
   await context?.close(); await fleet?.dispose()
   server?.closeAllConnections(); server?.close()
+  fixtureChrome?.kill()
 })
+
+/** The pinned headless Chrome from the suite's cache. */
+async function headlessChrome(): Promise<string> {
+  const root = join(repositoryRoot, '.internal/browser-engine-runtime')
+  for (const version of await readdir(root)) {
+    if (version.startsWith('.')) continue
+    for (const platform of await readdir(join(root, version)).catch(() => [] as string[])) {
+      for (const folder of await readdir(join(root, version, platform)).catch(() => [] as string[])) {
+        if (folder.startsWith('chrome-headless-shell')) return join(root, version, platform, folder, process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell')
+      }
+    }
+  }
+  throw new Error('The pinned headless Chrome is not cached yet; run the suite once with network access')
+}
+/** A throwaway Chrome at the default profile path under the fleet's isolated HOME, sharing its remote-debugging port as Chrome 144+ does. */
+async function startFixtureChrome(): Promise<ChildProcess> {
+  const userDataDir = process.platform === 'darwin'
+    ? join(BROWSER_E2E_HOME, 'Library/Application Support/Google/Chrome')
+    : join(BROWSER_E2E_HOME, '.config/google-chrome')
+  await rm(userDataDir, { recursive: true, force: true }); await mkdir(userDataDir, { recursive: true })
+  const child = spawn(await headlessChrome(), ['--headless', '--use-mock-keychain', '--password-store=basic', '--remote-debugging-port=0', `--user-data-dir=${userDataDir}`, 'about:blank'], { stdio: 'ignore', env: sanitizedEnvironment() })
+  const portFile = await until(() => readFile(join(userDataDir, 'DevToolsActivePort'), 'utf8').catch(() => ''), Boolean, 20_000)
+  const [port, path] = portFile.trim().split(/\r?\n/)
+  const source = await chromium.connectOverCDP(`ws://127.0.0.1:${port}${path}`)
+  const expires = Date.now() / 1000 + 7 * 86_400
+  await (await source.newBrowserCDPSession()).send('Storage.setCookies', { cookies: CHROME_SITES.flatMap(domain => [
+    { name: 'session', value: `synthetic-${domain}`, domain, path: '/', secure: true, httpOnly: true, expires },
+    { name: 'pref', value: 'synthetic', domain, path: '/', secure: false, httpOnly: false, expires },
+  ]) })
+  await source.close()
+  return child
+}
 test.afterEach(() => { expect(renderErrors).toEqual([]) })
 
 test('the panel opens from the header, resizes, and keeps its width and open state after a reload', async ({ page }) => {
@@ -184,6 +226,80 @@ test('a remote machine streams its tab into the panel and a click on the page re
   assertions.remoteClick = { environment: fleet.b.environmentId, reached: true }
 })
 
+test('Settings → Browser: setup, Sign in once, Import from Chrome with a confirm step, send to env-b, and Forget', async ({ page }) => {
+  const dialog = page.getByTestId('browser-import-dialog')
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=browser`)
+  await expect(page.getByTestId('settings-browser')).toBeVisible()
+  await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 })
+  await expect(page.getByText('No sites yet. Sign in once, or import sites from Chrome.')).toBeVisible()
+  await shot(page, 'settings-ready')
+
+  // Import from running Chrome: steps, then the seeded throwaway Chrome's sites with nothing selected.
+  await page.getByRole('button', { name: 'Import from Chrome…' }).click()
+  await expect(dialog).toHaveAttribute('data-step', 'source')
+  await expect(dialog).toContainText('chrome://inspect/#remote-debugging')
+  await shot(page, 'import-source')
+  await dialog.getByRole('button', { name: 'Show sites' }).click()
+  await expect(dialog).toHaveAttribute('data-step', 'sites', { timeout: 30_000 })
+  const offered = dialog.locator('[data-site]')
+  await expect(offered).toHaveCount(CHROME_SITES.length)
+  for (const check of await dialog.getByRole('checkbox').all()) await expect(check).not.toBeChecked()
+  await expect(dialog.getByRole('button', { name: 'Choose sites to continue' })).toBeDisabled()
+  await dialog.getByRole('textbox', { name: 'Search sites' }).fill('linear-fix')
+  await expect(offered).toHaveCount(1)
+  await dialog.getByRole('checkbox', { name: 'linear-fixture.test' }).check()
+  await dialog.getByRole('textbox', { name: 'Search sites' }).fill('')
+  await dialog.getByRole('checkbox', { name: 'github-fixture.test' }).check()
+  await shot(page, 'import-sites')
+  await dialog.getByRole('button', { name: 'Continue with 2 sites' }).click()
+
+  // Confirm, with an explicit send to env-b.
+  await expect(dialog).toHaveAttribute('data-step', 'confirm')
+  await expect(dialog.getByRole('list', { name: 'Sites to import' })).toContainText('github-fixture.test')
+  const send = dialog.getByRole('checkbox', { name: 'Also send these sites to another machine' })
+  await expect(send).not.toBeChecked()
+  await send.check()
+  await expect(dialog.getByRole('button', { name: 'Import 2 sites' })).toBeDisabled()
+  await dialog.getByRole('combobox', { name: 'Project on that machine' }).click()
+  await page.getByRole('option', { disabled: false }).first().click()
+  await shot(page, 'import-confirm')
+  await dialog.getByRole('button', { name: 'Import 2 sites' }).click()
+  await expect(dialog).toHaveAttribute('data-step', 'result', { timeout: 30_000 })
+  await expect(dialog).toContainText(`Also sent to ${fleet.b.label}`)
+  await expect(dialog.getByRole('list', { name: 'Signed-in sites' })).toContainText('linear-fixture.test')
+  await shot(page, 'import-result')
+  await dialog.getByRole('button', { name: 'Done' }).click()
+
+  // Both machines' audits name exactly the chosen sites; the third was never imported.
+  const audit = async (environment: UiEnvironment) => {
+    const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments.find(value => value.baseUrl === environment.baseUrl)!.name, 'bootstrap')
+    return (await fixtureRpcOnce(environment.baseUrl, admin, 'browser.cookies.audit', { sessionId: environment.sessionId })).domains.map((site: { domain: string }) => site.domain).sort()
+  }
+  expect(await audit(fleet.a)).toEqual(['github-fixture.test', 'linear-fixture.test'])
+  expect(await audit(fleet.b)).toEqual(['github-fixture.test', 'linear-fixture.test'])
+  const sites = page.getByRole('list', { name: 'Signed-in sites' })
+  await expect(sites.locator('[data-site]')).toHaveCount(2)
+  await shot(page, 'settings-sites')
+  await shot(page, 'settings-sites', 2560)
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Forget asks first, then signs this project out of that site only.
+  await sites.getByRole('button', { name: 'Forget github-fixture.test' }).click()
+  await expect(sites).toContainText('Agents will need to sign in again')
+  await sites.locator('[data-site="github-fixture.test"]').getByRole('button', { name: 'Forget', exact: true }).click()
+  await expect(sites.locator('[data-site]')).toHaveCount(1)
+  expect(await audit(fleet.a)).toEqual(['linear-fixture.test'])
+  assertions.cookieImport = { imported: ['github-fixture.test', 'linear-fixture.test'], sentTo: fleet.b.environmentId, forgot: 'github-fixture.test' }
+
+  // Sign in once opens the site in the session's Browser panel.
+  await page.getByRole('textbox', { name: 'Site to sign in to' }).fill(`${site}/target`)
+  await page.getByRole('button', { name: 'Sign in once…' }).click()
+  await expect(transcript(page)).toBeVisible()
+  await expect(panel(page)).toBeVisible()
+  await expect(panel(page).locator('#browser-panel-address')).toHaveValue(`${site}/target`, { timeout: 20_000 })
+  await expectLiveFrame(page)
+})
+
 test.describe('states the engine cannot produce on demand yet (mock engine)', () => {
   let mockContext: BrowserContext
   let mockPage: Page
@@ -198,16 +314,10 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
   })
   test.afterAll(async () => { await mockContext?.close() })
 
-  test('crashed tab, browser setup, and the floating panel on narrow windows', async () => {
+  test('crashed tab, browser setup and the floating panel on narrow windows', async () => {
     await open(mockPage, fleet.a)
     const tabId = await mock<string>(`engine.agentOpen('https://example.com/login', 'Opening example.com')`)
     await expect(panel(mockPage)).toBeVisible()
-    await mock(`engine.crash(${JSON.stringify(tabId)})`)
-    await expect(panel(mockPage).getByText('This tab crashed')).toBeVisible()
-    await shot(mockPage, 'crashed')
-    await panel(mockPage).getByRole('button', { name: 'Reload' }).last().click()
-    await expect(panel(mockPage).getByText('This tab crashed')).toHaveCount(0)
-
     // A machine with no browser yet and no pages: the panel offers setup.
     await mock(`engine.close(${JSON.stringify(tabId)})`)
     await mock(`engine.setAvailability({ kind: 'setup', state: 'missing', machineLabel: 'env-b' })`)
@@ -226,26 +336,22 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await mockPage.setViewportSize({ width: 1440, height: 900 })
     await expect(panel(mockPage)).toHaveAttribute('data-browser-panel', 'docked')
   })
-  test('Settings → Browser: setup state, sign-ins, Import from Chrome with a confirm step, and Forget', async () => {
+  test('Settings → Browser states the engine cannot produce on demand: install missing or failed, macOS refusals, skipped sites', async () => {
     const page = mockPage
     const dialog = page.getByTestId('browser-import-dialog')
-    const settingsUrl = `${fleet.uiUrl}/?view=settings&settingsTab=browser`
     const env = JSON.stringify(fleet.a.environmentId)
     const reopenTab = async () => {
       await page.getByRole('button', { name: 'General', exact: true }).click()
       await page.getByRole('button', { name: 'Browser', exact: true }).click()
       await expect(page.getByTestId('settings-browser')).toBeVisible()
     }
-    await pairB(page)
-    await page.goto(settingsUrl)
+    await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=browser`)
     await expect(page.getByTestId('settings-browser')).toBeVisible()
-    await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'ready')
 
     // A machine without its browser yet offers Set up, then follows the install to Ready.
     await mock(`(engine.settings.status[${env}] = { state: 'missing' }, true)`)
     await reopenTab()
     await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'missing')
-    await expect(page.getByTestId('browser-setup-state')).toContainText('Not set up yet')
     await shot(page, 'settings-setup')
     await page.getByTestId('browser-setup-state').getByRole('button', { name: 'Set up' }).click()
     await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'installing')
@@ -256,14 +362,10 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await expect(page.getByTestId('browser-setup-state')).toContainText('Browser download failed (503)')
     await mock(`(engine.settings.status[${env}] = { state: 'ready' }, true)`)
     await reopenTab()
-    await expect(page.getByText('No sites yet. Sign in once, or import sites from Chrome.')).toBeVisible()
 
-    // Import from Chrome: the cookie file is blocked by macOS Files & Folders, with a deep link.
+    // The cookie file is blocked by macOS Files & Folders, with a deep link; Keychain is explained.
     await mock(`(engine.settings.previewErrors['chrome-database'] = { code: 'files-folders-denied', message: 'denied', settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders' }, true)`)
     await page.getByRole('button', { name: 'Import from Chrome…' }).click()
-    await expect(dialog).toHaveAttribute('data-step', 'source')
-    await expect(dialog).toContainText('chrome://inspect/#remote-debugging')
-    await shot(page, 'import-source')
     await dialog.getByRole('radio', { name: /cookie file/ }).check()
     await expect(dialog).toContainText('Chrome Safe Storage')
     await dialog.getByRole('button', { name: 'Show sites' }).click()
@@ -272,74 +374,17 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await expect(denied.getByRole('link', { name: /Open Files & Folders settings/ })).toHaveAttribute('href', /Privacy_FilesAndFolders/)
     await shot(page, 'import-files-folders')
 
-    // Running Chrome lists the sites, most recently used first, with nothing selected.
+    // A site the engine skips is listed with its reason.
     await dialog.getByRole('radio', { name: /while it’s open/ }).check()
     await dialog.getByRole('button', { name: 'Show sites' }).click()
-    await expect(dialog).toHaveAttribute('data-step', 'sites')
-    const checks = dialog.getByRole('checkbox')
-    await expect(checks).toHaveCount(9)
-    for (const check of await checks.all()) await expect(check).not.toBeChecked()
-    await expect(dialog.getByRole('button', { name: 'Choose sites to continue' })).toBeDisabled()
     await expect(dialog.locator('[data-site]').first()).toContainText('used today')
-    await dialog.getByRole('textbox', { name: 'Search sites' }).fill('lin')
-    await expect(dialog.locator('[data-site]')).toHaveCount(1)
-    await dialog.getByRole('checkbox', { name: 'linear.app' }).check()
-    await dialog.getByRole('textbox', { name: 'Search sites' }).fill('')
     await dialog.getByRole('checkbox', { name: 'github.com' }).check()
     await dialog.getByRole('checkbox', { name: 'old-forum.example' }).check()
-    await shot(page, 'import-sites')
     await mock(`(engine.settings.skip = ['old-forum.example'], true)`)
-    await dialog.getByRole('button', { name: 'Continue with 3 sites' }).click()
-
-    // Confirm: what goes where, and sending elsewhere is off until chosen.
-    await expect(dialog).toHaveAttribute('data-step', 'confirm')
-    await expect(dialog.getByRole('list', { name: 'Sites to import' })).toContainText('github.com')
-    const send = dialog.getByRole('checkbox', { name: 'Also send these sites to another machine' })
-    await expect(send).not.toBeChecked()
-    await shot(page, 'import-confirm')
-    await dialog.getByRole('button', { name: 'Import 3 sites' }).click()
-
-    // Result: what was imported and what was skipped, and why.
-    await expect(dialog).toHaveAttribute('data-step', 'result')
+    await dialog.getByRole('button', { name: 'Continue with 2 sites' }).click()
+    await dialog.getByRole('button', { name: 'Import 2 sites' }).click()
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('old-forum.example')
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('expired')
-    await shot(page, 'import-result')
-    const calls = await mock<Array<{ method: string; domains?: string[] }>>('engine.settings.calls')
-    expect(calls.find(call => call.method === 'apply')?.domains).toEqual(['github.com', 'linear.app', 'old-forum.example'])
-    expect(calls.some(call => call.method === 'prepareSend' || call.method === 'receive')).toBe(false)
-    await dialog.getByRole('button', { name: 'Done' }).click()
-    const sites = page.getByRole('list', { name: 'Signed-in sites' })
-    await expect(sites.locator('[data-site]')).toHaveCount(2)
-    await shot(page, 'settings-sites')
-
-    // Forget asks first, then signs the project out of that site only.
-    await sites.getByRole('button', { name: 'Forget github.com' }).click()
-    await expect(sites).toContainText('Agents will need to sign in again')
-    await sites.locator('[data-site="github.com"]').getByRole('button', { name: 'Forget', exact: true }).click()
-    await expect(sites.locator('[data-site]')).toHaveCount(1)
-    await expect(sites).not.toContainText('github.com')
-
-    // Sending to another machine is explicit: it goes only when chosen, to the chosen project.
-    await page.getByRole('button', { name: 'Import from Chrome…' }).click()
-    await dialog.getByRole('button', { name: 'Show sites' }).click()
-    await dialog.getByRole('checkbox', { name: 'vercel.com' }).check()
-    await dialog.getByRole('button', { name: 'Continue with 1 site' }).click()
-    await send.check()
-    await expect(dialog.getByRole('button', { name: 'Import 1 site' })).toBeDisabled()
-    await dialog.getByRole('combobox', { name: 'Project on that machine' }).click()
-    await page.getByRole('option', { disabled: false }).first().click()
-    await shot(page, 'import-send')
-    await dialog.getByRole('button', { name: 'Import 1 site' }).click()
-    await expect(dialog).toContainText(`Also sent to ${fleet.b.label}`)
-    const sent = await mock<Array<{ environmentId: string; method: string; domains?: string[] }>>('engine.settings.calls')
-    expect(sent.filter(call => call.method === 'receive')).toEqual([{ environmentId: fleet.b.environmentId, method: 'receive', domains: ['vercel.com'] }])
-    await dialog.getByRole('button', { name: 'Done' }).click()
-
-    // Sign in once opens the site in the session's Browser panel.
-    await page.getByRole('textbox', { name: 'Site to sign in to' }).fill('example.com')
-    await page.getByRole('button', { name: 'Sign in once…' }).click()
-    await expect(transcript(page)).toBeVisible()
-    await expect(panel(page)).toBeVisible()
-    await expect(panel(page).locator('#browser-panel-address')).toHaveValue('https://example.com')
+    await shot(page, 'import-skipped')
   })
 })

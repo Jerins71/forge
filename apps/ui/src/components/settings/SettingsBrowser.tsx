@@ -42,7 +42,7 @@ export function SettingsBrowser({ environmentId, onOpenBrowserPanel }: SettingsB
 
   return (
     <div data-testid="settings-browser">
-      <MachineBrowserSection engine={engine} machine={machine} sessionId={sessionId} />
+      <MachineBrowserSection engine={engine} machine={machine} />
       <SettingsSection
         label="Browser profile"
         description={<>Each project has its own browser profile on <span className="font-medium text-foreground">{machine}</span>. Sign-ins stay with that project on that machine.</>}
@@ -77,13 +77,13 @@ export function SettingsBrowser({ environmentId, onOpenBrowserPanel }: SettingsB
 }
 
 /** Whether the machine's browser is installed, with Set up / Try again. */
-function MachineBrowserSection({ engine, machine, sessionId }: { engine: BrowserSettingsEngine; machine: string; sessionId: string | null }) {
+function MachineBrowserSection({ engine, machine }: { engine: BrowserSettingsEngine; machine: string }) {
   const [status, setStatus] = useState<BrowserSetupStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
-    try { setStatus(await engine.status(sessionId)); setError(null) } catch (caught) { setError(errorMessage(caught)) }
-  }, [engine, sessionId])
+    try { setStatus(await engine.status()); setError(null) } catch (caught) { setError(errorMessage(caught)) }
+  }, [engine])
   useEffect(() => { void load() }, [load])
   // Installing is short and visible; follow it until it settles.
   useEffect(() => {

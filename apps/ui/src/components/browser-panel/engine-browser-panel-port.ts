@@ -64,6 +64,9 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
     publish()
   }
 
+  // A reloaded window can still show the last presented page; nothing is presented until a panel asks.
+  void nativeBridge?.hide().catch(() => undefined)
+
   const stopTabs = engine.tabs(sessionId, {
     next: (item) => { if (item.kind === 'snapshot') apply(item.snapshot) },
     error: (error) => {

@@ -75,16 +75,18 @@ export function BrowserImportDialog({ open, onOpenChange, engine, environmentId,
     setBusy(true); setError(null)
     const domains = [...selected].sort()
     try {
-      const local = await engine.apply(project.sessionId, preview.importId, domains)
+      // A preview is single-use. Sending elsewhere takes the one-time transfer, which this machine then
+      // receives too; otherwise the selection is applied directly.
+      const target = sendTo ? targetProjects.find((candidate) => candidate.projectId === sendTo.projectId)?.sessionId : undefined
+      if (sendTo && (!targetEngine || !target)) throw new Error('That project has no thread on the other machine yet. Start one there first.')
+      // The transfer lives only in this call: never stored, logged, or shown.
+      const transfer = sendTo ? await engine.prepareSend(project.sessionId, preview.importId, domains) : null
+      const local = transfer ? await engine.receive(project.sessionId, transfer) : await engine.apply(project.sessionId, preview.importId, domains)
       onImported(local.sites)
       let sent: Outcome['sent'] = null
-      if (sendTo) {
-        const targetSession = targetProjects.find((candidate) => candidate.projectId === sendTo.projectId)?.sessionId
+      if (transfer && targetEngine && target) {
         try {
-          if (!targetEngine || !targetSession) throw new Error('That project has no thread on the other machine yet.')
-          // The transfer lives only in this call: never stored, logged, or shown.
-          const transfer = await engine.prepareSend(project.sessionId, preview.importId, domains)
-          sent = { machine: targetMachine, result: await targetEngine.receive(targetSession, transfer) }
+          sent = { machine: targetMachine, result: await targetEngine.receive(target, transfer) }
         } catch (caught) {
           sent = { machine: targetMachine, error: errorMessage(caught) }
         }
