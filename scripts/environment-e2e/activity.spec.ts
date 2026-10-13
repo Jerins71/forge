@@ -454,6 +454,144 @@ test('a plain Claude turn replies and settles idle', async ({ page }) => {
   assertions.claudeSmoke = { sessionId }
 })
 
+test('Claude background work stays active across reload and scroll, admits a message and settles without failure attention', async ({ page }) => {
+  test.setTimeout(120_000)
+  const release = join(manifest.environments[0]!.checkout, '.fixture-background-release')
+  await rm(release, { force: true })
+  const sessionId = await launchClaude('Claude background work', '[fixture:background] Start a background command')
+  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
+  const failure = () => page.locator(`[data-inbox-row$="::${sessionId}"] [aria-label="Run failed"]`)
+  const footer = page.getByTestId('manager-background-activity')
+  const assertRunning = async () => {
+    await expect(footer).toContainText('1 command running in background', { timeout: 30_000 })
+    await expect(stopButton(page)).toBeVisible()
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, historyAdmin)
+    try {
+      await rpc.call('shell.subscribe', {})
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      expect(snapshot.sessions.find((session: any) => session.sessionId === sessionId)?.status).toBe('running')
+    } finally { rpc.close() }
+  }
+  try {
+    await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+    await expect(transcript(page)).toContainText('Background command started; waiting for its completion.', { timeout: 60_000 })
+    await assertRunning()
+    await page.reload()
+    await assertRunning()
+    // Enough real persisted transcript rows to unmount activity rows as the viewport moves.
+    await controlEnvironment(manifest, 'env-a', 'fixture', { operation: 'burst', sessionId, count: 90, textBytes: 256 })
+    const scroll = transcript(page).locator('div.overflow-y-auto').last()
+    await expect.poll(() => scroll.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(1000)
+    await scroll.evaluate(node => { node.scrollTop = 0 })
+    await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(0)
+    await assertRunning()
+    await scroll.evaluate(node => { node.scrollTop = node.scrollHeight })
+    await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBeGreaterThan(1000)
+    await assertRunning()
+    await shot(page, 'claude-background-replayed')
+    await send(page, '[fixture:background-update] update?')
+    await expect(transcript(page)).toContainText('Update delivered while the background command runs.', { timeout: 30_000 })
+    await assertRunning()
+    await expect(transcript(page)).not.toContainText('Failed:')
+    await expect(failure()).toHaveCount(0)
+    expect(await attention()).not.toBe('work_failed')
+    await writeFile(release, 'release')
+    await expect(stopButton(page)).toHaveCount(0, { timeout: 30_000 })
+    await expect(footer).toHaveCount(0)
+    await expect.poll(attention).not.toBe('work_failed')
+    await expect(failure()).toHaveCount(0)
+    await page.reload()
+    await expect(transcript(page)).toContainText('Update delivered while the background command runs.')
+    await expect(transcript(page)).not.toContainText('Failed:')
+    await expect(failure()).toHaveCount(0)
+    await shot(page, 'claude-background-settled')
+    assertions.claudeBackground = { sessionId, liveReloadScrollActive: true, updateDelivered: true, finalAttention: (await attention()) ?? null }
+  } finally { await writeFile(release, 'release') }
+})
+
+test('a native Claude completion wake reopens a settled root and admits update throughout the wake, live and after reload', async ({ page }) => {
+  test.setTimeout(120_000)
+  const release = join(manifest.environments[0]!.checkout, '.fixture-background-release')
+  const wakeRelease = join(manifest.environments[0]!.checkout, '.fixture-wake-release')
+  await rm(release, { force: true }); await rm(wakeRelease, { force: true })
+  const sessionId = await launchClaude('Claude native wake', '[fixture:native-wake] Start work that will wake a settled root')
+  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
+  const failure = () => page.locator(`[data-inbox-row$="::${sessionId}"] [aria-label="Run failed"]`)
+  const status = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, historyAdmin)
+    try {
+      await rpc.call('shell.subscribe', {})
+      const snapshot = await until<any>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot.sessions.find((session: any) => session.sessionId === sessionId)?.status
+    } finally { rpc.close() }
+  }
+  try {
+    await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+    await expect(transcript(page)).toContainText('Background command started;', { timeout: 30_000 })
+    await expect.poll(status).toBe('idle') // The historical root ended before this native completion wake.
+    await writeFile(release, 'release')
+    // This Bash is called solely by the CLI's task-notification wake, with no Forge prompt.
+    await expect.poll(status, { timeout: 30_000 }).toBe('running')
+    await expect(transcript(page)).toContainText('.fixture-wake-release', { timeout: 30_000 })
+    await expect(stopButton(page)).toBeVisible()
+    await page.reload()
+    await expect.poll(status).toBe('running')
+    await expect(stopButton(page)).toBeVisible()
+    await controlEnvironment(manifest, 'env-a', 'fixture', { operation: 'disable-native-steer', sessionId })
+    await send(page, '[fixture:background-update] update?')
+    await expect(transcript(page)).not.toContainText('Failed:')
+    await expect(failure()).toHaveCount(0)
+    await writeFile(wakeRelease, 'release')
+    await expect(transcript(page)).toContainText('Update delivered while the background command runs.', { timeout: 30_000 })
+    await expect.poll(status, { timeout: 30_000 }).toBe('idle')
+    expect(await attention()).not.toBe('work_failed')
+    await expect(failure()).toHaveCount(0)
+    await page.reload()
+    await expect(transcript(page)).toContainText('Update delivered while the background command runs.')
+    await expect(transcript(page)).not.toContainText('Failed:')
+    await expect(failure()).toHaveCount(0)
+    await shot(page, 'claude-native-wake-settled')
+    assertions.claudeNativeWake = { sessionId, wakeWasRunningLiveAndReplayed: true, updateDelivered: true, finalAttention: (await attention()) ?? null }
+  } finally { await writeFile(release, 'release'); await writeFile(wakeRelease, 'release') }
+})
+
+test('a genuine Claude failure has a durable explanation and attention, and a successful background follow-up clears attention', async ({ page }) => {
+  test.setTimeout(120_000)
+  const sessionId = await launchClaude('Claude failed then background success', '[fixture:claude-fail] Fail this provider turn')
+  const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
+  const failure = () => page.locator(`[data-inbox-row$="::${sessionId}"] [aria-label="Run failed"]`)
+  const failedRows = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"][data-activity-status="failed"]')
+  await expect.poll(attention, { timeout: 30_000 }).toBe('work_failed')
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+  await expect(failure()).toHaveCount(1)
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+  await expect(failedRows()).toContainText('Failed:', { timeout: 30_000 })
+  await page.reload()
+  await expect(failedRows()).toContainText('Failed:', { timeout: 30_000 })
+  await page.mouse.wheel(0, -3000); await page.mouse.wheel(0, 3000)
+  await expect(failedRows()).toContainText('Failed:')
+  await shot(page, 'claude-failure-replayed')
+  const release = join(manifest.environments[0]!.checkout, '.fixture-background-release')
+  await rm(release, { force: true })
+  try {
+    await send(page, '[fixture:background] Recover with background work')
+    await expect(page.getByTestId('manager-background-activity')).toContainText('1 command running in background', { timeout: 30_000 })
+    await send(page, '[fixture:background-update] update?')
+    await expect(transcript(page)).toContainText('Update delivered while the background command runs.', { timeout: 30_000 })
+    await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
+    await writeFile(release, 'release')
+    await expect.poll(attention, { timeout: 30_000 }).not.toBe('work_failed')
+    await expect(failure()).toHaveCount(0)
+    await page.reload()
+    await expect(failure()).toHaveCount(0)
+    await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(sessionId)}`)
+    // Historical failure remains explained; only its outstanding attention clears.
+    await expect(failedRows()).toContainText('Failed:')
+    await shot(page, 'claude-failure-resolved')
+    assertions.claudeFailureRecovery = { sessionId, durableExplanation: true, finalAttention: (await attention()) ?? null }
+  } finally { await writeFile(release, 'release') }
+})
+
 test('a scheduled Claude wake-up is a wait, not a stall: its row and the footer count down, live and after reload, and settle when it fires', async ({ page }) => {
   test.setTimeout(420_000)
   const sessionId = await launchClaude('Claude wake-up', '[fixture:wakeup] Check the build again in two minutes')

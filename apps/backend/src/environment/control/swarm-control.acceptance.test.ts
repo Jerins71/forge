@@ -754,6 +754,27 @@ it("attention cannot settle from native idle while its authoritative run is stil
   expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toBeUndefined();
 });
 
+it("a failed pre-dispatch attempt has one durable explanation before failure attention, and the next success clears attention", async () => {
+  const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
+  const send = runtime.sendMessage.bind(runtime); runtime.sendMessage = async () => { throw Object.assign(new Error("Fixture admission failed before dispatch"), { delivery: "not_dispatched" }); };
+  const commandId = randomUUID();
+  await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Explain the failure", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.reason).toBe("work_failed"));
+  const failures = (await f.manager.getConversationHistory(f.sessionId)).filter(row => row.type === "activity_summary" && row.activity?.kind === "status");
+  expect(failures).toHaveLength(1); expect(failures[0]).toMatchObject({ status: "failed", displaySummary: expect.stringContaining("Fixture admission failed") });
+  const persisted = (await readFile(f.manager.getAgent(f.sessionId)!.sessionFile, "utf8")).split("\n").filter(line => line.includes("Fixture admission failed"));
+  expect(persisted).toHaveLength(1);
+  runtime.sendMessage = send; runtime.busy = true;
+  const next = randomUUID(); await f.core.controlService.execute(f.paired.principal, "session.send", { commandId: next, sessionId: f.sessionId, message: { text: "Try successfully", artifactIds: [] } });
+  await f.core.effectWorker.drain();
+  const state = loadState(f.database); const run = state.runs[`run-${next}`]; const attempt = state.attempts[run.activeAttemptId]; const binding = state.bindings[attempt.bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: attempt.attemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed",
+  } });
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.some(row => row.sessionAgentId === f.sessionId && row.reason === "work_failed")).toBe(false));
+});
+
 it("a failed canonical append raises work_failed without a provider or active presentation", async () => {
   const f = await fixture(); const runtime = f.manager.runtimeByAgentId.get(f.sessionId)!;
   runtime.appendCustomEntry = () => { throw new Error("Attention writer failure"); };

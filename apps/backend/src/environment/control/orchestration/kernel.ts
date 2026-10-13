@@ -30,10 +30,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   const thread = (id: string) => {
     const value = state.threads[id]; if (!value) throw new Error("Unknown orchestration thread"); return value;
   };
-  const finish = (run: Run, outcome: NonNullable<Run["outcome"]>, delivered = false) => {
+  const finish = (run: Run, outcome: NonNullable<Run["outcome"]>, delivered = false, error?: string) => {
     const attempt = state.attempts[run.activeAttemptId];
     emit({ type: "attempt.terminal", attempt: { ...attempt, state: "terminal", outcome, delivery: attempt.state === "dispatching" && delivered ? "dispatched" : attempt.delivery } });
-    emit({ type: "run.terminal", run: { ...run, state: "terminal", outcome } });
+    emit({ type: "run.terminal", run: { ...run, state: "terminal", outcome, error: outcome === "failed" ? error ?? "The turn failed before it could finish." : undefined } });
     for (const request of Object.values(state.requests)) if (request.attemptId === attempt.attemptId && ["pending", "responding"].includes(request.state))
       emit({ type: "request.expired", request: { ...request, state: "expired" } });
     const owner = thread(run.threadId);
@@ -125,7 +125,29 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
   const observe = (observation: ProviderObservation) => {
     const owner = state.threads[observation.scope.threadId]; const attempt = state.attempts[observation.attemptId];
     if (!owner || !attempt || owner.generation !== observation.scope.generation || attempt.generation !== owner.generation ||
-      attempt.bindingId !== observation.scope.bindingId || attempt.threadId !== owner.threadId || observation.sequence <= attempt.lastSequence || attempt.state === "terminal") return;
+      attempt.bindingId !== observation.scope.bindingId || attempt.threadId !== owner.threadId || observation.sequence <= attempt.lastSequence) return;
+    if (attempt.state === "terminal") {
+      // Claude's task completion can start a new native turn after its previous result. Reuse the
+      // originating run only for a new turn on the same current writer; stale terminals stay fenced.
+      if (observation.type !== "accepted" || observation.origin.kind !== "root" ||
+        state.bindings[attempt.bindingId]?.capabilities.provider !== "claude" || owner.bindingId !== attempt.bindingId ||
+        owner.desired !== "running" || owner.shutdown !== "clean" || attempt.outcome !== "completed" ||
+        attempt.delivery !== "dispatched" || !attempt.turn || attempt.turn.nativeId === observation.turn.nativeId) return;
+      const run = state.runs[attempt.runId];
+      // A delivered steer has no observation stream of its own. A later native root does,
+      // and supersedes this one even after it ends; earlier steers must not block repeated wakes.
+      if (run.activeAttemptId !== attempt.attemptId || Object.values(state.runs).some(later => later.threadId === owner.threadId && later.sequence > run.sequence &&
+        state.attempts[later.activeAttemptId].delivery === "dispatched" && state.attempts[later.activeAttemptId].lastSequence >= 0)) return;
+      if (owner.activeRunId) {
+        const pending = state.runs[owner.activeRunId]; const pendingAttempt = state.attempts[pending.activeAttemptId];
+        if (pendingAttempt.delivery !== "pending" || !["created", "dispatching"].includes(pendingAttempt.state)) return;
+        emit({ type: "run.started", run: { ...pending, state: "queued", delivery: "queue" } });
+      }
+      emit({ type: "run.started", run: { ...run, state: "running", outcome: undefined, error: undefined } });
+      emit({ type: "attempt.accepted", attempt: { ...attempt, state: "accepted", outcome: undefined, turn: observation.turn, lastSequence: observation.sequence } });
+      emit({ type: "thread.changed", thread: { ...owner, activeRunId: run.runId } });
+      advance(owner.threadId); return;
+    }
     emit({ type: "attempt.observed", attempt: { ...attempt, lastSequence: observation.sequence } });
     const run = state.runs[attempt.runId];
     if (observation.type === "request_opened") {
@@ -140,10 +162,10 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     } else if (observation.origin.kind !== "root" || owner.activeRunId !== run.runId || run.activeAttemptId !== attempt.attemptId) { /* This observation has no root terminal authority. */ }
     else if (observation.type === "accepted") { emit({ type: "attempt.accepted", attempt: { ...state.attempts[attempt.attemptId], state: "accepted", delivery: "dispatched", turn: observation.turn } }); advance(owner.threadId); }
     // A provider that answers a user Stop's interrupt before the drain is recorded settles the run as that same stop.
-    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome === "interrupted" && owner.desired === "stopped" ? "cancelled" : observation.outcome,true); advance(owner.threadId); }
+    else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome === "interrupted" && owner.desired === "stopped" ? "cancelled" : observation.outcome,true, observation.error?.message); advance(owner.threadId); }
     else if (observation.type === "error") {
       if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
-      else { finish(state.runs[run.runId], "failed",observation.delivery === "accepted"); advance(owner.threadId); }
+      else { finish(state.runs[run.runId], "failed",observation.delivery === "accepted", observation.message); advance(owner.threadId); }
     }
   };
 
@@ -195,6 +217,9 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "run.started", run: { ...run, state: "queued" } }); advance(owner.threadId); break;
         }
       }
+      // A native continuation won admission while this proved-undelivered start was preparing.
+      if (!command.targetAttemptId && command.authorized && owner.desired === "running" && owner.shutdown === "clean" && owner.generation === attempt.generation &&
+        run.state === "queued" && owner.activeRunId !== run.runId) break;
       if (!command.authorized || owner.desired !== "running" || owner.shutdown !== "clean" || owner.generation !== attempt.generation || (!command.targetAttemptId && owner.activeRunId !== run.runId)) {
         finish(run, "cancelled"); advance(owner.threadId); break;
       }
@@ -339,6 +364,12 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
         if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
+        else if (command.dispatchBusy && command.delivery === "not_dispatched" && ["provider.start", "provider.steer"].includes(command.kind) &&
+          thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
+          // The existing delayed effect will try admission again. No input reached the provider.
+          emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
+          if (thread(command.threadId).activeRunId !== attempt.runId) emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued", delivery: "queue" } });
+        }
         else if (command.kind === "provider.start" && command.bindingClosed && thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean"
           && Object.values(state.attempts).filter(previous => previous.runId === attempt.runId).length < 2) {
           // The closed binding proves this input was never dispatched. Drain its
@@ -358,7 +389,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
           emit({ type: "attempt.created", attempt: { ...attempt, state: "created", delivery: "pending" } });
           emit({ type: "run.started", run: { ...state.runs[attempt.runId], state: "queued", delivery: "queue" } });
           advance(command.threadId);
-        } else { finish(state.runs[attempt.runId], "failed"); advance(command.threadId); }
+        } else { finish(state.runs[attempt.runId], "failed", false, command.message); advance(command.threadId); }
       } else if (command.kind === "provider.release") {
         const owner = thread(command.threadId); emit({ type: "thread.changed", thread: { ...owner, shutdown: "quarantined" } });
       } break;

@@ -631,7 +631,25 @@ describe("durable provider outbox", () => {
     const third = await f.open(); await third.effectWorker.drain(); expect(loadState(third.database).recovery?.recoveryId).toBe(before.recoveryId);
     expect((await third.controlService.getReceipt(principal, commandId)).delivery).toBe("unknown");
   });
-  it.each(["busy", "closed", "stale_scope"] as const)("keeps a typed %s pre-dispatch rejection out of unknown recovery", async reason => {
+  // Typed busy proves no delivery. Retain the same input and retry through the delayed outbox without failure, duplicates or a spin.
+  it("retains a busy input for admission and delivers it after the provider becomes available", async () => {
+    const f = await fixture(); let now = f.options.clock(); f.options.clock = () => now;
+    const accepted = f.adapter.start; let busy = true; let starts = 0;
+    f.adapter.start = async input => { starts++; if (busy) throw new ProviderDispatchRejectedError("busy"); return accepted(input); };
+    await f.core.controlService.execute(principal, "session.send", { commandId, sessionId: "manager", message: { text: "update?", artifactIds: [] } });
+    await f.core.effectWorker.drain();
+    let state = loadState(f.core.database); const run = state.runs[`run-${commandId}`];
+    expect(state.attempts[run.activeAttemptId]).toMatchObject({ state: "created", delivery: "pending" });
+    expect(run).toMatchObject({ state: "running" }); expect(state.recovery).toBeNull(); expect(starts).toBe(1);
+    expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("running");
+    busy = false; now += 1000; await f.core.effectWorker.drain(); state = loadState(f.core.database);
+    expect(state.attempts[run.activeAttemptId]).toMatchObject({ state: "accepted", delivery: "dispatched" });
+    expect((await f.core.controlService.getReceipt(principal, commandId)).state).toBe("succeeded");
+    expect(starts).toBe(2); expect(f.canonical.size).toBe(1); expect(f.dispatches()).toBe(1);
+    expect(replayLifecycle(f.core.database)).toEqual(state);
+  });
+
+  it.each(["closed", "stale_scope"] as const)("keeps a typed %s pre-dispatch rejection out of unknown recovery", async reason => {
     const f = await fixture();
     let starts = 0;
     f.adapter.start = async () => {

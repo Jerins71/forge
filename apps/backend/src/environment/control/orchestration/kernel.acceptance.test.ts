@@ -19,11 +19,11 @@ function fixture() {
   run({ type: "thread.create", commandId: "create", now, threadId: "manager", role: "manager", projectId: "project" });
   const submit = (id: string, delivery: "queue" | "steer" = "queue") => run({ type: "run.submit", commandId: id, now, threadId: "manager", inputId: `input-${id}`, runId: `run-${id}`, attemptId: `attempt-${id}`, bindingId: "binding", input: { text: id, artifactIds: [] }, delivery });
   const record = (id: string) => run({ type: "input.recorded", commandId: `record-${id}`, now, threadId: "manager", inputId: `input-${id}`, entryId: `entry-${id}` });
-  const acquire = () => run({ type: "binding.acquired", commandId: "acquire", now, threadId: "manager", binding: { scope: { threadId: "manager", bindingId: "binding", generation: 0 }, conversation: { threadId: "manager", bindingId: "binding", generation: 0, kind: "conversation", nativeId: "native" }, capabilities: caps, instructionRevision: "prompt", toolContractRevision: "tools" } });
-  const observe = (attemptId: string, sequence: number, type: "accepted" | "terminal", generation = 0, child = false) => run({ type: "provider.observe", commandId: `obs-${attemptId}-${sequence}-${generation}`, now,
+  const acquire = (provider: typeof caps.provider = caps.provider) => run({ type: "binding.acquired", commandId: "acquire", now, threadId: "manager", binding: { scope: { threadId: "manager", bindingId: "binding", generation: 0 }, conversation: { threadId: "manager", bindingId: "binding", generation: 0, kind: "conversation", nativeId: "native" }, capabilities: { ...caps, provider }, instructionRevision: "prompt", toolContractRevision: "tools" } });
+  const observe = (attemptId: string, sequence: number, type: "accepted" | "terminal", generation = 0, child = false, nativeId = "turn") => run({ type: "provider.observe", commandId: `obs-${attemptId}-${sequence}-${generation}`, now,
     observation: { scope: { threadId: "manager", bindingId: "binding", generation }, attemptId, sequence,
       origin: child ? { kind: "child", conversation: { threadId: "manager", bindingId: "binding", generation, kind: "conversation", nativeId: "native" }, parentTurn: { threadId: "manager", bindingId: "binding", generation, kind: "turn", conversationId: "native", nativeId: "turn" } } : { kind: "root", conversation: { threadId: "manager", bindingId: "binding", generation, kind: "conversation", nativeId: "native" } },
-      ...(type === "accepted" ? { type, turn: { threadId: "manager", bindingId: "binding", generation, kind: "turn", conversationId: "native", nativeId: "turn" } } : { type, outcome: "completed", terminalAuthority: child ? "native_child" : "root_attempt" }) } });
+      ...(type === "accepted" ? { type, turn: { threadId: "manager", bindingId: "binding", generation, kind: "turn", conversationId: "native", nativeId } } : { type, outcome: "completed", terminalAuthority: child ? "native_child" : "root_attempt" }) } });
   const dispatch = (id: string, authorized = true) => run({ type: "attempt.dispatch", commandId: `dispatch-${id}`, now, threadId: "manager", attemptId: `attempt-${id}`, authorized });
   return { run, submit, record, acquire, observe, dispatch, state: () => state };
 }
@@ -48,6 +48,42 @@ describe("authoritative run decisions", () => {
     expect(f.state().recovery).toBeNull();
     expect(f.run({ type: "attempt.dispatch", commandId: "stale-dispatch", now, threadId: "manager", attemptId: oldAttempt, authorized: true }).events).toEqual([]);
     expect(f.state().runs["run-one"].state).toBe("running");
+  });
+
+  // Native background completion may wake an already completed Claude root. Its current binding remains the same writer.
+  it("reopens only the latest completed native root on current-scope acceptance and settles its wake", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire("claude");
+    f.dispatch("one"); f.observe("attempt-one", 1, "accepted"); f.observe("attempt-one", 2, "terminal");
+    expect(f.state().threads.manager.activeRunId).toBeUndefined();
+    f.observe("attempt-one", 3, "accepted", 0, false, "native-wake");
+    expect(f.state().runs["run-one"]).toMatchObject({ state: "running", outcome: undefined });
+    expect(f.state().threads.manager.activeRunId).toBe("run-one");
+    f.submit("two", "steer"); expect(f.record("two").effects).toContainEqual({ kind: "provider.steer", threadId: "manager", attemptId: "attempt-two", targetAttemptId: "attempt-one" });
+    f.observe("attempt-one", 4, "terminal"); expect(f.state().runs["run-one"]).toMatchObject({ state: "terminal", outcome: "completed" });
+    expect(f.observe("attempt-one", 5, "accepted", 0, false, "native-wake").events).toEqual([]);
+  });
+
+  it("keeps repeated native wakes on their root after an earlier steer was delivered", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire("claude"); f.dispatch("one"); f.observe("attempt-one", 1, "accepted");
+    f.submit("two", "steer"); f.record("two");
+    f.run({ type: "attempt.dispatch", commandId: "steer", now, threadId: "manager", attemptId: "attempt-two", targetAttemptId: "attempt-one", authorized: true });
+    f.run({ type: "attempt.accepted", commandId: "steer-accepted", now, threadId: "manager", attemptId: "attempt-two", turn: f.state().attempts["attempt-one"].turn! });
+    f.observe("attempt-one", 2, "terminal"); f.observe("attempt-one", 3, "accepted", 0, false, "wake-one"); f.observe("attempt-one", 4, "terminal");
+    f.observe("attempt-one", 5, "accepted", 0, false, "wake-two");
+    expect(f.state().threads.manager.activeRunId).toBe("run-one");
+    expect(f.state().runs["run-one"].state).toBe("running");
+  });
+
+  it("keeps a not-yet-delivered prompt queued when a native wake wins admission", () => {
+    const f = fixture(); f.submit("one"); f.record("one"); f.acquire("claude");
+    f.dispatch("one"); f.observe("attempt-one", 1, "accepted"); f.observe("attempt-one", 2, "terminal");
+    f.submit("two", "steer"); f.record("two"); f.dispatch("two");
+    f.observe("attempt-one", 3, "accepted", 0, false, "native-wake");
+    f.run({ type: "effect.failed", commandId: "busy", now, threadId: "manager", attemptId: "attempt-two", kind: "provider.start", delivery: "not_dispatched", dispatchBusy: true });
+    expect(f.state().threads.manager.activeRunId).toBe("run-one");
+    expect(f.state().runs["run-two"]).toMatchObject({ state: "queued", delivery: "queue" });
+    expect(f.state().attempts["attempt-two"]).toMatchObject({ state: "created", delivery: "pending" });
+    expect(f.observe("attempt-one", 4, "terminal").effects).toEqual([{ kind: "provider.start", threadId: "manager", attemptId: "attempt-two" }]);
   });
 
   it("queues accepted input behind the current root and advances only on its terminal", () => {

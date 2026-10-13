@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ClaudeRuntimeEvents } from '../../../apps/backend/src/swarm/runtime/claude/claude-runtime-events.js';
 
 // The normal server, core, SQLite store, Forge tools and both native adapters run, and Claude
 // sessions run the real bundled Claude Code. Only Claude's remote model is replaced, by a local
@@ -10,9 +11,23 @@ if (!process.env.FORGE_DATA_DIR || !process.env.FORGE_E2E_CHECKOUT) throw new Er
 const home = join(process.env.FORGE_DATA_DIR, 'fixture-claude');
 await mkdir(home, { recursive: true });
 
+// Replay the incident's already-settled root: its original task-registration edges were absent.
+// The real CLI still owns the background process and sends its completion wake. Only that first
+// task's registration projection is suppressed, so the test exercises native continuation admission.
+const untracked = new WeakSet<ClaudeRuntimeEvents>();
+const mapFrame = ClaudeRuntimeEvents.prototype.map;
+ClaudeRuntimeEvents.prototype.map = function (frame) {
+  if (frame.type === 'assistant' && frame.message.content.some(block => block.type === 'tool_use' && (block.input as { description?: string }).description === 'Untracked native wake fixture')) untracked.add(this);
+  if (untracked.has(this) && frame.type === 'system') {
+    if (frame.subtype === 'task_started' || frame.subtype === 'background_tasks_changed') return [];
+    if (frame.subtype === 'task_notification') untracked.delete(this);
+  }
+  return mapFrame.call(this, frame);
+};
+
 /** The prompt the scheduled wake-up submits when it fires; the model answers it once. */
 const WAKEUP_PROMPT = '[fixture:wakeup-fired] Resume after the scheduled check.';
-type Block = { type: string; text?: string; name?: string; tool_use_id?: string };
+type Block = { type: string; text?: string; name?: string; tool_use_id?: string; content?: string | Block[] };
 type Message = { role: string; content: string | Block[] };
 const blocks = (message: Message | undefined): Block[] => !message ? [] : typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content;
 /**
@@ -25,6 +40,24 @@ function reply(body: { messages?: Message[]; tools?: Array<{ name: string }> }):
   const last = [...body.messages ?? []].reverse().find(message => message.role === 'user');
   const text = blocks(last).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n');
   const answered = blocks(last).some(block => block.type === 'tool_result');
+  const lastAssistant = (body.messages ?? []).reduce((index, message, next) => message.role === 'assistant' ? next : index, -1);
+  const pendingText = (body.messages ?? []).slice(lastAssistant + 1).flatMap(blocks).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n');
+  if (pendingText.includes('[fixture:background-update]')) return { text: 'Update delivered while the background command runs.' };
+  if (text.includes('[fixture:native-wake]') && !answered && body.tools?.some(tool => tool.name === 'Bash')) {
+    return { tool: 'Bash', input: { command: `node -e 'const fs=require("node:fs");const timer=setInterval(()=>{if(fs.existsSync(".fixture-background-release")){clearInterval(timer);console.log("Native wake fixture completed")}},100)'`, run_in_background: true, description: 'Untracked native wake fixture' } };
+  }
+  if (text.includes('<task-notification>') && text.includes('native wake fixture') && body.tools?.some(tool => tool.name === 'Bash')) {
+    return { tool: 'Bash', input: { command: `node -e 'const fs=require("node:fs");const timer=setInterval(()=>{if(fs.existsSync(".fixture-wake-release")){clearInterval(timer);console.log("Wake turn finished")}},100)'`, description: 'Hold the native wake turn for update' } };
+  }
+  if (answered && body.messages?.some(message => blocks(message).some(block => block.type === 'tool_use' && (block as { input?: { description?: string } }).input?.description === 'Hold the native wake turn for update'))) return { text: 'Native wake turn finished successfully.' };
+  if (text.includes('[fixture:background]') && !answered && body.tools?.some(tool => tool.name === 'Bash')) {
+    return { tool: 'Bash', input: { command: `node -e 'const fs=require("node:fs");const timer=setInterval(()=>{if(fs.existsSync(".fixture-background-release")){clearInterval(timer);console.log("Background fixture completed")}},100)'`, run_in_background: true, description: 'Wait for the background fixture release' } };
+  }
+  if (text.includes('[fixture:background-update]')) return { text: 'Update delivered while the background command runs.' };
+  if (text.includes('<task-notification>') && text.includes('background fixture')) return { text: 'Background fixture finished successfully.' };
+  if (answered && body.messages?.some(message => blocks(message).some(block => block.type === 'tool_use' && block.name === 'Bash'))) {
+    return { text: 'Background command started; waiting for its completion.' };
+  }
   if (text.includes('[fixture:wakeup-fired]')) return { text: 'Woke up: the scheduled check ran.' };
   if (text.includes('[fixture:wakeup]') && !answered && body.tools?.some(tool => tool.name === 'ScheduleWakeup')) {
     return { tool: 'ScheduleWakeup', input: { delaySeconds: 120, reason: 'Check the fixture build again', prompt: WAKEUP_PROMPT, noop: false } };
@@ -44,6 +77,12 @@ const provider = createServer(async (request, response) => {
   // Read only to choose the scripted step; synthetic provider input is not retained.
   let body: Parameters<typeof reply>[0] = {};
   try { body = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { /* A plain reply. */ }
+  const requestedText = (body.messages ?? []).filter(message => message.role === 'user').flatMap(blocks).filter(block => block.type === 'text').map(block => block.text ?? '').join('\n');
+  if (requestedText.lastIndexOf('[fixture:claude-fail]') > requestedText.lastIndexOf('[fixture:background]')) {
+    response.writeHead(403, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ type: 'error', error: { type: 'permission_error', message: 'Fixture provider refused this turn' } }));
+    return;
+  }
   const next = reply(body);
   response.writeHead(200, { 'Content-Type': 'text/event-stream' });
   const emit = (type: string, data: object) => response.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);

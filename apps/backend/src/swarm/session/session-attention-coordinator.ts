@@ -299,7 +299,9 @@ export class SessionAttentionCoordinator {
         next.sessions[sessionAgentId] = { ...current, attention: { ...current.attention!, dismissedAt: this.now() } };
         return { value: undefined, state: next, changes: [{ sessionAgentId, attention: null }] };
       }
-      const record = { ...current, ...(outcome === "failed" ? { hadError: true } : {}) };
+      // Queued inputs and native wake-ups can share an epoch without another streaming edge.
+      // A successful manager run supersedes its earlier failure; an errored owned worker still needs attention.
+      const record = { ...current, hadError: outcome === "failed" || current.hadError && (source !== "manager" || session.hasTerminallyErroredWorker) };
       if (normalizeCount(session.pendingTurnContextCount) === 0) delete record.awaitingContinuation;
       const progressed = await this.progressWorkingEpoch(session, record);
       if (!progressed && record.hadError === current.hadError && record.awaitingContinuation === current.awaitingContinuation) return { value: undefined };

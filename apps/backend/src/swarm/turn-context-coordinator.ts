@@ -117,7 +117,7 @@ export interface CodexTurnScopePort<
   clearForRuntimeReset(agentId: string): void;
 }
 
-export interface CoreTurnOutcome { agentId: string; outcome: "completed" | "failed"; }
+export interface CoreTurnOutcome { agentId: string; outcome: "completed" | "failed"; runId?: string; error?: string; }
 export interface CoreTurnProjection { status?: AgentDescriptor["status"]; activeRunId?:string; pendingRunIds:readonly string[]; }
 export interface CoreTurnProjectionPort { read(agentId:string):CoreTurnProjection; }
 

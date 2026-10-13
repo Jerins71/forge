@@ -307,6 +307,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     if (this.turnOpen) return;
     this.turnOpen = true; this.status = "streaming";
     await this.emit({ type: "agent_start" }); await this.emit({ type: "turn_start" });
+    await this.publishStatus();
   }
   private async activate(input: Input): Promise<void> {
     if (input.activated) return;
@@ -326,6 +327,11 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
 
   private async handle(frame: SDKMessage): Promise<void> {
     if (this.stopping) return;
+    if (!("parent_tool_use_id" in frame && frame.parent_tool_use_id) && !this.turnOpen && !this.interrupted &&
+      (frame.type === "assistant" || frame.type === "stream_event" && frame.event.type === "message_start")) {
+      this.options.providerSession?.continueTurn(frame.uuid);
+      await this.begin();
+    }
     this.options.providerSession?.frame(frame);
     if ("parent_tool_use_id" in frame && frame.parent_tool_use_id) return;
     if (frame.type === "system" && frame.subtype === "init" && frame.session_id !== this.state.sessionId) {
@@ -341,8 +347,6 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       await this.begin(); await this.activate(input); this.sent.delete(id);
     }
     if (ids.length) await this.publishStatus();
-    // Background completion can trigger a new native turn without new user input.
-    if (frame.type === "assistant" && !this.turnOpen && !this.interrupted) await this.begin();
     // API failures arrive as synthetic assistant messages and can use a
     // "success" result envelope with is_error=true. Keep the explanation for
     // the runtime error path rather than dropping it as unfinished progress.
