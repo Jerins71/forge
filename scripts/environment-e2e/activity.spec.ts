@@ -16,6 +16,7 @@ const assertions: Record<string, unknown> = {}
 const renderErrors: string[] = []
 let fleet: UiFleet
 let manifest: FleetManifest
+let historyAdmin: BootstrapSession
 let context: BrowserContext
 let sharedPage: Page
 const test = base.extend({ page: async ({}, use) => { await use(sharedPage) } })
@@ -29,6 +30,11 @@ const releaseFile = () => join(manifest.environments[0]!.checkout, '.fixture-act
 async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
+}
+/** Count canonical rows: the transcript only mounts the current viewport's history. */
+async function canonicalStatusRows() {
+  const history = await fixtureRpcOnce(fleet.a.baseUrl, historyAdmin, 'session.history', { sessionId: fleet.a.sessionId, turns: 20 })
+  return history.items.filter((item: any) => item.activity?.kind === 'status') as Array<{ itemId: string; text: string }>
 }
 async function send(page: Page, text: string) {
   await page.getByRole('combobox', { name: /^(Message |Send another message to )/ }).fill(text)
@@ -55,6 +61,7 @@ test.beforeAll(async ({ browser, environmentManifest }) => {
   await mkdir(evidenceRoot, { recursive: true })
   manifest = await readManifest(environmentManifest)
   fleet = await openUiFleet(environmentManifest)
+  historyAdmin = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   sharedPage = await context.newPage()
   sharedPage.on('pageerror', error => renderErrors.push(error.message))
@@ -288,11 +295,12 @@ test('a successful turn after a failure and a model switch clears the failure, l
   assertions.failureResolvedBySuccess = { sessionId, attention: (await attention()) ?? null }
 })
 
-test('after a model switch a session still streams, settles and reports it finished, and a cut-off reply is marked, live and after reload', async ({ page }) => {
+test('after repeated model switches the shared session still streams, settles and reports it finished, live and after reload', async ({ page }) => {
   const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
   const settled = async (commandId: string) => { await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000) }
-  const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title: 'Switched model', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Before the switch', artifactIds: [] } }
-  const sessionId = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
+  const sessionId = fleet.a.sessionId
+  const launch = { commandId: randomUUID(), projectId: sessionId, title: 'Elsewhere', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Elsewhere', artifactIds: [] } }
+  const elsewhere = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
   await settled(launch.commandId)
   const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
   const open = async (id: string) => { await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(id)}`); await expect(transcript(page)).toBeVisible() }
@@ -307,7 +315,7 @@ test('after a model switch a session still streams, settles and reports it finis
   await send(page, '[fixture:retry] Answer on the new model')
   await expect(stop).toBeVisible({ timeout: 15_000 })
   // ...and, once it finishes out of view (the session in view is never left needing the user), it is reported finished.
-  await open(fleet.a.sessionId)
+  await open(elsewhere)
   await writeFile(releaseFile(), 'release')
   await expect.poll(attention, { timeout: 30_000 }).toBe('work_settled')
   await page.reload()
@@ -317,17 +325,10 @@ test('after a model switch a session still streams, settles and reports it finis
   await expect.poll(async () => { const text = await transcript(page).innerText(); return text.lastIndexOf('assistant reply') > text.lastIndexOf('Answer on the new model') }, { timeout: 30_000 }).toBe(true)
   await expect(stop).toHaveCount(0)
   await shot(page, 'rebound-runtime-settled')
-  // The rebound provider numbers its items afresh; a reply it cuts off is still its own row and is marked.
-  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
-  const before = await status().count()
-  await send(page, '[fixture:crash-mid-reply] Stop halfway after the switch')
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
-  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
-  await expect(transcript(page)).toContainText('This reply stops halfway through its')
-  await page.reload()
-  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.', { timeout: 30_000 })
-  await shot(page, 'rebound-runtime-reply-interrupted')
-  assertions.reboundRuntime = { sessionId, attention: 'work_settled', replyInterrupted: true }
+  const inherit = { commandId: randomUUID(), sessionId, model: { mode: 'inherit' } }
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.configure', inherit)
+  await settled(inherit.commandId)
+  assertions.reboundRuntime = { sessionId, attention: 'work_settled' }
 })
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
@@ -385,10 +386,10 @@ test('a reply cut off by a dying provider is marked as interrupted, live and aft
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
-  const before = await status().count()
+  const before = (await canonicalStatusRows()).length
   await send(page, '[fixture:crash-mid-reply] Stop halfway')
   // The partial text stays, and it is followed by a marker so it cannot be read as a finished answer.
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect.poll(async () => (await canonicalStatusRows()).length, { timeout: 30_000 }).toBe(before + 1)
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
   await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
   await expect(transcript(page)).toContainText('This reply stops halfway through its')
@@ -400,6 +401,7 @@ test('a reply cut off by a dying provider is marked as interrupted, live and aft
   await expect(transcript(page)).toContainText('This reply stops halfway through its')
   expect(await order()).toBe(true)
   await shot(page, 'reply-interrupted-replayed')
+  assertions.reboundCrash = { canonicalStatuses: await canonicalStatusRows(), liveAndReplayed: true }
 })
 
 // Last: the fixture's provider process exits, and recovering the session is outside this suite.
@@ -407,9 +409,9 @@ test('a provider process that dies mid-turn is one failed status row', async ({ 
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
-  const before = await status().count()
+  const before = (await canonicalStatusRows()).length
   await send(page, '[fixture:crash] Lose the provider')
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect.poll(async () => (await canonicalStatusRows()).length, { timeout: 30_000 }).toBe(before + 1)
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
   await expect(status().last()).toContainText('Failed: The provider process stopped unexpectedly.')
   await status().last().getByRole('button').click()
