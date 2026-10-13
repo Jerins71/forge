@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream, accessSync, readFileSync, constants } from 'node:fs'
+import { createReadStream, accessSync, readFileSync, constants } from 'node:fs'
 import { access, chmod, mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+import { writeFileAtomic, writeJsonFileAtomic } from '../../utils/atomic-files.js'
 import extract from '@electron-internal/extract-zip'
 import { chromium, type BrowserContext } from 'playwright-core'
 import { getBrowserProfileDir, getBrowserRuntimeDir } from '../storage/data-paths.js'
@@ -68,17 +68,15 @@ export class HeadlessBrowser {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         const response = await fetch(`https://storage.googleapis.com/chrome-for-testing-public/${HEADLESS_CHROME_VERSION}/${platform}/${folder}.zip`, { signal: AbortSignal.timeout(15 * 60 * 1000) })
         if (!response.ok || !response.body) throw new Error(`Browser download failed (${response.status}). Retry setup.`)
-        const part = join(staging, 'download.zip'); let bytes = 0
+        let bytes = 0
         async function* bounded() { for await (const chunk of Readable.fromWeb(response.body! as Parameters<typeof Readable.fromWeb>[0])) { bytes += chunk.length; if (bytes > releases[platform][0]) throw new Error('Browser archive exceeds its pinned length.'); yield chunk } }
-        // The archive streams to disk with a size cap; the whole-file helper would buffer it.
-        // eslint-disable-next-line no-restricted-syntax
-        await pipeline(bounded(), createWriteStream(part, { mode: 0o600 })); await rename(part, archive)
+        await writeFileAtomic(archive, bounded(), { mode: 0o600 })
       }
       const [length, sha256] = releases[platform]; const hash = createHash('sha256'); let bytes = 0
       for await (const chunk of createReadStream(archive)) { bytes += chunk.length; hash.update(chunk) }
       if (bytes !== length || hash.digest('hex') !== sha256) { await rm(archive); throw new Error('Browser archive did not match its pinned SHA-256 and size.') }
       await extract(archive, { dir: staging })
-      await import('../../utils/atomic-files.js').then(files => files.writeJsonFileAtomic(join(staging, 'integrity.json'), { version: HEADLESS_CHROME_VERSION, sha256: releases[platform][1] }, { mode: 0o600 }))
+      await writeJsonFileAtomic(join(staging, 'integrity.json'), { version: HEADLESS_CHROME_VERSION, sha256: releases[platform][1] }, { mode: 0o600 })
       if (process.platform !== 'win32') await chmod(join(staging, folder, 'chrome-headless-shell'), 0o755)
       await mkdir(join(root, HEADLESS_CHROME_VERSION), { recursive: true, mode: 0o700 })
       // Concurrent environments may share only the binary cache, never profiles.

@@ -33,7 +33,6 @@
     "ws": "^8.19.0"
   },
   "devDependencies": {
-    "@electron/asar": "^3.4.1",
     "@electron/rebuild": "^4.2.0",
     "@types/node": "^24.3.0",
     "@types/ws": "^8.18.1",

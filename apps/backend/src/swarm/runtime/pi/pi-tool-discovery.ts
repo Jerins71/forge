@@ -37,7 +37,7 @@ export function createPiBrowserDiscovery(browserTools: readonly ToolDefinition[]
   const tool: ToolDefinition = {
     name: "discover_tools",
     label: "Discover tools",
-    description: "Load optional capabilities for this actor. Available bundle: browser — inspect and interact with web pages, select existing Chrome tabs, take screenshots, and record the embedded browser. Call with bundles:[\"browser\"] before using browser tools. Omit bundles to list capabilities. Loading does not open or operate the browser; typed tools become available on the next model call.",
+    description: "Load optional capabilities for this actor. Available bundle: browser — inspect and interact with web pages, open shared Forge tabs, take screenshots, and record the browser. Call with bundles:[\"browser\"] before using browser tools. Omit bundles to list capabilities. Loading does not open or operate the browser; typed tools become available on the next model call.",
     parameters: Type.Object({ bundles: Type.Optional(Type.Array(Type.Literal("browser"), { minItems: 1, maxItems: 1, uniqueItems: true })) }, { additionalProperties: false }),
     async execute(_id, input) {
       if (!session) throw new Error("Tool discovery is not ready");
@@ -46,7 +46,7 @@ export function createPiBrowserDiscovery(browserTools: readonly ToolDefinition[]
         throw new Error("Unknown bundle. Available: browser.");
       }
       if (bundles === undefined) {
-        return { content: [{ type: "text", text: JSON.stringify({ bundles: [{ id: "browser", loaded, description: "Page inspection, interaction, screenshots, and embedded recording." }] }) }], details: {} };
+        return { content: [{ type: "text", text: JSON.stringify({ bundles: [{ id: "browser", loaded, description: "Page inspection, interaction, screenshots, and browser recording." }] }) }], details: {} };
       }
       const registered = new Set(session.getAllTools().map(entry => entry.name));
       if (!names.every(name => registered.has(name))) {

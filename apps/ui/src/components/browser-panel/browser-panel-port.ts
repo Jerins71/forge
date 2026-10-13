@@ -122,10 +122,3 @@ export interface BrowserPanelPort {
   resizeScreencast?(tabId: string, viewport: BrowserScreencastViewport): void
   sendInput?(tabId: string, input: BrowserPanelInput): void
 }
-
-export const EMPTY_BROWSER_PANEL_SNAPSHOT: BrowserPanelSnapshot = {
-  availability: { kind: 'ready' },
-  surface: 'screencast',
-  tabs: [],
-  activeTabId: null,
-}

@@ -41,6 +41,7 @@ test('headless engine drives fixtures, acknowledged screencast and persistent pr
  const tabId = opened.activeTabId!
     expect(opened.tabs[0]!.host).toBe('headless')
     expect((await engine.invoke('session', 'project', 'status', {})).ok).toBe(true)
+    const missingTab = await engine.invoke('session', 'project', 'open', { tabId: 'missing-tab', reuseExistingTab: true, show: false }); expect(missingTab.ok).toBe(false); expect((await engine.getSnapshot('session')).tabs).toHaveLength(1)
     expect((await engine.invoke('session', 'project', 'navigate', { tabId, url, readiness: 'domContentLoaded', timeoutMs: 15000 })).ok).toBe(true)
     expect((await engine.invoke('session', 'project', 'resize', { tabId, mode: 'freeform', width: 800, height: 600, timeoutMs: 15000 })).ok).toBe(true)
     const type = await engine.invoke('session', 'project', 'type', { tabId, locator: 'label=Email', text: 'proof@example.test', clear: true, timeoutMs: 15000 }); expect(type.ok).toBe(true)
@@ -77,6 +78,10 @@ test('headless engine drives fixtures, acknowledged screencast and persistent pr
     await expect.poll(async () => (await engine.getSnapshot('session')).tabs[0]!.agentAction).toBeTruthy()
     await engine.input('session', tabId, { kind: 'text', text: 'human' }); const cancelled = await pending
     expect(cancelled.ok).toBe(false)
+    const pendingEvaluation = engine.invoke('session', 'project', 'evaluate', { tabId, expression: 'new Promise(() => {})', awaitPromise: true, returnByValue: true })
+    await expect.poll(async () => (await engine.getSnapshot('session')).tabs[0]!.agentAction).toBe('Evaluating page JavaScript')
+    await engine.input('session', tabId, { kind: 'text', text: 'interrupt' })
+    const evaluationCancelled = await Promise.race([pendingEvaluation, new Promise<never>((_resolve, reject) => { const timer = setTimeout(() => reject(new Error('Evaluation did not cancel.')), 5000); timer.unref() })]); expect(evaluationCancelled.ok).toBe(false)
     await engine.invoke('session', 'project', 'evaluate', { tabId, expression: 'document.cookie="fixture=persisted;Max-Age=3600;path=/"', awaitPromise: true, returnByValue: true })
     await engine.shutdown(); engine = create()
     const restored = await engine.getSnapshot('session'); expect(restored.tabs[0]!.tabId).toBe(tabId)

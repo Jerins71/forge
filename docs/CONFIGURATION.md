@@ -46,8 +46,6 @@ Skill API keys can also be configured in the dashboard under **Settings → Skil
 
 Forge’s Browser panel and built-in tools share a Playwright engine in each environment. Desktop uses embedded Electron tabs; standalone and remote backends use a pinned headless shell with a live view. See [Browser automation](BROWSER_AUTOMATION.md) for installation, Linux dependencies, and explicit cookie import.
 
-Optional Chrome setup and repair live under **Settings → Use Chrome with Forge**. Complete setup for every Chrome profile and `FORGE_DATA_DIR` you intend to use. Browser recording remains embedded-only.
-
 Ordinary web clients have no local browser host. See [Browser automation](BROWSER_AUTOMATION.md) for setup, behavior, persistence, and security boundaries.
 
 ### Secure Sessions

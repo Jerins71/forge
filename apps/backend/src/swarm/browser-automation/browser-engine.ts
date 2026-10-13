@@ -86,9 +86,9 @@ export class BrowserEngine {
   private readonly options: { dataDir: string; resolveSession(sessionId: string): string | undefined; browserCacheDir?: string; desktop?: DesktopBrowserChannel }
   constructor(options: BrowserEngine['options']) {
     this.cookies = new BrowserCookieImport({ engine: this, dataDir: options.dataDir }); this.options = options; this.desktop = options.desktop ?? new DesktopBrowserChannel()
-    this.headless = new HeadlessBrowser({ dataDir: options.dataDir, cacheDir: options.browserCacheDir ?? process.env.FORGE_BROWSER_CACHE_DIR, onSetup: () => { for (const work of this.sessions.values()) void work.then(session => this.publish(session)) } })
-    this.desktop.onInput = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) this.humanInput(session, tab) }) }
-    this.desktop.onClosed = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) { tab.state.errorCode = 'crashed'; tab.state.error = 'Desktop browser page closed.'; this.publish(session) } }) }
+    this.headless = new HeadlessBrowser({ dataDir: options.dataDir, cacheDir: options.browserCacheDir ?? process.env.FORGE_BROWSER_CACHE_DIR, onSetup: () => { for (const work of this.sessions.values()) void work.then(session => this.publish(session)).catch(() => {}) } })
+    this.desktop.onInput = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) this.humanInput(session, tab) }).catch(() => {}) }
+    this.desktop.onClosed = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) { tab.state.errorCode = 'crashed'; tab.state.error = 'Desktop browser page closed.'; this.publish(session) } }).catch(() => {}) }
   }
   setupState(): BrowserSetupState { return this.desktop.available ? { browserEngineState: 'ready' } : this.headless.state() }
   async setup(): Promise<BrowserSetupState> { if (!this.desktop.available) void this.headless.ensureExecutable().catch(() => {}); return this.setupState() }
@@ -216,7 +216,7 @@ export class BrowserEngine {
   }
   private async perform(sessionId: string, operation: BrowserAutomationOperation, input: BrowserAutomationInputByOperation[BrowserAutomationOperation]): Promise<unknown> {
     if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: snapshot.browserEngineState !== 'failed', ...this.setupState(), selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ?? null, tabs: snapshot.tabs } }
-    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false } }
+    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; if (value.tabId && !existing) throw new Error('The requested browser tab does not belong to this session.'); const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false } }
     const { session, tab } = await this.tab(sessionId, input.tabId)
     const actionEpoch = tab.actionEpoch
     const run = async () => {
@@ -240,7 +240,23 @@ export class BrowserEngine {
       case 'type': { const input = raw as BrowserAutomationInputByOperation['type']; const locator = input.locator || input.selector ? locate(page, input) : page.locator(':focus'); await this.point(session, tab, locator, signal); if (input.clear) await locator.fill(input.text, { timeout: input.timeoutMs, signal }); else await locator.pressSequentially(input.text, { timeout: input.timeoutMs, signal }); return { tabId, characters: input.text.length, cleared: input.clear ?? false } }
       case 'press': { const input = raw as BrowserAutomationInputByOperation['press']; signal.throwIfAborted(); await page.keyboard.press([...(input.modifiers ?? []), input.key].join('+')); return { tabId, key: input.key, modifiers: input.modifiers ?? [] } }
       case 'scroll': { const input = raw as BrowserAutomationInputByOperation['scroll']; const deltaX = input.deltaX ?? 0, deltaY = input.deltaY ?? 0; if (input.locator || input.selector) { const locator = locate(page, input); await this.point(session, tab, locator, signal); await locator.evaluate(`(element) => element.scrollBy(${deltaX}, ${deltaY})`) } else { signal.throwIfAborted(); await page.mouse.wheel(deltaX, deltaY) } const positions = await page.evaluate<{ scrollX: number; scrollY: number }>('({ scrollX, scrollY })'); return { tabId, deltaX, deltaY, ...positions } }
-      case 'evaluate': { const input = raw as BrowserAutomationInputByOperation['evaluate']; const terminate = () => { void tab.cdp.send('Runtime.terminateExecution').catch(() => {}) }; signal.addEventListener('abort', terminate, { once: true }); try { const result = await tab.cdp.send('Runtime.evaluate', { expression: input.expression, awaitPromise: input.awaitPromise, returnByValue: input.returnByValue }); if (result.exceptionDetails) throw new Error(result.exceptionDetails.text); signal.throwIfAborted(); const value = result.result.value; const serializedBytes = Buffer.byteLength(JSON.stringify(value) ?? ''); if (serializedBytes > 65536) throw new Error('Evaluation result exceeds 64 KiB.'); return { tabId, ...(input.returnByValue ? { value } : { remoteObject: result.result }), serializedBytes } } finally { signal.removeEventListener('abort', terminate) } }
+      case 'evaluate': {
+        const input = raw as BrowserAutomationInputByOperation['evaluate']; signal.throwIfAborted()
+        let interrupt!: () => void
+        const cancelled = new Promise<never>((_resolve, reject) => {
+          interrupt = () => { void tab.cdp.send('Runtime.terminateExecution').catch(() => {}); reject(signal.reason ?? new Error('Browser evaluation was interrupted.')) }
+          signal.addEventListener('abort', interrupt, { once: true })
+        })
+        try {
+          // Termination does not settle CDP evaluations waiting on a page promise.
+          // The owning action must still finish immediately when the user interrupts it.
+          const result = await Promise.race([tab.cdp.send('Runtime.evaluate', { expression: input.expression, awaitPromise: input.awaitPromise, returnByValue: input.returnByValue }), cancelled])
+          if (result.exceptionDetails) throw new Error(result.exceptionDetails.text)
+          signal.throwIfAborted(); const value = result.result.value; const serializedBytes = Buffer.byteLength(JSON.stringify(value) ?? '')
+          if (serializedBytes > 65536) throw new Error('Evaluation result exceeds 64 KiB.')
+          return { tabId, ...(input.returnByValue ? { value } : { remoteObject: result.result }), serializedBytes }
+        } finally { signal.removeEventListener('abort', interrupt) }
+      }
       case 'waitFor': { const input = raw as BrowserAutomationInputByOperation['waitFor']; const started = Date.now(); if (input.locator || input.selector) await locate(page, input).waitFor({ state: 'visible', timeout: input.timeoutMs, signal }); if (input.text) await page.getByText(input.text, { exact: false }).first().waitFor({ state: 'visible', timeout: input.timeoutMs, signal }); if (input.urlIncludes) await page.waitForURL(url => url.href.includes(input.urlIncludes!), { timeout: input.timeoutMs, signal }); return { tabId, matched: true, elapsedMs: Date.now() - started } }
       default: throw new Error(`Browser operation ${operation} is not implemented yet.`)
     }
@@ -257,7 +273,7 @@ export class BrowserEngine {
   }
   cancelSession(sessionId: string): number {
     const loaded = this.sessions.get(sessionId)
-    if (loaded) void loaded.then(session => { for (const tab of session.tabs.values()) { tab.actionEpoch++; tab.action?.abort(new Error('Browser session was stopped.')) } })
+    if (loaded) void loaded.then(session => { for (const tab of session.tabs.values()) { tab.actionEpoch++; tab.action?.abort(new Error('Browser session was stopped.')) } }).catch(() => {})
     return loaded ? 1 : 0
   }
   async endBrowserTurn(_profileId: string, sessionId: string, _turnId: string): Promise<void> { await this.releaseSessionForLifecycle(_profileId, sessionId, 'stop') }

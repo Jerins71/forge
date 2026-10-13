@@ -102,6 +102,10 @@
       "project": [
         "src/**/*.{ts,tsx}",
         "scripts/**/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "@napi-rs/keyring",
+        "koffi"
       ]
     },
     "packages/protocol": {
