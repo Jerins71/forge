@@ -383,9 +383,10 @@ export class BrowserEngine {
   }
   async archiveSession(profileId: string, sessionId: string): Promise<void> {
     await this.releaseSessionForLifecycle(profileId, sessionId, 'archive'); this.cookies.releaseSession(sessionId)
-    const loaded = this.sessions.get(sessionId); if (!loaded) return; const session = await loaded
+    const loaded = this.sessions.get(sessionId); if (!loaded) { this.headless.forgetSessionCookies(profileId); return }; const session = await loaded
     await this.persist(session); session.closed = true; this.sessions.delete(sessionId); await Promise.allSettled([...session.popups])
     for (const tab of session.tabs.values()) { tab.closing = true; if (tab.recording) { await tab.recording.cast.release(); await tab.recording.work; await tab.recording.encoder.stop().catch(() => {}) }; await tab.stream?.stop(); await tab.dispose() }
+    this.headless.forgetSessionCookies(profileId)
     session.tabs.clear(); session.snapshot.activeTabId = null; this.publish(session)
   }
   async restoreSession(_profileId: string, sessionId: string): Promise<void> { if (this.sessions.has(sessionId)) return; await this.getSnapshot(sessionId) }

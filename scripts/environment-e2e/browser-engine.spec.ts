@@ -164,6 +164,45 @@ for (const host of ['headless', 'desktop'] as const) test(`${host} adopts OAuth 
   } finally { await engine?.shutdown(); await application?.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
 })
 
+/** Session cookie failures: no-tab import retires before sign-in can be used;
+ * last-tab close loses the session; a partition key is stripped; Forget, archive
+ * or process shutdown resurrects remembered logins. Cookie values stay synthetic. */
+test('session-cookie imports survive idle retirement and first-tab reopen without becoming persistent', async ({}, info) => {
+  const { BrowserCookieImport } = await import('../../apps/backend/src/swarm/browser-automation/browser-cookie-import.js')
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-session-cookie-proof-'))
+  const create = () => new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') })
+  let engine = create(), releaseRetirement = () => {}
+  const imported = [{ name: 'session-login', value: 'synthetic-session', domain: '.session.example.test', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'None' as const }, { name: 'partition-login', value: 'synthetic-partition', domain: '.session.example.test', path: '/', expires: -1, httpOnly: true, secure: true, sameSite: 'None' as const, partitionKey: 'https://partition.test', partitionHasCrossSiteAncestor: true }, { name: 'persistent-login', value: 'synthetic-persistent', domain: '.session.example.test', path: '/', expires: Date.now() / 1000 + 3600, httpOnly: true, secure: true, sameSite: 'None' as const }]
+  const importCookies = async () => {
+    const importer = new BrowserCookieImport({ engine, dataDir: root, running: async () => imported })
+    try { const preview = await importer.preview('device', 'session', 'chrome-running'); if (!preview.ok) throw new Error('Fixture preview failed'); await importer.apply('device', 'session', preview.importId, ['example.test']) } finally { importer.shutdown() }
+  }
+  const cookies = () => engine.withCookieContext('session', context => context.cookies())
+  const expectSession = async () => { const stored = await cookies(); expect(stored.find(cookie => cookie.name === 'session-login')?.expires).toBe(-1); expect(stored.find(cookie => cookie.name === 'partition-login')).toMatchObject({ expires: -1, partitionKey: 'https://partition.test', _crHasCrossSiteAncestor: true }) }
+  try {
+    await importCookies() // This closes the no-tab import context before returning.
+    const first = await engine.open('session', {}); await expectSession()
+    await engine.open('other', {}); await engine.archiveSession('project', 'other')
+    await engine.close('session', first.activeTabId!); const reopened = await engine.open('session', {}); await expectSession()
+    await engine.cookies.forget('session', 'example.test'); await engine.close('session', reopened.activeTabId!); const forgotten = await engine.open('session', {}); expect(await cookies()).toEqual([])
+    await importCookies()
+    const context = await engine.headless.context('project'), originalCookies = context.cookies.bind(context)
+    let entered!: () => void; const capturing = new Promise<void>(resolve => { entered = resolve }), pause = new Promise<void>(resolve => { releaseRetirement = resolve })
+    context.cookies = async (...args) => { entered(); await pause; return originalCookies(...args) }
+    const closing = engine.close('session', forgotten.activeTabId!); await capturing
+    await engine.archiveSession('project', 'session'); releaseRetirement(); await closing
+    await engine.restoreSession('project', 'session')
+    expect((await cookies()).map(cookie => cookie.name)).toEqual(['persistent-login'])
+    await importCookies(); await engine.shutdown(); engine = create(); await engine.open('session', {})
+    expect((await cookies()).map(cookie => cookie.name)).toEqual(['persistent-login'])
+    await engine.shutdown(); engine = create(); await importCookies()
+    await engine.archiveSession('project', 'session') // Cookie-only projects have no loaded tab session.
+    await engine.open('session', {}); expect((await cookies()).map(cookie => cookie.name)).toEqual(['persistent-login'])
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'session-cookie-proof.json'), JSON.stringify({ passed: true, noTabImport: true, firstTab: true, lastTabReopen: true, sessionExpiryPreserved: true, partitionPreserved: true, forgetClears: true, archiveClears: true, archiveFencesPendingRetirement: true, cookieOnlyArchiveClears: true, otherActiveSessionPreserves: true, shutdownClears: true, persistentCookieSurvives: true, browserOnlyMemory: true }, null, 2))
+    expect(forgotten.tabs).toHaveLength(1)
+  } finally { releaseRetirement(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('idle project contexts retire after the last tab and cookie operation, preserving the profile', async ({}, info) => {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-idle-proof-'))
   const engine = new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') })

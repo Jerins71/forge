@@ -64,7 +64,6 @@ const useShell = process.platform === 'win32'
 
 export const BACKEND_BUNDLE_EXTERNAL_PACKAGES = [
   { name: 'playwright-core', optional: false, validateLoadedModule: loaded => typeof loaded?.chromium?.connectOverCDP === 'function' ? null : 'expected Chromium CDP API' },
-  { name: '@electron-internal/extract-zip', optional: false, validateLoadedModule: loaded => typeof loaded?.extract === 'function' ? null : 'expected native archive extractor' },
   { name: '@napi-rs/keyring', optional: false, validateLoadedModule: loaded => typeof loaded?.Entry === 'function' ? null : 'expected in-process keyring API' },
   {
     name: '@anthropic-ai/claude-agent-sdk',

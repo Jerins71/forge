@@ -21,7 +21,6 @@
     "@cursor/sdk": "1.0.13",
     "@earendil-works/pi-ai": "0.80.6",
     "@earendil-works/pi-coding-agent": "0.80.6",
-    "@electron-internal/extract-zip": "1.0.4",
     "@forge/protocol": "workspace:*",
     "@google/genai": "^1.42.0",
     "@modelcontextprotocol/sdk": "1.29.0",
