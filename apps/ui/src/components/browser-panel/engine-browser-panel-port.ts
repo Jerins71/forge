@@ -13,6 +13,9 @@ import { normalizeBrowserAddress } from './browser-address'
 const VIEWPORT_MIN = 240
 const VIEWPORT_MAX = 3840
 const SCREENCAST_QUALITY = 70
+const SCREENCAST_RETRY_MS = 1000
+/** A new viewer gets the latest frame at once; none by then means the stream stalled. */
+const SCREENCAST_FIRST_FRAME_MS = 5000
 
 export interface EngineBrowserPanelPortOptions {
   client: EnvironmentClient
@@ -112,32 +115,59 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
         void nativeBridge.hide().catch(() => undefined)
       }
     },
-    subscribeFrames(tabId, viewport, onFrame) {
+    subscribeFrames(tabId, viewport, onFrame, onError) {
       let closed = false
       let decoding = Promise.resolve()
+      let stream: ReturnType<typeof engine.screencast> | null = null
+      let retry: ReturnType<typeof setTimeout> | null = null
+      let gotFrame = false
       resizeHeadless(tabId, viewport)
-      const stream = engine.screencast({
-        sessionId, tabId, quality: SCREENCAST_QUALITY,
-        maxWidth: clampDimension(viewport.width * viewport.deviceScaleFactor),
-        maxHeight: clampDimension(viewport.height * viewport.deviceScaleFactor),
-      }, {
-        next(item) {
-          if (item.kind !== 'frame' || item.tabId !== tabId) return
-          decoding = decoding.then(async () => {
-            if (closed) return
-            const image = await decodeJpeg(item.data)
-            if (closed) { image.close(); return }
-            const page = tabOf(tabId)?.viewport ?? { width: item.width, height: item.height }
-            onFrame({ sequence: item.frameId, image, viewport: page, close: () => image.close() })
-            // One unacknowledged frame per viewer: acknowledging asks for the next.
-            void stream.ack(item.frameId).catch(() => undefined)
-          }).catch(() => undefined)
-        },
-        error: () => undefined,
-      })
+      // A tab whose page is still starting can refuse or end a stream, and a stream can attach as the
+      // previous one stops; reconnect until the first frame arrives, then whenever the stream ends.
+      const reconnect = (message?: string) => {
+        if (closed || retry) return
+        if (message) onError?.(message)
+        stream?.release()
+        stream = null
+        retry = setTimeout(() => { retry = null; connect() }, SCREENCAST_RETRY_MS)
+      }
+      const connect = () => {
+        if (closed) return
+        gotFrame = false
+        const current = engine.screencast({
+          sessionId, tabId, quality: SCREENCAST_QUALITY,
+          maxWidth: clampDimension(viewport.width * viewport.deviceScaleFactor),
+          maxHeight: clampDimension(viewport.height * viewport.deviceScaleFactor),
+        }, {
+          next(item) {
+            if (item.tabId !== tabId || stream !== current) return
+            if (item.kind === 'state') {
+              if (item.state === 'error') reconnect(item.message ?? 'The live view stopped.')
+              else if (item.state === 'closed') reconnect()
+              return
+            }
+            gotFrame = true
+            decoding = decoding.then(async () => {
+              if (closed || stream !== current) return
+              const image = await decodeJpeg(item.data)
+              if (closed) { image.close(); return }
+              const page = tabOf(tabId)?.viewport ?? { width: item.width, height: item.height }
+              onFrame({ sequence: item.frameId, image, viewport: page, close: () => image.close() })
+              // One unacknowledged frame per viewer: acknowledging asks for the next.
+              void current.ack(item.frameId).catch(() => undefined)
+            }).catch((error: unknown) => onError?.(error instanceof Error ? error.message : String(error)))
+          },
+          error: (error) => { if (stream === current) reconnect(error instanceof Error ? error.message : String(error)) },
+        })
+        stream = current
+        setTimeout(() => { if (stream === current && !gotFrame) reconnect() }, SCREENCAST_FIRST_FRAME_MS)
+      }
+      connect()
       return () => {
         closed = true
-        stream.release()
+        if (retry) clearTimeout(retry)
+        stream?.release()
+        stream = null
       }
     },
     resizeScreencast: resizeHeadless,

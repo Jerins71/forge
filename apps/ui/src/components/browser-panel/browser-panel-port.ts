@@ -116,6 +116,8 @@ export interface BrowserPanelPort {
     tabId: string,
     viewport: BrowserScreencastViewport,
     onFrame: (frame: BrowserScreencastFrame) => void,
+    /** The live view stopped; the message says why. */
+    onError?: (message: string) => void,
   ): () => void
   resizeScreencast?(tabId: string, viewport: BrowserScreencastViewport): void
   sendInput?(tabId: string, input: BrowserPanelInput): void

@@ -23,7 +23,8 @@ interface BrowserPanelProps {
 export function BrowserPanel({ port, snapshot, docked, onClose }: BrowserPanelProps) {
   const [error, setError] = useState<string | null>(null)
   const [focusAddressNonce, setFocusAddressNonce] = useState(0)
-  const ready = snapshot.availability.kind === 'ready'
+  // A machine without a browser yet still takes addresses: opening a page installs it.
+  const ready = usable(snapshot)
   const activeTab = snapshot.tabs.find((tab) => tab.tabId === snapshot.activeTabId) ?? null
 
   const run = (action: () => Promise<unknown>) => {
@@ -106,7 +107,8 @@ function BrowserContent({ port, snapshot, activeTab, onNewTab, onReload }: {
   onReload: () => void
 }) {
   const { availability } = snapshot
-  if (availability.kind !== 'ready') {
+  // Without a browser yet, an empty panel offers setup; tabs already open still show.
+  if (availability.kind !== 'ready' && (!usable(snapshot) || !activeTab)) {
     return <BrowserAvailabilityState availability={availability} onSetup={port.setup ? () => void port.setup!() : undefined} />
   }
   if (!activeTab) return <BrowserEmptyState onNewTab={onNewTab} disabled={false} />
@@ -130,4 +132,8 @@ function AgentStrip({ tab }: { tab: BrowserPanelTab }) {
       <span className="ml-auto shrink-0 pl-2 text-[11.5px] text-subtle-foreground">Click or type to take over</span>
     </div>
   )
+}
+
+function usable({ availability }: BrowserPanelSnapshot): boolean {
+  return availability.kind === 'ready' || (availability.kind === 'setup' && availability.state === 'missing')
 }

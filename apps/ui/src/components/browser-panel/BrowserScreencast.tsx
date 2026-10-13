@@ -41,6 +41,7 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
   /** The pointer that pressed on the page; only it releases there. */
   const pressedRef = useRef<number | null>(null)
   const [hasFrame, setHasFrame] = useState(false)
+  const [streamError, setStreamError] = useState<string | null>(null)
   const [focused, setFocused] = useState(false)
   const [, setGeometryVersion] = useState(0)
 
@@ -58,6 +59,7 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
     const canvas = canvasRef.current
     if (!box || !canvas || !port.subscribeFrames) return
     setHasFrame(false)
+    setStreamError(null)
     geometryRef.current = null
     const initial = measure() ?? { width: 800, height: 600, deviceScaleFactor: window.devicePixelRatio || 1 }
     viewportRef.current = initial
@@ -76,7 +78,8 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
         setGeometryVersion((version) => version + 1)
       }
       setHasFrame(true)
-    })
+      setStreamError(null)
+    }, setStreamError)
     let timer: ReturnType<typeof setTimeout> | null = null
     const onResize = () => {
       if (timer) clearTimeout(timer)
@@ -248,7 +251,12 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
         onMouseDown={(event) => event.preventDefault()}
         onContextMenu={(event) => event.preventDefault()}
       />
-      {!hasFrame ? <ScreencastSkeleton /> : null}
+      {!hasFrame && !streamError ? <ScreencastSkeleton /> : null}
+      {streamError ? (
+        <div role="alert" data-browser-stream-error className="absolute inset-x-3 bottom-3 rounded-lg border border-hairline bg-card/95 px-3 py-2 text-[12px] text-muted-foreground shadow-sm">
+          Live view unavailable: {streamError}
+        </div>
+      ) : null}
       {hasFrame && agentCursor ? <AgentCursor cursor={agentCursor} toClient={(x, y) => {
         const geometry = geometryRef.current
         const drawn = drawnRect()

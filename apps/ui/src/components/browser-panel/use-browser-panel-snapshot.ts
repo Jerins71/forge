@@ -6,7 +6,8 @@ export function useBrowserPanelSnapshot(port: BrowserPanelPort): BrowserPanelSna
 }
 
 /**
- * Opens the panel when an agent opens a page: a tab the panel has not seen before, held by the agent.
+ * Opens the panel when an agent opens a page: any tab the panel has not seen before (a person opens
+ * tabs from the open panel itself, and the engine may publish a new tab before the agent acts on it).
  * Tabs present when the session is first shown never open it.
  */
 export function useRevealOnAgentTab(snapshot: BrowserPanelSnapshot, sessionKey: string | null, reveal: () => void): void {
@@ -17,6 +18,6 @@ export function useRevealOnAgentTab(snapshot: BrowserPanelSnapshot, sessionKey: 
     const previous = seen.current.ids
     seen.current.ids = ids
     if (!previous) return
-    if (snapshot.tabs.some((tab) => !previous.has(tab.tabId) && tab.controller === 'agent')) reveal()
+    if (snapshot.tabs.some((tab) => !previous.has(tab.tabId))) reveal()
   }, [reveal, sessionKey, snapshot.tabs])
 }
