@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type Database from "better-sqlite3";
 import type { HistoryEntryKind, HistorySearchOrder, HistoryIndexStatistics } from "@forge/protocol";
 import type { SqliteDatabaseConstructor } from "../types.js";
@@ -19,7 +20,10 @@ import {
 } from "./jsonl-reader.js";
 import {
   HISTORY_TOOL_NAME,
+  historyRecallCutoff,
   INDEX_SCHEMA_VERSION,
+  isWithinRecallWindow,
+  PURGE_BATCH_ROWS,
   INITIAL_WINDOW_ID,
   MAX_INDEX_CATCHUP_BYTES,
   MAX_INDEX_CATCHUP_SOURCES,
@@ -183,8 +187,11 @@ export class HistoryRecallIndexStore {
   private readonly getSource: Database.Statement;
   private readonly listSourceIds: Database.Statement;
   private readonly deleteSource: Database.Statement;
-  private readonly deleteEntries: Database.Statement;
-  private readonly deleteFts: Database.Statement;
+  private readonly rebaseSource: Database.Statement;
+  private readonly deleteFtsBatch: Database.Statement;
+  private readonly deleteEntriesBatch: Database.Statement;
+  private readonly deleteExpiredFts: Database.Statement;
+  private readonly deleteExpiredEntries: Database.Statement;
   private readonly insertEntry: Database.Statement;
   private readonly insertFts: Database.Statement;
   private readonly insertPayload: Database.Statement;
@@ -243,10 +250,14 @@ export class HistoryRecallIndexStore {
     this.getSource = database.prepare("SELECT * FROM sources WHERE source_id = ?");
     this.listSourceIds = database.prepare("SELECT source_id FROM sources");
     this.deleteSource = database.prepare("DELETE FROM sources WHERE source_id = ?");
-    this.deleteEntries = database.prepare("DELETE FROM entries WHERE source_id = ?");
-    this.deleteFts = database.prepare(`
-      DELETE FROM entries_fts WHERE rowid IN (SELECT rowid FROM entries WHERE source_id = ?)
-    `);
+    this.rebaseSource = database.prepare("UPDATE sources SET path=@path, inode=@inode, generation=@generation WHERE source_id=@source_id");
+    const sourceBatch = "SELECT id FROM entries WHERE source_id = ? ORDER BY id LIMIT ?";
+    this.deleteFtsBatch = database.prepare(`DELETE FROM entries_fts WHERE rowid IN (${sourceBatch})`);
+    this.deleteEntriesBatch = database.prepare(`DELETE FROM entries WHERE id IN (${sourceBatch})`);
+    const expiredBatch = `SELECT id FROM entries INDEXED BY entries_recent_idx
+      WHERE (CASE WHEN timestamp IS NULL OR timestamp = '' THEN 1 ELSE 0 END) = 0 AND timestamp < ? LIMIT ?`;
+    this.deleteExpiredFts = database.prepare(`DELETE FROM entries_fts WHERE rowid IN (${expiredBatch})`);
+    this.deleteExpiredEntries = database.prepare(`DELETE FROM entries WHERE id IN (${expiredBatch})`);
     this.insertEntry = database.prepare(`
       INSERT INTO entries (
         source_id, entry_id, part_id, chunk_index, kind, role, tool_name, timestamp, window_id, origin,
@@ -309,20 +320,18 @@ export class HistoryRecallIndexStore {
   ): Promise<HistoryRecallIndexStore> {
     const DatabaseConstructor = await loadDatabaseModule();
     mkdirSync(dirname(path), { recursive: true });
-    let database = new DatabaseConstructor(path);
+    void removeReplacedCaches(path);
+    if (existsSync(path) && isOutdatedCache(new DatabaseConstructor(path, { readonly: true, fileMustExist: true }))) {
+      // Only this recognized, rebuildable cache is replaced; never canonical data. A
+      // large cache is set aside by rename and freed off the main thread.
+      const replaced = `${path}${REPLACED_CACHE_MARK}${Date.now()}`;
+      for (const suffix of ["", "-wal", "-shm"]) if (existsSync(`${path}${suffix}`)) renameSync(`${path}${suffix}`, `${replaced}${suffix}`);
+      void removeReplacedCaches(path);
+    }
+    const database = new DatabaseConstructor(path);
     try {
-      const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
-      if (tables.length > 0) {
-        const known = ["meta", "sources", "entries"].every((name) => tables.some((table) => table.name === name));
-        if (!known) throw new Error("Refusing to replace an unrecognized history cache");
-        const version = database.prepare("SELECT value FROM meta WHERE key='projection_version'").get() as { value: string } | undefined;
-        if (version?.value !== INDEX_SCHEMA_VERSION) {
-          database.close();
-          // Only this recognized, rebuildable cache is replaced; never canonical data.
-          for (const file of [path, `${path}-wal`, `${path}-shm`]) if (existsSync(file)) unlinkSync(file);
-          database = new DatabaseConstructor(path);
-        }
-      }
+      // Takes effect only on a new file; lets pruning give pages back in small steps.
+      database.pragma("auto_vacuum = INCREMENTAL");
       database.pragma("journal_mode = WAL");
       database.pragma("synchronous = NORMAL");
       database.pragma("cache_size = -32768");
@@ -453,7 +462,7 @@ export class HistoryRecallIndexStore {
 
   private needsReadableSourceScan(source: HistorySourceDescriptor): boolean {
     const stat = readSourceStat(source.path);
-    const row = this.getSourceRow(source.sourceId);
+    let row = this.getSourceRow(source.sourceId);
     if (!stat) {
       return Boolean(row);
     }
@@ -461,6 +470,7 @@ export class HistoryRecallIndexStore {
       return true;
     }
     const generation = readSourceGeneration(source.path, stat);
+    row = this.adoptRelocatedSource(source, stat, generation, row);
     if (row.generation !== generation || row.inode !== stat.ino) {
       return true;
     }
@@ -519,8 +529,10 @@ export class HistoryRecallIndexStore {
     if (!params.ftsMatch) {
       return [];
     }
-    const clauses = ["entries_fts MATCH @ftsMatch"];
+    // Rows already past the recall window stay hidden until pruning removes them.
+    const clauses = ["entries_fts MATCH @ftsMatch", "(entries.timestamp IS NULL OR entries.timestamp = '' OR entries.timestamp >= @recallCutoff)"];
     const bindings: Record<string, unknown> = {
+      recallCutoff: historyRecallCutoff(),
       ftsMatch: params.ftsMatch,
       limit: params.limit,
       offset: params.offset,
@@ -618,11 +630,9 @@ export class HistoryRecallIndexStore {
     let remainingBytes = options?.maxBytes ?? MAX_INDEX_CATCHUP_TOTAL_BYTES;
     if (options?.purgeMissing && options.liveSourceIds) {
       const liveIds = new Set(options.liveSourceIds);
-      for (const row of this.listSourceIds.all() as Array<{ source_id: string }>) {
-        if (!liveIds.has(row.source_id)) {
-          this.purgeSource(row.source_id);
-        }
-      }
+      // One bounded batch per catch-up; background ingestion removes the rest.
+      const orphan = (this.listSourceIds.all() as Array<{ source_id: string }>).find((row) => !liveIds.has(row.source_id));
+      if (orphan) this.purgeSourceSlice(orphan.source_id);
     }
 
     const ordered = options?.preferRecent ? prioritizeRecent(sources, this) : sources;
@@ -647,20 +657,38 @@ export class HistoryRecallIndexStore {
     return { incomplete, warnings: unique(warnings), pendingSourceCount };
   }
 
-  purgeSession(sessionAgentId: string): void {
-    const rows = this.database.prepare("SELECT source_id FROM sources WHERE session_agent_id = ?").all(sessionAgentId) as Array<{ source_id: string }>;
-    for (const row of rows) {
-      this.purgeSource(row.source_id);
-    }
+  /** Marks a source replaced; ingestion then deletes its rows in batches before re-indexing it. */
+  retireSource(sourceId: string): void {
+    this.database.prepare("UPDATE sources SET generation='', scan_ready=1 WHERE source_id=?").run(sourceId);
   }
 
-  purgeSource(sourceId: string): void {
-    const tx = this.database.transaction(() => {
-      this.deleteFts.run(sourceId);
-      this.deleteEntries.run(sourceId);
+  retireSession(sessionAgentId: string): void {
+    this.database.prepare("UPDATE sources SET generation='', scan_ready=1 WHERE session_agent_id=?").run(sessionAgentId);
+  }
+
+  /**
+   * Deletes at most one batch of a source's rows; true once the source is gone.
+   * Removing a large transcript in one statement can hold the main thread for
+   * seconds while FTS5 records and merges the deletions.
+   */
+  purgeSourceSlice(sourceId: string, maxRows = PURGE_BATCH_ROWS): boolean {
+    return this.database.transaction(() => {
+      this.deleteFtsBatch.run(sourceId, maxRows);
+      if (this.deleteEntriesBatch.run(sourceId, maxRows).changes >= maxRows) return false;
       this.deleteSource.run(sourceId);
-    });
-    tx();
+      return true;
+    })();
+  }
+
+  /** Deletes at most one batch of rows older than the recall window; true while more remain. */
+  pruneExpiredRows(maxRows = PURGE_BATCH_ROWS): boolean {
+    const cutoff = historyRecallCutoff();
+    const more = this.database.transaction(() => {
+      this.deleteExpiredFts.run(cutoff, maxRows);
+      return this.deleteExpiredEntries.run(cutoff, maxRows).changes >= maxRows;
+    })();
+    this.database.pragma("incremental_vacuum(64)");
+    return more;
   }
 
   ingestSource(source: HistorySourceDescriptor, maxBytes: number): IndexedSourceState & { scannedBytes: number; warnings: string[] } {
@@ -685,19 +713,20 @@ export class HistoryRecallIndexStore {
     const warnings: string[] = [];
     const stat = readSourceStat(source.path);
     if (!stat) {
-      this.purgeSource(source.sourceId);
+      if (!this.purgeSourceSlice(source.sourceId)) return this.purgePending(source, warnings);
       return this.markUnreadable(source, "source file missing");
     }
     const generation = readSourceGeneration(source.path, stat);
-    const existing = this.getSourceRow(source.sourceId);
+    const indexed = this.getSourceRow(source.sourceId);
+    const existing = indexed && this.adoptRelocatedSource(source, stat, generation, indexed);
     const replaced = Boolean(existing && (
       existing.generation !== generation
       || existing.inode !== stat.ino
       || prefixReplaced(source.path, existing)
     ));
     const truncated = Boolean(existing && !replaced && stat.size < Math.max(existing.prefix_bytes, existing.suffix_end, existing.indexed_bytes));
-    if (replaced || truncated) {
-      this.purgeSource(source.sourceId);
+    if ((replaced || truncated) && !this.purgeSourceSlice(source.sourceId)) {
+      return this.purgePending(source, warnings);
     }
     const current = (replaced || truncated ? undefined : existing);
     if (!current) {
@@ -751,6 +780,22 @@ export class HistoryRecallIndexStore {
       ]);
     }
     return this.finishIngest(source, generation, this.getSourceRow(source.sourceId), scannedBytes, warnings);
+  }
+
+  /**
+   * A copied or moved data directory gives every transcript a new path and
+   * inode. When the content markers the index already checks (header, first
+   * row, and the hashes at each indexed boundary) still match, the indexed rows
+   * describe this file: rebase the file identity instead of re-indexing it.
+   */
+  private adoptRelocatedSource(source: HistorySourceDescriptor, stat: { size: number; ino: string }, generation: string, row: SourceRow): SourceRow {
+    if (row.path === source.path || (row.generation === generation && row.inode === stat.ino)) return row;
+    if (readSourceGeneration(source.path, { ...stat, mtimeMs: 0, ino: row.inode }) !== row.generation) return row;
+    if (stat.size < Math.max(row.prefix_bytes, row.suffix_end, row.indexed_bytes) || prefixReplaced(source.path, row)) return row;
+    if (row.suffix_head_hash && readPrefixTailHash(source.path, row.suffix_start) !== row.suffix_head_hash) return row;
+    if (row.suffix_tail_hash && readPrefixTailHash(source.path, row.suffix_end) !== row.suffix_tail_hash) return row;
+    this.rebaseSource.run({ source_id: source.sourceId, path: source.path, inode: stat.ino, generation });
+    return { ...row, path: source.path, inode: stat.ino, generation };
   }
 
   private prepareTail(
@@ -1042,6 +1087,9 @@ export class HistoryRecallIndexStore {
       this.deleteFtsEntryParts.run(sourceId, entry.replacesEntryId);
       this.deleteEntryParts.run(sourceId, entry.replacesEntryId);
     }
+    if (!isWithinRecallWindow(entry.timestamp)) {
+      return;
+    }
     const row = {
       source_id: sourceId,
       entry_id: entry.entryId,
@@ -1086,6 +1134,16 @@ export class HistoryRecallIndexStore {
         this.retagWindow.run(entry.windowId, sourceId, kept.byte_offset, entry.byteOffset);
       }
     }
+  }
+
+  /** The replaced rows are still being deleted; stale rows never match the new generation. */
+  private purgePending(source: HistorySourceDescriptor, warnings: string[]): IndexedSourceState & { scannedBytes: number; warnings: string[] } {
+    this.database.prepare("UPDATE sources SET scan_ready=1 WHERE source_id=?").run(source.sourceId);
+    return {
+      sourceId: source.sourceId, generation: "", indexedBytes: 0, sourceSize: 0, incomplete: true, pending: true,
+      // A purge batch costs about as much as a scan batch; count it against the slice budget.
+      omittedEligibleText: false, unreadable: false, scannedBytes: SCAN_BATCH_BYTES, warnings,
+    };
   }
 
   private markUnreadable(source: HistorySourceDescriptor, _reason: string): IndexedSourceState & { scannedBytes: number; warnings: string[] } {
@@ -1281,6 +1339,32 @@ function uniqueEntries(rows: EntryRow[], limit: number): EntryRow[] {
     }
   }
   return uniqueRows;
+}
+
+const REPLACED_CACHE_MARK = ".replaced-";
+
+/**
+ * Reads the cache version without a writable connection: closing a writable
+ * connection checkpoints the WAL, which can take minutes for a large one.
+ */
+function isOutdatedCache(probe: Database.Database): boolean {
+  try {
+    const tables = probe.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as Array<{ name: string }>;
+    if (tables.length === 0) return false;
+    if (!["meta", "sources", "entries"].every((name) => tables.some((table) => table.name === name))) {
+      throw new Error("Refusing to replace an unrecognized history cache");
+    }
+    const version = probe.prepare("SELECT value FROM meta WHERE key='projection_version'").get() as { value: string } | undefined;
+    return version?.value !== INDEX_SCHEMA_VERSION;
+  } finally {
+    probe.close();
+  }
+}
+
+async function removeReplacedCaches(path: string): Promise<void> {
+  const prefix = `${basename(path)}${REPLACED_CACHE_MARK}`;
+  const names = await readdir(dirname(path)).catch(() => [] as string[]);
+  await Promise.all(names.filter((name) => name.startsWith(prefix)).map((name) => rm(join(dirname(path), name), { force: true }).catch(() => undefined)));
 }
 
 function prefixReplaced(path: string, existing: SourceRow): boolean {

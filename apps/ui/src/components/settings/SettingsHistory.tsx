@@ -16,7 +16,7 @@ export function SettingsHistory({ apiClient }: { apiClient: SettingsApiClient })
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold">History</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Local history recall across eligible projects, sessions, and workers.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Local history recall across eligible projects, sessions, and workers from the last 30 days. Older history is not searched.</p>
         </div>
         <Button variant="outline" size="sm" onClick={refresh} disabled={updating}><RefreshCw className="mr-2 size-4" />Refresh</Button>
       </div>

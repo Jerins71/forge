@@ -8,7 +8,7 @@ import { buildCenteredSnippet, MAX_SNIPPET_CHARS, OVERSIZED_LINE_WARNING } from 
 import { isSourceReadError, readCompleteLines, readPrefixTailHash, readSourceGeneration, readSourceStat } from "./jsonl-reader.js";
 import { HistoryRecallError } from "./source-catalog.js";
 import {
-  DEFAULT_SEARCH_LIMIT, MAX_INDEX_CATCHUP_TOTAL_BYTES, MAX_INDEX_CATCHUP_SOURCES,
+  DEFAULT_SEARCH_LIMIT, historyRecallCutoff, isWithinRecallWindow, MAX_INDEX_CATCHUP_TOTAL_BYTES, MAX_INDEX_CATCHUP_SOURCES,
   MAX_LIVE_SNAPSHOTS, MAX_SEARCH_LIMIT, SCAN_BATCH_BYTES, SNAPSHOT_TTL_MS,
   type HistorySourceDescriptor, type JsonlCompleteLine, type ProjectedHistoryEntry, type ProjectorState,
 } from "./types.js";
@@ -68,6 +68,7 @@ export class CanonicalHistoryTraversal {
     let bytesRemaining = MAX_INDEX_CATCHUP_TOTAL_BYTES;
     let visitedSources = 0;
     const validated = new Set<SourceScan>();
+    const cutoff = historyRecallCutoff();
     while (results.length < limit && bytesRemaining > 0 && visitedSources < MAX_INDEX_CATCHUP_SOURCES) {
       let scan = traversal.scan;
       if (!scan) {
@@ -93,6 +94,7 @@ export class CanonicalHistoryTraversal {
         if (!validated.has(scan)) { this.validate(scan); validated.add(scan); }
         if (scan.parts.length) {
           const part = scan.parts.shift()!;
+          if (!isWithinRecallWindow(part.timestamp, cutoff)) continue;
           if (operation === "windows") {
             if (part.windowId !== scan.lastWindow) {
               scan.lastWindow = part.windowId;

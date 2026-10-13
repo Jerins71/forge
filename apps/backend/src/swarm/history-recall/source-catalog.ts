@@ -1,7 +1,7 @@
 import { isSystemProfile, type HistoryCatalogSnapshot } from "@forge/protocol";
 import type { AgentDescriptor, ManagerProfile } from "../types.js";
 import { getSessionFilePath, getWorkerSessionFilePath } from "../storage/data-paths.js";
-import type { HistorySearchServiceHost, HistorySourceDescriptor } from "./types.js";
+import { isWithinRecallWindow, type HistorySearchServiceHost, type HistorySourceDescriptor } from "./types.js";
 
 export function isRestrictedDescriptor(descriptor: AgentDescriptor | undefined): boolean {
   if (!descriptor) {
@@ -126,6 +126,11 @@ export function sourceFromDescriptor(
   if (!session || session.role !== "manager" || isRestrictedDescriptor(session)) {
     return undefined;
   }
+  // The actor's own activity: a worker's age is not its session's age.
+  const lastActivityAt = newestTimestamp(descriptor.lastUserMessageAt, descriptor.updatedAt);
+  if (!isWithinRecallWindow(lastActivityAt)) {
+    return undefined;
+  }
   const dataDir = host.config.paths.dataDir;
   const path = descriptor.role === "manager"
     ? getSessionFilePath(dataDir, profileId, descriptor.agentId)
@@ -139,8 +144,21 @@ export function sourceFromDescriptor(
     archived: Boolean(session.archivedAt || profile?.archivedAt),
     sessionLabel: session.sessionLabel ?? session.displayName ?? session.agentId,
     actorLabel: descriptor.displayName ?? descriptor.agentId,
-    lastActivityAt: descriptor.lastUserMessageAt ?? session.lastUserMessageAt,
+    lastActivityAt,
   };
+}
+
+function newestTimestamp(...timestamps: Array<string | undefined>): string | undefined {
+  let newest: string | undefined;
+  let newestTime = Number.NEGATIVE_INFINITY;
+  for (const timestamp of timestamps) {
+    const time = timestamp ? Date.parse(timestamp) : Number.NaN;
+    if (!Number.isNaN(time) && time > newestTime) {
+      newest = timestamp;
+      newestTime = time;
+    }
+  }
+  return newest;
 }
 
 export function findSource(
@@ -189,6 +207,9 @@ export function isCatalogSourceAllowed(
   source: HistorySourceDescriptor,
   profiles?: ReadonlyMap<string, ManagerProfile>,
 ): boolean {
+  if (!isWithinRecallWindow(source.lastActivityAt)) {
+    return false;
+  }
   const actor = host.getAgent(source.actorAgentId);
   const session = host.getAgent(source.sessionAgentId);
   if (actor && isRestrictedDescriptor(actor)) {

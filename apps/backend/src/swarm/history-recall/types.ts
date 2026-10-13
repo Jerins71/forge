@@ -113,12 +113,33 @@ export const MAX_JSONL_CHUNK_BYTES = 64 * 1024;
 export const MAX_GENERATION_SCAN_BYTES = 64 * 1024;
 export const SCAN_BATCH_BYTES = 256 * 1024;
 export const BACKGROUND_SLICE_SOURCES = 8;
+/** Soft time budget for one background indexing slice on the main thread. */
+export const BACKGROUND_SLICE_MS = 25;
 export const IDLE_RECONCILE_MS = 250;
 export const HISTORY_TOOL_NAME = "history";
 export const SNAPSHOT_TTL_MS = 60_000;
 export const MAX_LIVE_SNAPSHOTS = 32;
 export const MAX_SNAPSHOT_HITS = 500;
-export const INDEX_SCHEMA_VERSION = "5";
+/** Version 6 indexes only the recall window; older caches are rebuilt rather than pruned row by row. */
+export const INDEX_SCHEMA_VERSION = "6";
+/** Product limit: history recall covers only the last 30 days. Fixed, not a setting. */
+export const HISTORY_RECALL_WINDOW_DAYS = 30;
+/** How often background indexing looks for rows that aged past the recall window. */
+export const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+/** Rows deleted per purge or prune batch; each batch is one short transaction. */
+export const PURGE_BATCH_ROWS = 200;
+
+/** ISO timestamp of the oldest moment history recall still covers. */
+export function historyRecallCutoff(now = Date.now()): string {
+  return new Date(now - HISTORY_RECALL_WINDOW_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/** Undated rows and sources cannot be proven old, so they stay inside the window. */
+export function isWithinRecallWindow(timestamp: string | null | undefined, cutoff = historyRecallCutoff()): boolean {
+  if (!timestamp) return true;
+  const time = Date.parse(timestamp);
+  return Number.isNaN(time) || time >= Date.parse(cutoff);
+}
 
 export const EMPTY_CATALOG: HistoryCatalogSnapshot = {
   revision: 0,

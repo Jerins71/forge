@@ -244,9 +244,9 @@ A context transition does not create a goal, revive completed work, or replace t
 
 ### History recall
 
-Canonical JSONL (`session.jsonl` and worker JSONL) remains authoritative. `shared/cache/history-recall.db` is a rebuildable recognized v5 contentless FTS cache, not a second source of truth. Replacement is restricted to the recognized derived cache; schema and version initialization are transactional. Canonical transcripts are never replaced. The index payload is not read authority: `history` reads expand source-qualified references from canonical JSONL.
+Canonical JSONL (`session.jsonl` and worker JSONL) remains authoritative. `shared/cache/history-recall.db` is a rebuildable recognized v6 contentless FTS cache, not a second source of truth. Replacement is restricted to the recognized derived cache; schema and version initialization are transactional. Canonical transcripts are never replaced. The index payload is not read authority: `history` reads expand source-qualified references from canonical JSONL.
 
-Local Builder managers and ordinary workers use the agent-only `history` tool. There is no embedding index and no human/global history drawer. Indexing starts autonomously after local Builder hydration and prefers recent sources. **Settings → History** pauses indexing rather than disabling search or direct recovery.
+Local Builder managers and ordinary workers use the agent-only `history` tool. There is no embedding index and no human/global history drawer. Indexing starts autonomously after local Builder hydration, runs in bounded background slices that never hold up startup, and prefers recent sources. Recall is limited to the last 30 days (fixed, not a setting): only sources whose actor was active in that window are indexed, rows older than 30 days are skipped and pruned in small background batches, and search, read, windows, items, and literal scans return nothing older. A copied or moved data directory keeps its index when transcript content is unchanged. **Settings → History** pauses indexing rather than disabling search or direct recovery.
 
 | Operation | Use |
 |-----------|-----|
@@ -271,6 +271,7 @@ Read results use source-qualified references, including `partId`, `chunkIndex`, 
 
 | History limit | Value |
 |---------------|-------|
+| Recall window | Last 30 days (fixed) |
 | Indexed chunk / overlap | 32,768 / 2,000 characters; all eligible chunks are indexed |
 | Readable JSONL row | 1 MiB |
 | Canonical traversal scan per call | 2 MiB |
