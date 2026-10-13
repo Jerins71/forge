@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
@@ -10,26 +10,6 @@ import { BrowserTabStrip } from './BrowserTabStrip'
 import { BrowserToolbar } from './BrowserToolbar'
 import { BROWSER_PANEL_DEFAULT_WIDTH, BROWSER_PANEL_MIN_WIDTH } from './browser-panel-layout'
 import type { BrowserPanelPort, BrowserPanelSnapshot, BrowserPanelTab } from './browser-panel-port'
-
-export function useBrowserPanelSnapshot(port: BrowserPanelPort): BrowserPanelSnapshot {
-  return useSyncExternalStore(port.subscribe, port.getSnapshot, port.getSnapshot)
-}
-
-/**
- * Opens the panel when an agent opens a page: a tab the panel has not seen before, held by the agent.
- * Tabs present when the session is first shown never open it.
- */
-export function useRevealOnAgentTab(snapshot: BrowserPanelSnapshot, sessionKey: string | null, reveal: () => void): void {
-  const seen = useRef<{ sessionKey: string | null; ids: Set<string> | null }>({ sessionKey, ids: null })
-  useEffect(() => {
-    if (seen.current.sessionKey !== sessionKey) seen.current = { sessionKey, ids: null }
-    const ids = new Set(snapshot.tabs.map((tab) => tab.tabId))
-    const previous = seen.current.ids
-    seen.current.ids = ids
-    if (!previous) return
-    if (snapshot.tabs.some((tab) => !previous.has(tab.tabId) && tab.controller === 'agent')) reveal()
-  }, [reveal, sessionKey, snapshot.tabs])
-}
 
 interface BrowserPanelProps {
   port: BrowserPanelPort

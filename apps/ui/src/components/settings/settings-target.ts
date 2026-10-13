@@ -23,6 +23,7 @@ export type SettingsTab =
   | 'project-resources'
   | 'slash-commands'
   | 'extensions'
+  | 'browser'
   | 'external-chrome'
   | 'cli-access'
   | 'stream-deck'
@@ -50,6 +51,7 @@ export const SETTINGS_TABS: SettingsTab[] = [
   'project-resources',
   'slash-commands',
   'extensions',
+  'browser',
   'external-chrome',
   'cli-access',
   'stream-deck',

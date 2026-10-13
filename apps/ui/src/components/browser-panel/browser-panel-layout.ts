@@ -52,21 +52,35 @@ function writeOpen(sessionKey: string, open: boolean): void {
   }
 }
 
+/** The key a session's open state is remembered under. */
+export function browserPanelSessionKey(environmentId: string | null, sessionId: string): string {
+  return `${environmentId ?? 'local'}:${sessionId}`
+}
+
+/** Opens the panel for a session the next time it is shown. */
+export function rememberBrowserPanelOpen(sessionKey: string): void {
+  writeOpen(sessionKey, true)
+}
+
 /** Whether the browser panel is open for one session; remembered per session across reloads. */
 export function useBrowserPanelOpen(sessionKey: string | null): [boolean, (open: boolean) => void] {
-  const [state, setState] = useState(() => ({ sessionKey, open: sessionKey ? readOpenMap()[sessionKey] === true : false }))
-  const current = state.sessionKey === sessionKey
-    ? state
-    : { sessionKey, open: sessionKey ? readOpenMap()[sessionKey] === true : false }
-  useEffect(() => {
-    if (state.sessionKey !== sessionKey) setState(current)
-  }, [current, sessionKey, state.sessionKey])
-  const setOpen = useCallback((open: boolean) => {
-    if (!sessionKey) return
-    writeOpen(sessionKey, open)
+  // Storage is the source of truth: Settings can open a session's panel before showing it.
+  const [state, setState] = useState(() => ({ sessionKey, open: readOpen(sessionKey) }))
+  let open = state.open
+  if (state.sessionKey !== sessionKey) {
+    open = readOpen(sessionKey)
     setState({ sessionKey, open })
+  }
+  const setOpen = useCallback((next: boolean) => {
+    if (!sessionKey) return
+    writeOpen(sessionKey, next)
+    setState({ sessionKey, open: next })
   }, [sessionKey])
-  return [current.open, setOpen]
+  return [open, setOpen]
+}
+
+function readOpen(sessionKey: string | null): boolean {
+  return sessionKey ? readOpenMap()[sessionKey] === true : false
 }
 
 /** Whether the window is wide enough to dock the panel beside the chat. */

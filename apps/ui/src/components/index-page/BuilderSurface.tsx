@@ -8,15 +8,9 @@ import {
 import { AgentSidebarConnected } from '@/components/chat/AgentSidebarConnected'
 import { WorkGraphWorkerHighlightProvider } from '@/components/chat/WorkGraphWorkerHighlight'
 import { ArtifactsSidebar } from '@/components/chat/ArtifactsSidebar'
-import { shouldRevealBrowserPanel } from '@/components/index-page/activity-rail-workspace'
-import { PrimaryBrowserAutomationHost, type BrowserAutomationHostHandle } from '@/components/browser/BrowserAutomationHost'
-import { BrowserPreviewSurface } from '@/components/browser/BrowserPreviewSurface'
-import { BrowserPanel, BrowserUnavailableOnRemote, type BrowserWorkspaceCommandPort } from '@/components/browser/BrowserPanel'
-import { countOpenBrowserTabs, projectRuntimeBrowserTabState } from '@/components/browser/browser-runtime-state'
 import { BrowserDock, BrowserPanelToggle } from '@/components/browser-panel/BrowserDock'
-import { useBrowserPanelOpen } from '@/components/browser-panel/browser-panel-layout'
+import { browserPanelSessionKey, rememberBrowserPanelOpen, useBrowserPanelOpen } from '@/components/browser-panel/browser-panel-layout'
 import { useBrowserPanelPort } from '@/components/browser-panel/use-browser-panel-port'
-import type { ManagedBrowserWorkspaceMode } from '@/lib/electron-bridge'
 import { ArchiveView } from '@/components/index-page/ArchiveView'
 import { type MessageSourceView } from '@/components/chat/ChatHeader'
 import { SettingsPanel } from '@/components/chat/SettingsDialog'
@@ -184,32 +178,8 @@ export function BuilderSurface({
   const messageListRef = useRef<MessageListHandle | null>(null)
   const previousAgentsByIdRef = useRef<Map<string, AgentDescriptor>>(new Map())
   const fileEditorCoordinatorRef = useRef<FileEditorCoordinator | null>(null)
-  const browserHostRef = useRef<BrowserAutomationHostHandle | null>(null)
-  const browserSelectionRef = useRef<{ sessionAgentId: string | null; profileId: string | null }>({
-    sessionAgentId: null,
-    profileId: null,
-  })
-  const handledBrowserRevealRef = useRef<string | null>(null)
   const handledDeckPanelRef = useRef<string | null>(null)
   const handledStreamDeckNavigationRef = useRef<string | null>(null)
-  const [browserWorkspaceMode, setBrowserWorkspaceMode] = useState<ManagedBrowserWorkspaceMode>(
-    window.electronBridge?.browserWorkspace?.capability.popoutAvailable ? 'docked' : 'unavailable',
-  )
-  const browserCommandPort = useMemo<BrowserWorkspaceCommandPort>(() => {
-    const host = (): BrowserAutomationHostHandle => {
-      if (!browserHostRef.current) throw new Error('Browser controller is unavailable')
-      return browserHostRef.current
-    }
-    return {
-      open: (autoOpenAttemptKey) => host().open(autoOpenAttemptKey), activate: (tabId) => host().activate(tabId), close: (tabId) => host().close(tabId),
-      resize: (tabId, viewport) => host().resize(tabId, viewport), navigate: (tabId, url) => host().navigate(tabId, url),
-      history: async (tabId, direction) => host().history(tabId, direction), reload: async (tabId, hard) => host().reload(tabId, hard),
-      zoom: async (tabId, factor) => host().setZoom(tabId, factor), capture: (tabId) => host().captureScreenshot(tabId),
-      startRecording: (tabId) => host().startRecording(tabId), stopRecording: (tabId, recordingId) => host().stopRecording(tabId, recordingId),
-      reveal: (tabId) => host().reveal(tabId), takeControl: (tabId) => host().takeControl(tabId),
-      popOut: () => host().popOut(), dock: () => host().dock(),
-    }
-  }, [])
 
   // ── Environment addressing ──
   // The chat workspace and every project panel address the routed session's own environment. The
@@ -253,10 +223,6 @@ export function BuilderSurface({
       ? { ...next, environmentId: undefined }
       : next, replace)
   }, [navigateToRoute, primaryEnvironmentId])
-  const setPrimaryState = primary.setState
-  const handleBrowserRuntimeTabStateChanged = useCallback((tab: Parameters<typeof projectRuntimeBrowserTabState>[1]) => {
-    setPrimaryState((previous) => projectRuntimeBrowserTabState(previous, tab))
-  }, [setPrimaryState])
 
   const isSelectedConnected = state.connected
   useEffect(() => {
@@ -726,19 +692,11 @@ export function BuilderSurface({
     },
   })
 
-  // The embedded browser runs on this machine and serves only its sessions; a remote session has none.
-  const browserManagerAgent = isPrimarySelected ? activeManagerAgent : null
-  const browserSessionAgentId = browserManagerAgent?.agentId ?? null
-  const browserProfileId = browserManagerAgent?.profileId ?? browserManagerAgent?.agentId ?? null
-  browserSelectionRef.current = { sessionAgentId: browserSessionAgentId, profileId: browserProfileId }
-  const browserSessionSnapshot = browserSessionAgentId
-    ? state.browserSessions[browserSessionAgentId] ?? null
-    : null
 
   // ── Browser panel: the session's tabs, docked to the right of the chat ──
-  const browserPanelSessionKey = activeAgentId ? `${selectedEnvironmentId ?? 'local'}:${activeAgentId}` : null
+  const browserPanelKey = activeAgentId ? browserPanelSessionKey(selectedEnvironmentId, activeAgentId) : null
   const browserPanelPort = useBrowserPanelPort({ environmentClient, sessionId: activeAgentId, isPrimary: isPrimarySelected })
-  const [isBrowserPanelOpen, setBrowserPanelOpen] = useBrowserPanelOpen(browserPanelPort ? browserPanelSessionKey : null)
+  const [isBrowserPanelOpen, setBrowserPanelOpen] = useBrowserPanelOpen(browserPanelPort ? browserPanelKey : null)
 
   // ── Workspace panels (file browser / diff viewer / artifacts / activity rail) ──
   const panels = useWorkspacePanels({
@@ -749,7 +707,6 @@ export function BuilderSurface({
     terminalSessionAgentId,
     terminalPanel,
     terminalCount: state.terminals.length,
-    browserTabCount: countOpenBrowserTabs(browserSessionSnapshot),
     clientRef,
     messageInputRef,
     navigateToRoute: navigateToBuilderRoute,
@@ -761,16 +718,6 @@ export function BuilderSurface({
   // in-component ordering where the ref always held the live coordinator.
   fileEditorCoordinatorRef.current = panels.fileEditorCoordinator
 
-  const handleOpenManagedPreviewTab = useCallback(async (tabId: string): Promise<void> => {
-    const selection = browserSelectionRef.current
-    await browserCommandPort.activate(tabId)
-    const currentSelection = browserSelectionRef.current
-    if (currentSelection.sessionAgentId !== selection.sessionAgentId || currentSelection.profileId !== selection.profileId) return
-    panels.handleOpenBrowserFromReveal()
-    if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') {
-      await browserHostRef.current?.bringToFront()
-    }
-  }, [browserCommandPort, browserWorkspaceMode, panels])
 
   useEffect(() => {
     const request = state.streamDeckNavigationRequest
@@ -802,10 +749,7 @@ export function BuilderSurface({
     if (routeState.deckPanel === 'git') {
       panels.handleOpenDiffViewerInline()
     } else if (routeState.deckPanel === 'browser') {
-      panels.handleOpenBrowserFromReveal()
-      if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') {
-        void browserHostRef.current?.bringToFront()
-      }
+      if (browserPanelPort) setBrowserPanelOpen(true)
     } else {
       if (state.terminals.length === 0) {
         void terminalPanel.createTerminal()
@@ -815,31 +759,16 @@ export function BuilderSurface({
     }
   }, [
     activeAgentId,
-    browserWorkspaceMode,
+    browserPanelPort,
     panels,
     state.streamDeckNavigationRequest,
     routeState,
+    setBrowserPanelOpen,
     state.terminals.length,
     terminalSessionAgentId,
     terminalPanel,
   ])
 
-  useEffect(() => {
-    const request = state.browserPanelRevealRequest
-    if (!shouldRevealBrowserPanel({
-      electronHostAvailable: Boolean(window.electronBridge?.browserAutomation),
-      selectedSessionAgentId: browserSessionAgentId,
-      request,
-      currentHostGeneration: state.browserHost.hostGeneration,
-    })) return
-    const key = `${request!.hostGeneration}:${request!.sequence}:${request!.tabId}`
-    if (handledBrowserRevealRef.current === key) return
-    handledBrowserRevealRef.current = key
-    panels.handleOpenBrowserFromReveal()
-    if (browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening') {
-      void browserHostRef.current?.bringToFront()
-    }
-  }, [browserSessionAgentId, browserWorkspaceMode, state.browserHost.hostGeneration, state.browserPanelRevealRequest, panels])
 
   // Workers belonging to the active manager session (for pill bar)
   const sessionWorkers = useMemo(() => {
@@ -2142,21 +2071,6 @@ export function BuilderSurface({
   return (
     <WorkGraphWorkerHighlightProvider>
       <FileDirtyConfirmDialog state={panels.fileEditorCoordinator.dialogState} />
-      <PrimaryBrowserAutomationHost
-        ref={browserHostRef}
-        environmentId={primaryEnvironmentId}
-        selectedSessionAgentId={browserSessionAgentId}
-        selectedProfileId={browserProfileId}
-        panelVisible={activeView === 'chat' && panels.isBrowserOpen}
-        onRuntimeTabStateChanged={handleBrowserRuntimeTabStateChanged}
-        onWorkspaceModeChange={(mode) => {
-          setBrowserWorkspaceMode(mode)
-          if (mode === 'docked') window.requestAnimationFrame(() => {
-            const control = document.querySelector('button[aria-label="Open Managed Browser in a separate window"]')
-            if (control instanceof HTMLElement) control.focus()
-          })
-        }}
-      />
 
       <AgentSidebarConnected
         modelConfigChangeKey={state.modelConfigChangeKey}
@@ -2338,6 +2252,10 @@ export function BuilderSurface({
                   })
                 }
                 previewSession={previewSession}
+                onOpenBrowserPanel={(environmentId, sessionId) => {
+                  rememberBrowserPanelOpen(browserPanelSessionKey(environmentId, sessionId))
+                  navigateToBuilderRoute({ view: 'chat', agentId: sessionId, environmentId })
+                }}
                 contextProfileId={routeState.view === 'settings' ? routeState.settingsProfileId : undefined}
                 projectSettingsActions={projectSettingsActions}
                 initialTab={routeState.view === 'settings' ? routeState.settingsTab : undefined}
@@ -2381,28 +2299,6 @@ export function BuilderSurface({
                 }
                 onRestoreProfile={session.handleRestoreProfile}
                 onRestoreSession={session.handleRestoreSession}
-              />
-            ) : activeView === 'chat' && panels.isBrowserOpen && !isPrimarySelected ? (
-              <BrowserUnavailableOnRemote />
-            ) : activeView === 'chat' && panels.isBrowserOpen && browserSessionAgentId && browserProfileId ? (
-              browserWorkspaceMode === 'popped-out' || browserWorkspaceMode === 'opening' ? (
-                <section className="relative flex min-h-0 flex-1 items-center justify-center" aria-label="Managed Browser workspace">
-                  <div data-browser-automation-viewport className="pointer-events-none absolute inset-0" aria-hidden="true" />
-                  <div className="relative z-10 max-w-md text-center">
-                    <h2 className="font-medium">Browser is open in a separate window</h2>
-                    <p className="mt-2 text-sm text-muted-foreground">The same managed tab, automation queue, and recording remain active.</p>
-                    <div className="mt-4 flex justify-center gap-2">
-                      <button type="button" className="rounded border px-3 py-1.5 text-sm hover:bg-muted focus-visible:ring-2" onClick={() => void browserHostRef.current?.bringToFront()}>Bring to front</button>
-                      <button id="managed-browser-dock-control" type="button" className="rounded border px-3 py-1.5 text-sm hover:bg-muted focus-visible:ring-2" onClick={() => void browserHostRef.current?.dock()}>Dock</button>
-                    </div>
-                  </div>
-                </section>
-              ) : <BrowserPanel
-                snapshot={browserSessionSnapshot}
-                host={state.browserHost}
-                commandPort={browserCommandPort}
-                mode={browserWorkspaceMode}
-                popoutAvailable={Boolean(window.electronBridge?.browserWorkspace?.capability.popoutAvailable)}
               />
             ) : launchGroupKey ? (
               <LaunchSessionWorkspace key={launchGroupKey} groupKey={launchGroupKey} onLaunched={handleSelectEnvironmentSession} />
@@ -2692,18 +2588,15 @@ export function BuilderSurface({
               />
               </div>
             )}
-            {activeView === 'chat' && !panels.isInlineDiffViewerOpen ? (
-              <BrowserPreviewSurface hidden={panels.isBrowserOpen} onOpenManagedTab={handleOpenManagedPreviewTab} />
-            ) : null}
             {activeView === 'chat' && !panels.isInlineDiffViewerOpen && sideChat.isOpen && !sideChat.isExpanded ? (
               <SideChatPanel {...sideChatPanelProps} />
             ) : null}
           </div>
 
-          {activeView === 'chat' && !panels.isInlineDiffViewerOpen && browserPanelPort && browserPanelSessionKey ? (
+          {activeView === 'chat' && !panels.isInlineDiffViewerOpen && browserPanelPort && browserPanelKey ? (
             <BrowserDock
               port={browserPanelPort}
-              sessionKey={browserPanelSessionKey}
+              sessionKey={browserPanelKey}
               open={isBrowserPanelOpen}
               onOpenChange={setBrowserPanelOpen}
             />

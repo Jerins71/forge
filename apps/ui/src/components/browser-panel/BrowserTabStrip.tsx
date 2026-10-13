@@ -156,7 +156,7 @@ function AgentMark() {
   )
 }
 
-export function tabTitle(tab: BrowserPanelTab): string {
+function tabTitle(tab: BrowserPanelTab): string {
   if (tab.title.trim()) return tab.title
   if (!tab.url || tab.url === 'about:blank') return 'New tab'
   try { return new URL(tab.url).host || tab.url } catch { return tab.url }
