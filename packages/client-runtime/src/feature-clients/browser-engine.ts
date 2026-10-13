@@ -8,6 +8,19 @@ export function createBrowserEngineClient(rpc: RpcFeatureTransport) {
   return {
     request: <M extends BrowserEngineMethod>(method: M, input: RpcInput<M>): Promise<RpcOutput<M>> => rpc.request(method, input),
     tabs: (sessionId: string, observer: StreamObserver<RpcStreamItem<'browser.tabs.subscribe'>>) => rpc.subscribe('browser.tabs.subscribe', { sessionId }, observer),
-    screencast: (input: RpcInput<'browser.screencast.subscribe'>, observer: StreamObserver<RpcStreamItem<'browser.screencast.subscribe'>>) => rpc.subscribe('browser.screencast.subscribe', input, observer),
+    screencast: (input: RpcInput<'browser.screencast.subscribe'>, observer: StreamObserver<RpcStreamItem<'browser.screencast.subscribe'>>) => {
+      let subscriptionId: string | null = null
+      let live = true
+      const release = rpc.subscribe('browser.screencast.subscribe', input, {
+        next: item => observer.next(item),
+        error: error => { subscriptionId = null; observer.error(error) },
+      }, id => { if (live) subscriptionId = id })
+      return {
+        release: () => { live = false; subscriptionId = null; release() },
+        ack: async (frameId: number): Promise<void> => {
+          if (subscriptionId) await rpc.request('browser.screencast.ack', { subscriptionId, frameId })
+        },
+      }
+    },
   }
 }

@@ -368,6 +368,7 @@ export interface RpcFeatureTransport {
     method: M,
     input: RpcInput<M>,
     observer: StreamObserver<RpcStreamItem<M>>,
+    onSubscribed?: (id: string) => void,
   ): () => void
 }
 function query(value: Record<string, unknown>): string {
