@@ -71,6 +71,7 @@ import type {
   BuilderTimelineChannelView,
   ChoiceAnswer,
   ConversationAttachment,
+  ConversationMessageEvent,
   ConversationReplyTargetInput,
   DeliveryMode,
   ManagerExactModelSelection,
@@ -240,6 +241,7 @@ export class ManagerWsClient {
     if (this.viewedSessionId === sessionId) return
     this.viewedSessionId = sessionId
     this.keptUnreadSessionId = null
+    if (sessionId && this.environmentProjection && sessionId !== this.environmentProjection.session.sessionId && sessionId !== this.desiredAgentId) this.clearConversationHistory()
     this.keepViewedSessionRead()
   }
 
@@ -763,20 +765,44 @@ export class ManagerWsClient {
  }
 
   async loadOlderConversation(limit?: number): Promise<ConversationPageResult | null> {
- if (!this.environmentClient || this.state.conversationBootstrap.phase !== 'ready') return null;
- const agentId = this.state.targetAgentId; const cursor = this.state.conversationPage?.nextCursor;
- if (!agentId || !cursor || !this.state.conversationPage?.hasOlder || this.state.conversationPageLoading) return null;
- this.updateState({ conversationPageLoading: true, lastError: null });
- try {
- const page = await this.environmentClient.request('session.history', { sessionId: agentId, before: cursor, turns: Math.min(20, Math.max(1, limit ?? 20)) });
- const ownerId = this.environmentProjection?.session.sessionId ?? agentId;
- const items = page.items.filter(item => ownerId === agentId || item.actorId === agentId);
- const messages = projectItems(items, agentId, ownerId);
- const result: ConversationPageResult = { agentId, messages, page: { hasOlder: !!page.nextCursor, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}), completeness: 'complete', source: 'canonical' } };
- if (this.state.targetAgentId === agentId) this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...projectActivityItems(items, ownerId), ...this.state.activityMessages], conversationPage: result.page, conversationPageLoading: false, conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } });
- return result;
- } catch (error) { if (this.state.targetAgentId === agentId) this.updateState({ conversationPageLoading: false, lastError: error instanceof Error ? error.message : String(error) }); throw error; }
- }
+    if (!this.environmentClient || this.state.conversationBootstrap.phase !== 'ready') return null
+    const agentId = this.desiredAgentId
+    const cursor = this.state.conversationPage?.nextCursor
+    const lease = this.detailLease
+    const sourceCursor = this.environmentProjection?.historyCursor
+    const ownerId = this.environmentProjection?.session.sessionId ?? agentId
+    const isCurrent = () => this.detailLease === lease && this.desiredAgentId === agentId && this.state.targetAgentId === agentId
+      && this.environmentProjection?.historyCursor === sourceCursor
+      && (!this.viewedSessionId || this.viewedSessionId === ownerId || this.viewedSessionId === agentId)
+    if (!agentId || !cursor || !lease || !isCurrent() || !this.state.conversationPage?.hasOlder || this.state.conversationPageLoading) return null
+    this.updateState({ conversationPageLoading: true, lastError: null })
+    try {
+      const page = await this.environmentClient.request('session.history', { sessionId: agentId, before: cursor, turns: Math.min(20, Math.max(1, limit ?? 20)) })
+      // A view switch or source resync invalidates the request even before its new snapshot arrives.
+      if (!isCurrent()) return null
+      const items = page.items.filter(item => ownerId === agentId || item.actorId === agentId)
+      const messageIds = new Set(this.state.messages.flatMap(message => message.type === 'conversation_message' && message.id ? [message.id] : []))
+      const messages = projectItems(items, agentId, ownerId!).filter(message => {
+        if (!message.id || messageIds.has(message.id)) return false
+        messageIds.add(message.id); return true
+      })
+      const activityIds = new Set(this.state.activityMessages.map(activity => activity.timelineEntryId!))
+      const activities = projectActivityItems(items, ownerId!).filter(activity => {
+        const id = activity.timelineEntryId!
+        if (activityIds.has(id)) return false
+        activityIds.add(id); return true
+      })
+      const result: ConversationPageResult = { agentId, messages, page: { hasOlder: !!page.nextCursor, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}), completeness: 'complete', source: 'canonical' } }
+      this.updateState({ messages: [...messages, ...this.state.messages], activityMessages: [...activities, ...this.state.activityMessages],
+        conversationPage: result.page, conversationPageLoading: false,
+        conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'prepend' } })
+      return result
+    } catch (error) {
+      if (!isCurrent()) return null
+      this.updateState({ conversationPageLoading: false, lastError: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }
 
   refreshConversationHistory(): boolean { return this.retryConversationBootstrap(); }
 
@@ -834,21 +860,35 @@ export class ManagerWsClient {
     })
   }
 
+  private clearConversationHistory(): void {
+    this.updateState({ messages: [], activityMessages: [], conversationPage: null, conversationPageLoading: false,
+      conversationHistoryMutation: { revision: (this.state.conversationHistoryMutation?.revision ?? 0) + 1, kind: 'replace' } })
+  }
+
   private mountEnvironmentDetail(sessionId: string): void {
     if (!this.environmentClient) return
     this.detailDetach?.()
     this.detailLease?.release()
     this.liveActivity.clear()
+    const changedSession = this.desiredAgentId !== sessionId
     this.desiredAgentId = sessionId
+    this.environmentProjection = null
+    this.outboxEchoIds.clear()
+    this.clearConversationHistory()
+    this.updateState({ targetAgentId: sessionId, conversationBootstrap: { ...this.state.conversationBootstrap, agentId: sessionId, phase: 'pending' } })
     this.detailLease = this.environmentClient.acquireDetail(sessionId)
     const store = this.detailLease.store
     // Lineage and a reported error belong to one session; never present the previous session's on this one.
-    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null, ...(this.state.targetAgentId && this.state.targetAgentId !== sessionId ? { lastError: null } : {}) })
+    this.updateState({ sessionLineage: null, sessionTransferCapabilities: null, ...(changedSession ? { lastError: null } : {}) })
     let projection: DetailState['projection'] = null
     let transient: DetailState['transient'] = new Map()
     const apply = () => {
       const detail = store.getSnapshot()
+      if (this.desiredAgentId !== sessionId) return
       if (detail.projection !== projection) {
+        const keepHistory = Boolean(projection && detail.projection
+          && projection.session.sessionId === detail.projection.session.sessionId
+          && projection.historyCursor === detail.projection.historyCursor)
         projection = detail.projection
         this.environmentProjection = projection
         this.outbox?.settle(projectedCommandIds(projection))
@@ -868,17 +908,20 @@ export class ManagerWsClient {
         const items = (projection?.items ?? []).filter(item => ownerId === sessionId || item.actorId === sessionId)
         const choices = choicesForView(projection?.choices ?? [], sessionId, ownerId)
         const projectedMessages = projectItems(items, sessionId, ownerId)
+        const messages = mergeHistoryRows(keepHistory ? this.state.messages.filter((message): message is ConversationMessageEvent => message.type === 'conversation_message' && !!message.id) : [], projectedMessages, message => message.id!)
+        const activities = mergeHistoryRows(keepHistory ? this.state.activityMessages : [], projectActivityItems(items, ownerId), activity => activity.timelineEntryId!)
+        const page = keepHistory ? this.state.conversationPage : projection ? { hasOlder: !!projection.historyCursor, ...(projection.historyCursor ? { nextCursor: projection.historyCursor } : {}), completeness: 'complete' as const, source: 'canonical' as const } : null
         const echoes = this.outbox?.pendingMessages(sessionId, projectedCommandIds(projection)) ?? []
         this.outboxEchoIds = new Set(echoes.map((echo) => echo.clientRequestId!))
         this.updateState({
-          messages: [...withChoicesInTimelineOrder(projectedMessages, choices, !!projection?.historyCursor), ...echoes],
+          messages: [...withChoicesInTimelineOrder(messages, choices, !!page?.hasOlder), ...echoes],
           commandStatuses: this.outbox?.statuses(),
           pendingChoiceIds:new Set(choices.filter(c=>c.status==='pending').map(c=>c.choiceId)),
           agents: projectSessionWorkers(this.state.agents, projection?.workers ?? [], ownerId, this.environmentClient!.shell.getSnapshot()),
-          conversationPage:projection?{hasOlder:!!projection.historyCursor,...(projection.historyCursor?{nextCursor:projection.historyCursor}:{}),completeness:'complete',source:'canonical'}:null,
-          conversationPageLoading:false,
-          activityMessages: projectActivityItems(items, ownerId),
-          conversationHistoryMutation: {
+          conversationPage: page,
+          conversationPageLoading: keepHistory && this.state.conversationPageLoading,
+          activityMessages: activities,
+          conversationHistoryMutation: keepHistory ? this.state.conversationHistoryMutation : {
             revision:
               (this.state.conversationHistoryMutation?.revision ?? 0) + 1,
             kind: 'replace',
@@ -913,6 +956,11 @@ export class ManagerWsClient {
       listener(this.state)
     }
   }
+}
+
+/** Existing canonical order stays in place; current projection values replace matching rows. */
+function mergeHistoryRows<T>(older: readonly T[], current: readonly T[], id: (row: T) => string): T[] {
+  return [...new Map([...older, ...current].map(row => [id(row), row])).values()]
 }
 
 function projectedCommandIds(projection: DetailState['projection']): ReadonlySet<string> {

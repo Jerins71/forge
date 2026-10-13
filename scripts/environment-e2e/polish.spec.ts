@@ -16,7 +16,7 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
+import { expect, type BrowserContext, type Locator, type Page, type WebSocket } from '@playwright/test'
 import type { CommandReceipt, DetailStreamItem, SessionSummary } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
@@ -642,4 +642,140 @@ test('Codex compacts an active plan and goal and sees both on its next native in
   expect(await state()).toEqual(expectedState)
   expect((await readState()).items.find(item => item.itemId === pinned.itemId)?.pinned).toBe(true)
   assertions.codexCompactState = { sessionId, pinnedItemId: pinned.itemId, nativeInputChecks: 2, liveAndReload: true, authoritativeState: expectedState, replies }
+})
+
+
+test('history windows with hundreds of manager and worker rows reach the first user without overlap, live and after reload', async ({ page }) => {
+  test.setTimeout(90_000)
+  const original = '[fixture:spawn-activity] The very first user message in a long thread'
+  const sessionId = await launch('History overlap QA', original)
+  const snapshot = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      const { subscriptionId } = await rpc.call('session.subscribe', { sessionId })
+      return (await until(() => rpc.frames.find(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'snapshot'), Boolean))!.item.snapshot
+    } finally { rpc.close() }
+  }
+  const worker = await until<any>(async () => (await snapshot()).workers[0], Boolean)
+  await until(snapshot, head => head.items.some((item: any) => item.actorId === worker.agentId && item.kind === 'activity'), 30_000)
+  const commandId = randomUUID()
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.send', { commandId, sessionId, message: { text: 'The second and most recent user turn', artifactIds: [] } })
+  await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000)
+  // Write through the actual canonical timeline. Worker entries arrive later but interleave in
+  // canonical time, as a delayed source or completed activity does in a long real thread.
+  const startTime = Date.UTC(2030, 0, 1)
+  await controlEnvironment(manifest, manifest.environments[0]!.name, 'fixture', { operation: 'burst', sessionId, count: 360, startTime, status: 'idle' })
+  await controlEnvironment(manifest, manifest.environments[0]!.name, 'fixture', { operation: 'burst', sessionId: worker.agentId, count: 120, startTime: startTime - 200, status: 'idle' })
+  const phases: Record<string, unknown> = {}
+  let updatedItemId: string | undefined
+  for (const phase of ['live', 'reload']) {
+    const pages: Array<{ before: string; next: string | null; ids: string[] }> = []
+    let head: { ids: string[]; cursor: string | null; pinnedIds: string[] } | undefined
+    const requests = new Map<string, string>()
+    let updatedDuringPaging = false
+    const onSocket = (socket: WebSocket) => {
+      socket.on('framesent', ({ payload }: { payload: string | Buffer }) => {
+        const frame = JSON.parse(String(payload))
+        if (frame.type === 'request' && frame.method === 'session.history' && frame.input.sessionId === sessionId) requests.set(frame.requestId, frame.input.before)
+      })
+      socket.on('framereceived', ({ payload }: { payload: string | Buffer }) => {
+        const frame = JSON.parse(String(payload))
+        if (frame.item?.kind === 'snapshot' && frame.item.snapshot.session?.sessionId === sessionId) head = { ids: frame.item.snapshot.items.map((item: any) => item.itemId), cursor: frame.item.snapshot.historyCursor, pinnedIds: frame.item.snapshot.items.filter((item: any) => item.pinned).map((item: any) => item.itemId) }
+        if (frame.type === 'result' && requests.has(frame.requestId)) pages.push({ before: requests.get(frame.requestId)!, next: frame.output.nextCursor, ids: frame.output.items.map((item: any) => item.itemId) })
+      })
+    }
+    page.on('websocket', onSocket)
+    try {
+      if (phase === 'live') await open(page, sessionId)
+      else { await page.reload(); await expect(transcript(page)).toBeVisible() }
+      await until(() => head, Boolean)
+      expect(head!.ids.length).toBe(200)
+      // Update a current row after the initial window, then read it again through live detail and reload.
+      if (phase === 'live') {
+        const row = (await snapshot()).items.find((item: any) => item.actorId === sessionId && item.kind === 'assistant' && item.text.startsWith('Synthetic provider update'))
+        updatedItemId = row.itemId
+        await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.message.pin', { commandId: randomUUID(), sessionId, itemId: row.itemId, pinned: true })
+        await until(snapshot, state => state.items.some((item: any) => item.itemId === row.itemId && item.pinned))
+      } else expect(head!.pinnedIds).toContain(updatedItemId)
+      await expect.poll(async () => {
+        await transcript(page).locator('.overflow-y-auto').last().evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')) })
+        if (!updatedDuringPaging && pages.length === 1 && pages[0]!.next) {
+          updatedDuringPaging = true
+          for (const pinned of [false, true]) await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.message.pin', { commandId: randomUUID(), sessionId, itemId: updatedItemId!, pinned })
+        }
+        const ids = await transcript(page).locator('[data-row-id]').evaluateAll(rows => rows.map(row => row.getAttribute('data-row-id')))
+        expect(new Set(ids).size).toBe(ids.length)
+        return pages.at(-1)?.next === null && await textRow(page, original).isVisible()
+      }, { timeout: 30_000 }).toBe(true)
+      await expect(textRow(page, original)).toBeVisible()
+      const seen = new Set(head!.ids), duplicateIds: string[] = []
+      let before = head!.cursor
+      for (const older of pages) {
+        expect(older.before).toBe(before)
+        expect(older.next).not.toBe(older.before)
+        expect(older.ids.length).toBeGreaterThan(0)
+        for (const id of older.ids) { if (seen.has(id)) duplicateIds.push(id); seen.add(id) }
+        before = older.next
+      }
+      phases[phase] = { snapshotRows: head!.ids.length, pageRows: pages.map(page => page.ids.length), uniqueRows: seen.size, duplicateIds, reachedBeginning: before === null, firstUserVisible: true, updatedDuringPaging }
+      await writeFile(join(evidenceRoot, 'history-overlap.json'), JSON.stringify(phases, null, 2) + '\n')
+      expect(pages.length).toBeGreaterThanOrEqual(2)
+      expect(duplicateIds).toEqual([])
+      await shot(page, `history-first-user-${phase}`)
+    } finally { page.off('websocket', onSocket) }
+  }
+  assertions.historyOverlap = { sessionId, workerId: worker.agentId, recentUserTurns: 2, lateUpdate: { itemId: updatedItemId, pinnedAfterInitialWindow: true, pinnedInReloadSnapshot: true, updatedDuringPaging: true }, phases }
+})
+
+
+test('a delayed older page stays with its session when the user switches chats, live and after reload', async ({ page }) => {
+  const firstUser = 'This first user belongs only to history session A'
+  const sessionA = await launch('Delayed history A', firstUser)
+  await controlEnvironment(manifest, manifest.environments[0]!.name, 'fixture', { operation: 'burst', sessionId: sessionA, count: 320, status: 'idle' })
+  const sessionB = await launch('Delayed history B', 'This user belongs only to history session B')
+  let release: (() => void) | undefined
+  let delayedRows = 0
+  const historyRequests: Array<{ sessionId: string; before: string }> = []
+  await page.routeWebSocket('**/api/v2/rpc', route => {
+    const server = route.connectToServer()
+    const pending = new Set<string>()
+    route.onMessage(message => {
+      const frame = JSON.parse(String(message))
+      if (frame.type === 'request' && frame.method === 'session.history') {
+        historyRequests.push({ sessionId: frame.input.sessionId, before: frame.input.before })
+        if (frame.input.sessionId === sessionA) pending.add(frame.requestId)
+      }
+      server.send(message)
+    })
+    server.onMessage(message => {
+      const frame = JSON.parse(String(message))
+      if (frame.type === 'result' && pending.delete(frame.requestId)) {
+        delayedRows = frame.output.items.length
+        release = () => route.send(message)
+      } else route.send(message)
+    })
+  })
+  try {
+    await open(page, sessionA)
+    await transcript(page).locator('.overflow-y-auto').last().evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event('scroll')) })
+    await until(() => release, Boolean)
+    await page.getByRole('complementary').getByRole('button').filter({ hasText: 'Delayed history B', visible: true }).first().click()
+    await expect(textRow(page, 'This user belongs only to history session B')).toBeVisible()
+    release!(); release = undefined
+    // A round trip after releasing the old result fences its processing on the same socket.
+    await composer(page).fill('B remains selected after the delayed page')
+    await page.keyboard.press('Enter')
+    await expect(textRow(page, 'B remains selected after the delayed page')).toBeVisible()
+    await expect(transcript(page)).not.toContainText(firstUser)
+    await expect(transcript(page)).not.toContainText('Synthetic provider update')
+    await shot(page, 'history-delayed-switch-live')
+    await page.reload()
+    await expect(textRow(page, 'This user belongs only to history session B')).toBeVisible()
+    await expect(transcript(page)).not.toContainText(firstUser)
+    await expect(transcript(page)).not.toContainText('Synthetic provider update')
+    expect(historyRequests.every(request => request.sessionId === sessionA)).toBe(true)
+    expect(delayedRows).toBeGreaterThan(0)
+    await shot(page, 'history-delayed-switch-reload')
+    assertions.historySessionSwitch = { sessionA, sessionB, delayedRows, requests: historyRequests, foreignRowsVisible: false, liveAndReload: true }
+  } finally { release?.() }
 })

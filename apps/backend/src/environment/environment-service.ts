@@ -209,6 +209,7 @@ export async function createEnvironmentService(options: {
           withReadBarrier: (fn) => owner.eventSink.readBarrier(fn).value,
           getDescriptor: () => identity.descriptor(),
           ensureDetailInitialized: (sessionId) => source.ensureDetailInitialized(sessionId),
+          readDetailWindow: (sessionId) => source.readDetailWindow(sessionId),
           readHistory: (principal, input) => source.readHistory(principal, input),
           readContent: (principal, input) => source.readContent(principal, input),
         };

@@ -2,14 +2,13 @@ import { readFileSync, writeFileSync, existsSync, openSync, fsyncSync, closeSync
 import { join } from 'node:path';
 import { basename } from 'node:path';
 import { ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import type { Database } from 'better-sqlite3';
 import { loadConfiguredSqliteDatabaseConstructor } from '../../../apps/backend/src/sqlite-database-loader.js';
 import { getEnvironmentDbPath, getSessionMetaPath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import { AgentDescriptorStore } from '../../../apps/backend/src/swarm/agents/agent-descriptor-store.js';
 import { SwarmManager } from '../../../apps/backend/src/swarm/swarm-manager.js';
-import { ConversationTimeline } from '../../../apps/backend/src/swarm/session/conversation-timeline.js';
+import type { ConversationProjector } from '../../../apps/backend/src/swarm/session/conversation-projector.js';
 import { RpcSendQueue } from '../../../apps/backend/src/ws/rpc/rpc-send-queue.js';
 import { StreamQueue } from '../../../apps/backend/src/environment/streams/stream-budget.js';
 import { TerminalService } from '../../../apps/backend/src/terminal/terminal-service.js';
@@ -48,7 +47,6 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
     return terminalEmit.call(this, name, ...args);
   };
   let tick = 0;
-  const timeline = new ConversationTimeline({ now: () => new Date().toISOString() });
   const overlay = new Map<string, AgentDescriptor>();
   const streams = new Set<NodeJS.Timeout>();
   const counters = { catalogSerializations: 0, transcriptHydrations: 0, gitScans: 0, hostResourceProbes: 0, applicationRxBytes: 0, applicationTxBytes: 0, streamQueueFramesMax: 0, streamQueueBytesMax: 0, sendQueueFramesMax: 0, sendQueueBytesMax: 0, injections: 0, agentsJsonControlWrites: 0 };
@@ -241,7 +239,7 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
       if (!/^[0-9a-f-]{36}$/.test(input.commandId) || !crashBoundaries.includes(input.boundary)) throw new Error('Invalid controlled crash request');
       armed = input; return { armed: true, pid: process.pid };
     },
-    async operate(input: { operation: string; boundary?: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
+    async operate(input: { operation: string; boundary?: string; commandId?: string; sessionId?: string; count?: number; hz?: number; durationMs?: number; textBytes?: number; startTime?: number; status?: AgentDescriptor['status']; gc?: boolean }) {
       if (input.operation === 'arm-recovery-crash') {
         if (!input.commandId || !/^[0-9a-f-]{36}$/.test(input.commandId) || !recoveryBoundaries.includes(input.boundary as RecoveryBoundary)) throw new Error('Invalid recovery crash request');
         armed = { commandId: input.commandId, boundary: input.boundary as RecoveryBoundary }; return { pid: process.pid };
@@ -328,15 +326,15 @@ export async function installHardeningHooks(dataDir: string, checkout: string) {
         return manager.getSessionAttentionSnapshot().attentions.filter(attention => attention.sessionAgentId === descriptor.agentId).map(attention => ({ attentionId: attention.attentionId, reason: attention.reason }));
       }
       const inject = () => {
-        const timestamp = new Date(Date.now() + tick++).toISOString();
+        const timestamp = new Date((input.startTime ?? Date.now()) + tick++).toISOString();
         // A provider's coalesced detail updates do not advance its session's activity time every token.
         // Status changes once at turn start; shell-burst separately exercises the real shell update path.
         const next = input.operation === 'stream-start' && overlay.has(descriptor.agentId) ? overlay.get(descriptor.agentId)!
           : { ...descriptor, status: input.status ?? 'streaming' as const, updatedAt: timestamp };
         overlay.set(descriptor.agentId, next);
         if (input.operation !== 'shell-burst') {
-          const event = { type: 'conversation_message' as const, agentId: descriptor.agentId, role: 'assistant' as const, source: 'speak_to_user' as const, text: `Synthetic provider update ${tick} ` + 'x'.repeat(input.textBytes ?? 64), timestamp, terminal: true, id: randomUUID() };
-          timeline.appendConversationEntry(descriptor, event); manager!.emit('conversation_message', event);
+          const event = { type: 'conversation_message' as const, agentId: descriptor.agentId, role: 'assistant' as const, source: 'speak_to_user' as const, text: `Synthetic provider update ${tick} ` + 'x'.repeat(input.textBytes ?? 64), timestamp, terminal: true };
+          (manager as unknown as { conversationProjector: ConversationProjector }).conversationProjector.emitConversationMessage(event);
         }
         manager!.emit('agent_status', { agentId: descriptor.agentId, status: next.status, timestamp }); counters.injections++;
       };

@@ -6,7 +6,7 @@ import {
   type ProjectSummary, type SessionSummary,
 } from "@forge/protocol/environment-v2";
 import type { Principal } from "../control/control-types.js";
-import type { ShellEvent, DetailEvent, DetailItem } from "./stream-types.js";
+import type { ShellEvent, DetailEvent, DetailItem, DetailHistoryWindow } from "./stream-types.js";
 import { encodedBytes, EVENT_BYTES, LEASE_BYTES, SNAPSHOT_BYTES, StreamFault, StreamQueue } from "./stream-budget.js";
 import { decodeStreamItem } from "./wire-projection.js";
 
@@ -25,6 +25,7 @@ export interface StreamDependencies {
   getDescriptor(): EnvironmentDescriptor;
   withReadBarrier?<T>(fn: () => T): T;
   ensureDetailInitialized?(sessionId: string): Promise<{ historyCursor: string | null }>;
+  readDetailWindow?(sessionId: string): DetailHistoryWindow;
   readHistory?(principal: Principal, input: RpcInput<"session.history">): Promise<RpcOutput<"session.history">>;
   readContent?(principal: Principal, input: RpcInput<"session.content">): Promise<RpcOutput<"session.content">>;
 }
@@ -203,9 +204,10 @@ export function createShellStream(deps: StreamDependencies) {
   return { shell, shellPage, descriptor: deps.getDescriptor };
 }
 
-export function recentItems(database: Database.Database, sessionId: string): DetailItem[] {
+export function recentItems(database: Database.Database, sessionId: string, canonical?: readonly DetailItem[]): DetailItem[] {
+  // The canonical window supplies ordering and evicted rows; the bounded cache supplies current state.
   const rows = database.prepare(`SELECT item_json FROM detail_items WHERE session_id = ?
-    AND user_turn_id IN (SELECT user_turn_id FROM detail_items WHERE session_id = ? GROUP BY user_turn_id
-    ORDER BY MAX(updated_sequence) DESC LIMIT 20) ORDER BY updated_sequence, item_id LIMIT 200`).all(sessionId, sessionId) as { item_json: string }[];
-  return rows.map(row => JSON.parse(row.item_json) as DetailItem);
+    ORDER BY updated_sequence, item_id`).all(sessionId) as { item_json: string }[];
+  const current = new Map(rows.map(row => { const item = JSON.parse(row.item_json) as DetailItem; return [item.itemId, item]; }));
+  return canonical ? canonical.map(item => current.get(item.itemId) ?? item) : [...current.values()];
 }
