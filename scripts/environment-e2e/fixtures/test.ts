@@ -4,7 +4,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { launchFleet, readManifest, verifyFleetHealth, repositoryRoot } from '../launch.js';
 
 /** Suites whose Claude sessions run the real Claude Code against a scripted model; Codex sessions are unchanged. */
-const BACKEND_ENTRIES: Record<string, string> = { 'lineage-ui': 'lineage-backend-process.ts', activity: 'claude-backend-process.ts' };
+const BACKEND_ENTRIES: Record<string, string> = { 'lineage-ui': 'lineage-backend-process.ts', activity: 'claude-backend-process.ts', pairing: 'pairing-backend-process.ts' };
 
 /** Suite options force separate workers: destructive slice scenarios cannot contaminate UI/load. */
 export const test = base.extend<{ environmentFailure: void }, { environmentSuite: string; environmentManifest: string }>({
@@ -15,7 +15,7 @@ export const test = base.extend<{ environmentFailure: void }, { environmentSuite
       await use(process.env.FORGE_E2E_MANIFEST);
       return; // Explicit attachment never takes ownership of another launcher's fleet.
     }
-    if (!['slice', 'ui', 'lineage-ui', 'ux', 'activity', 'polish', 'load', 'cli'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
+    if (!['slice', 'ui', 'lineage-ui', 'ux', 'activity', 'polish', 'load', 'cli', 'pairing'].includes(environmentSuite)) throw new Error('Environment suite must select its fleet');
     const out = join(repositoryRoot, `.internal/forge-v2-remote/e2e-manifest-${process.env.FORGE_E2E_RUN_ID}-${worker.workerIndex}-${environmentSuite}.json`);
     const fleet = await launchFleet({ environments: Number(process.env.FORGE_E2E_ENVIRONMENTS ?? (environmentSuite === 'load' ? 8 : 3)), out, ...(BACKEND_ENTRIES[environmentSuite] ? { backendEntry: join(repositoryRoot, 'scripts/environment-e2e/fixtures', BACKEND_ENTRIES[environmentSuite]) } : {}) });
     process.env.FORGE_E2E_MANIFEST = fleet.manifestPath;

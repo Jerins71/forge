@@ -410,6 +410,7 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   │   ├── model-overrides.json           # Model visibility, context caps, instructions
 │   ├── state/
 │   │   ├── environment/control.sqlite      # Descriptor, command, event and private recovery authority
+│   │   ├── environment/local-pairing.json  # While running: owner-only token for `forge pair-link`
 │   │   ├── secure-sessions.db             # Secure Session metadata and OS-encrypted material
 │   │   ├── builder-sidebar-order.json     # Unified project order
 │   │   ├── compaction-settings.json       # Manager compaction settings

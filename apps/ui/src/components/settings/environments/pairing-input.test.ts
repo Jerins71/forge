@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkMixedContent, formatPairingCode, normalizeHostUrl, normalizePairingCode, parsePairingLink } from './pairing-input'
+import { checkMixedContent, formatPairingCode, isLoopbackBaseUrl, normalizeHostUrl, normalizePairingCode, parsePairingLink } from './pairing-input'
 
 const ENV = '0b5c7a7e-1d2f-4c3b-9a8e-112233445566'
 const GRANT = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'
@@ -59,5 +59,12 @@ describe('host URLs and HTTPS requirement', () => {
     expect(checkMixedContent('https:', 'http://localhost:47187')).toBeNull()
     expect(checkMixedContent('http:', 'http://192.168.1.20:47187')).toBeNull()
     expect(checkMixedContent(null, 'http://192.168.1.20:47187')).toBeNull()
+  })
+})
+
+describe('isLoopbackBaseUrl', () => {
+  it('flags addresses that only work on the machine itself', () => {
+    for (const url of ['http://127.0.0.1:47187', 'http://localhost:47187', 'http://[::1]:47187', 'http://127.1.2.3']) expect(isLoopbackBaseUrl(url)).toBe(true)
+    for (const url of ['https://dev1.tailnet.ts.net', 'https://192.168.1.20', 'not a url']) expect(isLoopbackBaseUrl(url)).toBe(false)
   })
 })

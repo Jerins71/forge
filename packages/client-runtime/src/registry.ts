@@ -109,12 +109,14 @@ export function createEnvironmentRegistry(
           ...(result.bearerToken ? { bearerToken: result.bearerToken } : {}),
           ...(result.csrfToken ? { csrfToken: result.csrfToken } : {}),
         })
+      // Re-pairing replaces only the credential: the user's name and settings stay.
+      const known = catalog.getSnapshot().get(result.environment.environmentId)
       await register({
         environmentId: result.environment.environmentId,
         baseUrl: input.baseUrl,
-        labelOverride: null,
-        primary: false,
-        enabled: true,
+        labelOverride: known?.labelOverride ?? null,
+        primary: known?.primary ?? false,
+        enabled: known?.enabled ?? true,
         credentialRef: ports.platform ? result.environment.environmentId : null,
       })
       return result

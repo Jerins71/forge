@@ -27,6 +27,14 @@ describe('describeEnvironmentStatus', () => {
     expect(status).toMatchObject({ kind: 'offline', label: 'Offline · 5m ago', blocksLaunch: true })
   })
 
+  it('keeps a lost or rejected credential listed as Needs re-pairing, naming the cause', () => {
+    for (const blockedCause of ['revoked', 'expired', 'needs-pairing', null] as const) {
+      expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause }), NOW)).toMatchObject({ label: 'Needs re-pairing', blocksLaunch: true })
+    }
+    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'revoked' }), NOW).detail).toMatch(/revoked/)
+    expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'expired' }), NOW).detail).toMatch(/expired/)
+  })
+
   it('distinguishes revoked from needs pairing', () => {
     expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'revoked' }), NOW).kind).toBe('revoked')
     expect(describeEnvironmentStatus(state({ phase: 'auth-blocked', blockedCause: 'expired' }), NOW).kind).toBe('needs-pairing')

@@ -61,6 +61,7 @@ export function requestHandler(deps: RpcDependencies, principal: Principal, meth
       return deps.control.readWorkspace(principal, method, input as RpcInput<typeof method>);
     case "command.get": return deps.control.getReceipt(principal, (input as RpcInput<"command.get">).commandId);
     case "access.grant.create": return deps.access.createGrant(principal, input as RpcInput<typeof method>);
+    case "access.pairing.address": return deps.access.pairingAddressInfo(principal);
     case "access.devices.list": return deps.access.listDevices(principal);
     case "access.devices.revoke": return deps.access.revokeDevice(principal, input as RpcInput<typeof method>);
     case "terminal.input": return deps.terminalTransport.input(principal, input as RpcInput<typeof method>);

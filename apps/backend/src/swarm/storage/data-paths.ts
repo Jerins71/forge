@@ -643,6 +643,11 @@ export function getEnvironmentDbPath(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "environment", "control.sqlite");
 }
 
+/** Owner-only endpoint a running backend publishes for `forge pair-link`; removed on stop. */
+export function getLocalPairingEndpointPath(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "environment", "local-pairing.json");
+}
+
 export function getEnvironmentArtifactDir(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "environment", "artifacts");
 }

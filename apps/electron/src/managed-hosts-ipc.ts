@@ -33,10 +33,11 @@ export function installManagedHostsIpc(options: {
       operation?: string
       input?: ManagedHostAddInput
       hostAlias?: string
+      dataDir?: string
     }
     if (
       options.supported === false &&
-      ['add', 'repair', 'update'].includes(r?.operation ?? '')
+      ['add', 'repair', 'update', 'detect', 'pairingLink'].includes(r?.operation ?? '')
     )
       return {
         ok: false,
@@ -58,6 +59,10 @@ export function installManagedHostsIpc(options: {
         return options.service.update(r.hostAlias!)
       case 'removeConnection':
         return options.service.removeConnection(r.hostAlias!)
+      case 'detect':
+        return options.service.detect(r.hostAlias!)
+      case 'pairingLink':
+        return options.service.pairingLink(r.hostAlias!, r.dataDir!)
       default:
         return {
           ok: false,
@@ -91,6 +96,9 @@ export function createManagedHostsBridge(ipc: {
     update: (hostAlias) => invoke({ operation: 'update', hostAlias }),
     removeConnection: (hostAlias) =>
       invoke({ operation: 'removeConnection', hostAlias }),
+    detect: (hostAlias) => invoke({ operation: 'detect', hostAlias }),
+    pairingLink: (hostAlias, dataDir) =>
+      invoke({ operation: 'pairingLink', hostAlias, dataDir }),
     onChanged: (listener) => {
       const handler = (_event: unknown, value: ManagedHostStatus[]) =>
         listener(value)

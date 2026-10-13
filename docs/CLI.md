@@ -37,6 +37,18 @@ export FORGE_ENVIRONMENT_ID=<paired-environment-UUID>
 forge doctor
 ```
 
+To let another device pair with a Forge that is already running on this machine, without restarting
+it, run `forge pair-link` as the account that owns its data directory:
+
+```bash
+forge pair-link --data-dir "$HOME/.forge"            # one-time link on stdout, valid 10 minutes
+forge pair-link --code --scopes session:read --expires 30m
+```
+
+It talks to the running backend over a local-only socket whose token is an owner-only file in the
+data directory. Without `--scopes` the grant allows every permission; the pairing device can still
+request fewer.
+
 For local development, use the built workspace entrypoint directly:
 
 ```bash

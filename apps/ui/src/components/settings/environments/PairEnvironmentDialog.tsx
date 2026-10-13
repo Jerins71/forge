@@ -25,12 +25,19 @@ type Mode = 'link' | 'code'
 const DEFAULT_SCOPES: Scope[] = ['session:read', 'session:operate', 'workspace:read', 'workspace:write', 'terminal:operate']
 const GENERIC_PAIRING_ERROR = 'This pairing link or code is invalid, expired, or already used. Create a new one on the host and try again.'
 
-export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+/** An environment that lost its pairing: the new link must be for it, and its name and settings stay. */
+export interface RepairTarget {
+  environmentId: string
+  label: string
+  baseUrl: string
+}
+
+export function PairEnvironmentDialog({ open, onOpenChange, repair }: { open: boolean; onOpenChange: (open: boolean) => void; repair?: RepairTarget }) {
   const registry = useEnvironmentRegistry()
   const desktop = isElectron()
   const [mode, setMode] = useState<Mode>('link')
   const [link, setLink] = useState('')
-  const [host, setHost] = useState('')
+  const [host, setHost] = useState(repair?.baseUrl ?? '')
   const [code, setCode] = useState('')
   const [deviceName, setDeviceName] = useState(() => (desktop ? 'Forge Desktop' : 'Browser'))
   const [scopes, setScopes] = useState<Scope[]>(DEFAULT_SCOPES)
@@ -58,13 +65,14 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
     if (mode === 'link') {
       const parsed = parsePairingLink(link)
       if (!parsed.ok) return parsed.error
+      if (repair && parsed.environmentId !== repair.environmentId) return `This link is for a different environment, not ${repair.label}. Create the link on ${repair.label}.`
       return { ...common, baseUrl: parsed.baseUrl, expectedEnvironmentId: parsed.environmentId, credential: parsed.credential }
     }
     const baseUrl = normalizeHostUrl(host)
     if (!baseUrl) return 'Enter the environment address, for example dev1.tailnet.ts.net.'
     const normalized = normalizePairingCode(code)
     if (!normalized) return 'Codes have 12 characters, shown as XXXX-XXXX-XXXX.'
-    return { ...common, baseUrl, credential: { kind: 'code', code: normalized } }
+    return { ...common, baseUrl, ...(repair ? { expectedEnvironmentId: repair.environmentId } : {}), credential: { kind: 'code', code: normalized } }
   }
 
   const submit = async () => {
@@ -95,9 +103,13 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
     <Dialog open={open} onOpenChange={close}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add environment</DialogTitle>
+          <DialogTitle>{repair ? `Re-pair ${repair.label}` : 'Add a machine to this app'}</DialogTitle>
           <DialogDescription>
-            On the other machine, open Settings → Environments and create a pairing link or code.
+            {repair
+              ? `Create a new pairing link on ${repair.label} and paste it here. Its name and settings stay.`
+              : 'Paste a pairing link from the other machine.'}{' '}
+            There, open Settings → Environments → Let another device use this machine, or run{' '}
+            <code className="font-mono text-[12px]">forge pair-link</code>.
           </DialogDescription>
         </DialogHeader>
 
@@ -107,7 +119,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
               <span className="grid size-7 place-items-center rounded-full bg-success/15">
                 <CheckCircle2 className="size-4 text-success" />
               </span>
-              Paired with {paired.environment.label}
+              {repair ? `Re-paired ${repair.label}` : `Paired with ${paired.environment.label}`}
             </div>
             <dl className="glass-inset grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-xl p-3 text-[12px]">
               <dt className="text-subtle-foreground">Platform</dt><dd className="font-mono text-[11.5px] text-foreground/90">{paired.environment.platform.os} · Forge {paired.environment.forgeVersion}</dd>
@@ -188,7 +200,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
               <Button type="button" variant="ghost" onClick={() => close(false)}>Cancel</Button>
               <Button type="submit" disabled={busy}>
                 {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-                Pair
+                {repair ? 'Re-pair' : 'Pair'}
               </Button>
             </DialogFooter>
           </form>
@@ -201,7 +213,7 @@ export function PairEnvironmentDialog({ open, onOpenChange }: { open: boolean; o
 function BrowserMemoryNotice() {
   return (
     <p className="rounded-lg border border-attention/25 bg-attention-surface px-3 py-2 text-[12px] text-muted-foreground">
-      In a browser, access to another machine lasts until this page reloads; then it shows Needs pairing.
+      In a browser, access to another machine lasts until this page reloads; then it shows Needs re-pairing.
       Forge Desktop keeps environments paired.
     </p>
   )

@@ -216,7 +216,7 @@ test('a new thread starts on a paired machine', async ({ page }) => {
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
   await expect(page.getByRole('list', { name: 'Environments' })).toBeVisible()
   const link = await fleet.mintGrant(b, 'link')
-  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(b.label)

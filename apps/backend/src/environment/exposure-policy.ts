@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import { isIP } from "node:net";
 import { readFile, open, unlink } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { networkInterfaces } from "node:os";
 import { promisify } from "node:util";
 
 export interface ExposureOptions {
@@ -108,6 +109,33 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
       if (!options.publicBaseUrl && loopback) base = `${scheme}://${host.includes(":") ? `[${host}]` : host}:${port}`;
     },
   };
+}
+
+/**
+ * Addresses this machine could be reached on if it were exposed: its Tailscale HTTPS name and private
+ * LAN IPv4 addresses. Hints for a loopback-only environment's pairing copy, never a pairing address.
+ */
+export async function detectExposureSuggestions(
+  run: () => Promise<string> = async () =>
+    (await promisify(execFile)("tailscale", ["status", "--json"], { windowsHide: true, timeout: 2000 })).stdout,
+  interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
+): Promise<{ tailscaleUrl: string | null; lanAddresses: string[] }> {
+  let tailscaleUrl: string | null = null;
+  try {
+    const name = (JSON.parse(await run()) as { Self?: { DNSName?: string } }).Self?.DNSName?.replace(/\.$/, "");
+    if (name && /^[a-zA-Z0-9.-]+$/.test(name)) tailscaleUrl = `https://${name}`;
+  } catch {
+    /* Tailscale is optional. */
+  }
+  // Physical-looking adapters only: VPN tunnels, VM and container bridges are not where devices reach it.
+  const virtual = /^(lo|utun|tun|tap|bridge|vmnet|vnic|vboxnet|docker|veth|br-|virbr|tailscale|zt|awdl|llw|ipsec|wg)/i;
+  const lanAddresses = Object.entries(interfaces)
+    .filter(([name]) => !virtual.test(name))
+    .flatMap(([, entries]) => entries ?? [])
+    .filter((entry) => entry.family === "IPv4" && !entry.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(entry.address))
+    .map((entry) => entry.address)
+    .slice(0, 3);
+  return { tailscaleUrl, lanAddresses };
 }
 
 /** Own only a previously absent HTTPS handler, and compare it before explicit disable. */

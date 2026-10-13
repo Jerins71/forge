@@ -199,6 +199,8 @@ export function createFixtureEnvironmentRegistry(
       else if (method === 'session.content')
         value = { text: 'Fixture content', nextOffset: null }
       else if (method === 'access.devices.list') value = devices
+      else if (method === 'access.pairing.address')
+        value = { baseUrl: seed.entry.baseUrl, loopbackOnly: /^http:\/\/(127\.|localhost|\[::1\])/.test(seed.entry.baseUrl), tailscaleUrl: null, lanAddresses: [] }
       else if (method === 'access.grant.create') {
         const grant = input as RpcInput<'access.grant.create'>
         value = {

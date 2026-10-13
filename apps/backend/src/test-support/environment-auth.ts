@@ -108,7 +108,7 @@ export async function createAuthOnlyTestEnvironment(host: string, port: number):
   let rpc: ReturnType<typeof createEnvironmentRpcServer> | undefined;
   const environment: import('../environment/environment-service.js').EnvironmentService = {
     database, access, control, exposure, descriptor: identity.descriptor, routes: access.routes,
-    initialize: async () => {}, start: () => {},
+    initialize: async () => {}, start: () => {}, listenLocalPairing: async () => {},
     composeTransport(sessionFeatures) {
       sessionFeatures.setEnvironmentControl({ access, control });
       const deps = { database, subscribeCommitted: eventSink.subscribe, getDescriptor: identity.descriptor };

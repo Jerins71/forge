@@ -118,6 +118,7 @@ export interface EnvironmentAccessPort {
   authorize(principal: Principal, scopes: readonly Scope[]): void;
   exchange(input: PairingExchange, origin: string | null): Promise<PairingExchangeResult>;
   createGrant(principal: Principal, input: RpcInput<"access.grant.create">): Promise<RpcOutput<"access.grant.create">>;
+  pairingAddressInfo(principal: Principal): Promise<RpcOutput<"access.pairing.address">>;
   listDevices(principal: Principal): Promise<RpcOutput<"access.devices.list">>;
   revokeDevice(principal: Principal, input: RpcInput<"access.devices.revoke">): Promise<RpcOutput<"access.devices.revoke">>;
   consumeWsTicket(input: {

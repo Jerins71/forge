@@ -1,9 +1,9 @@
 import { mkdtemp, cp, readFile, writeFile, rm, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
-import { loadEnvironmentIdentity, recoverEnvironmentIdentity } from "./identity.js";
-import { createExposurePolicy, enableTailscaleServe, disableOwnedTailscaleServe } from "./exposure-policy.js";
+import { defaultEnvironmentLabel, loadEnvironmentIdentity, recoverEnvironmentIdentity } from "./identity.js";
+import { createExposurePolicy, detectExposureSuggestions, enableTailscaleServe, disableOwnedTailscaleServe } from "./exposure-policy.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../sqlite-database-loader.js";
 import { getHostInstallationStateDir } from "../swarm/storage/data-paths.js";
@@ -102,4 +102,24 @@ it("persists and reloads default identity registration only in the explicit isol
   expect((await loadEnvironmentIdentity({ dataDir })).file).toEqual(first.file);
   const registry = JSON.parse(await readFile(join(installation, "registry.json"), "utf8"));
   expect(registry.instances).toEqual({ [await realpath(dataDir)]: first.file.instanceNonce });
+});
+it("names an environment after its machine's short hostname unless a label is configured", async () => {
+  expect(defaultEnvironmentLabel("dev1")).toBe("dev1");
+  expect(defaultEnvironmentLabel("dev1.tailnet.ts.net")).toBe("dev1");
+  expect(defaultEnvironmentLabel("Adams-MacBook-Pro.local")).toBe("Adams-MacBook-Pro");
+  expect(defaultEnvironmentLabel("")).toBe("Forge");
+  expect(defaultEnvironmentLabel("  ")).toBe("Forge");
+  expect(defaultEnvironmentLabel("h".repeat(200))).toHaveLength(80);
+  root = await mkdtemp(join(tmpdir(), "forge-identity-"));
+  const identity = await loadEnvironmentIdentity({ dataDir: join(root, "data"), installationStateDir: join(root, "host") });
+  expect(identity.descriptor().label).toBe(defaultEnvironmentLabel(hostname()));
+  const labelled = await loadEnvironmentIdentity({ dataDir: join(root, "other"), installationStateDir: join(root, "host"), label: "Build box" });
+  expect(labelled.descriptor().label).toBe("Build box");
+});
+it("suggests a loopback environment's Tailscale name and physical LAN addresses, never tunnels or VM bridges", async () => {
+  const nic = (address: string) => ({ address, family: "IPv4" as const, internal: false, netmask: "255.255.255.0", mac: "00:00:00:00:00:00", cidr: null });
+  const interfaces = { lo0: [{ ...nic("127.0.0.1"), internal: true }], en0: [nic("192.168.1.20"), { ...nic("fe80::1"), family: "IPv6" as const, scopeid: 0 }], utun4: [nic("10.8.0.2")], bridge100: [nic("10.211.55.2")], docker0: [nic("172.17.0.1")], en7: [nic("203.0.113.9")] };
+  expect(await detectExposureSuggestions(async () => JSON.stringify({ Self: { DNSName: "dev1.tailnet.ts.net." } }), interfaces)).toEqual({ tailscaleUrl: "https://dev1.tailnet.ts.net", lanAddresses: ["192.168.1.20"] });
+  expect(await detectExposureSuggestions(async () => { throw new Error("tailscale: not found"); }, {})).toEqual({ tailscaleUrl: null, lanAddresses: [] });
+  expect(await detectExposureSuggestions(async () => JSON.stringify({ Self: { DNSName: "bad name;rm" } }), {})).toMatchObject({ tailscaleUrl: null });
 });

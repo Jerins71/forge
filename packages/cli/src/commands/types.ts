@@ -36,6 +36,8 @@ export interface ParsedArgs {
     instructions?: string
     answers?: string
     pinned?: string
+    expires?: string
+    code?: boolean
     yes?: boolean
     stopOnTimeout?: boolean
     includeWorkerUpdates?: boolean

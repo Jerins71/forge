@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, KeyRound, Link2, Loader2 } from 'lucide-react'
+import { AlertTriangle, Copy, KeyRound, Link2, Loader2 } from 'lucide-react'
 import type { RpcOutput, Scope } from '@forge/protocol/environment-v2'
 import type { EnvironmentCatalogEntry } from '@forge/client-runtime'
 import { Button } from '@/components/ui/button'
@@ -11,14 +11,15 @@ import { copyTextToClipboard } from '@/lib/clipboard'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { SettingsSection } from '../settings-row'
 import { environmentLabel } from './environment-runtime'
-import { formatPairingCode, normalizeHostUrl } from './pairing-input'
+import { formatPairingCode, isLoopbackBaseUrl } from './pairing-input'
 import { ScopePicker } from './ScopePicker'
 
 type GrantKind = 'link' | 'code'
 type CreatedGrant = RpcOutput<'access.grant.create'>
+type PairingAddress = RpcOutput<'access.pairing.address'>
 
 const DEFAULT_SCOPES: Scope[] = ['session:read', 'session:operate', 'workspace:read', 'workspace:write', 'terminal:operate']
-const EXPIRY_MINUTES = [1, 2, 5, 10] as const
+const EXPIRY_MINUTES = [2, 5, 10] as const
 
 export function HostPairingPanel({ environments, targetEnvironmentId, onTargetChange }: {
   environments: readonly EnvironmentCatalogEntry[]
@@ -31,23 +32,31 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
   const [kind, setKind] = useState<GrantKind>('link')
   const [label, setLabel] = useState('')
   const [scopes, setScopes] = useState<Scope[]>(DEFAULT_SCOPES)
-  const [minutes, setMinutes] = useState<number>(5)
-  const [reachableUrl, setReachableUrl] = useState(target?.baseUrl ?? '')
+  const [minutes, setMinutes] = useState<number>(10)
+  const [address, setAddress] = useState<PairingAddress | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [grant, setGrant] = useState<CreatedGrant | null>(null)
+  const remote = !target?.primary
 
-  // A grant belongs to the environment that issued it; switching targets discards it.
+  // A grant belongs to the environment that issued it; switching targets discards it. The environment
+  // itself says which address its links name (only that one is accepted); an older one falls back to ours.
   useEffect(() => {
     setGrant(null)
     setError(null)
-    setReachableUrl(target?.baseUrl ?? '')
-  }, [targetEnvironmentId, target?.baseUrl])
+    const fallback = target?.baseUrl ?? ''
+    setAddress(fallback ? { baseUrl: fallback, loopbackOnly: isLoopbackBaseUrl(fallback), tailscaleUrl: null, lanAddresses: [] } : null)
+    let current = true
+    registry.get(targetEnvironmentId).request('access.pairing.address', {}).then(
+      (value) => { if (current) setAddress(value) },
+      () => {},
+    )
+    return () => { current = false }
+  }, [registry, targetEnvironmentId, target?.baseUrl])
 
   const create = async () => {
-    const reachableBaseUrl = normalizeHostUrl(reachableUrl)
-    if (!reachableBaseUrl) {
-      setError('Enter the address other devices use to reach this environment.')
+    if (!address) {
+      setError(`${targetLabel} has no address yet. Wait until it is online.`)
       return
     }
     if (scopes.length === 0) {
@@ -62,7 +71,7 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
         label: label.trim() || 'New device',
         scopes,
         expiresInSeconds: minutes * 60,
-        reachableBaseUrl,
+        reachableBaseUrl: address.baseUrl,
       }))
     } catch (err) {
       setError(grantErrorMessage(err, targetLabel))
@@ -73,11 +82,13 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
 
   return (
     <SettingsSection
-      label="Pair a device"
-      description="Create a one-time link or code that lets another device use this environment. It expires quickly and works once."
+      label={remote ? `Let another device use ${targetLabel}` : 'Let another device use this machine'}
+      description={remote
+        ? `The link or code pairs a phone, laptop or browser with ${targetLabel}, the machine chosen here, not with this app. It works once.`
+        : 'Create a one-time link or code so a phone, laptop or browser can use this machine. It works once.'}
       cta={environments.length > 1 ? (
         <Select value={targetEnvironmentId} onValueChange={onTargetChange}>
-          <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Environment to pair">
+          <SelectTrigger className="h-8 w-48 text-[13px]" aria-label="Machine to share">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -111,15 +122,18 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
                 <SelectTrigger id="grant-expiry"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {EXPIRY_MINUTES.map((value) => (
-                    <SelectItem key={value} value={String(value)}>{value} {value === 1 ? 'minute' : 'minutes'}</SelectItem>
+                    <SelectItem key={value} value={String(value)}>{value} minutes</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="grant-url">Address other devices use</Label>
-            <Input id="grant-url" value={reachableUrl} spellCheck={false} onChange={(event) => setReachableUrl(event.target.value)} />
+            <Label>Address in the link</Label>
+            <div className="truncate rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-1.5 font-mono text-[12px] text-foreground/90" data-testid="pairing-address">
+              {address?.baseUrl ?? '…'}
+            </div>
+            {address?.loopbackOnly ? <LoopbackWarning address={address} label={remote ? targetLabel : 'this machine'} /> : null}
           </div>
           <ScopePicker value={scopes} onChange={setScopes} legend="Permissions" />
           {error ? <p role="alert" className="text-[13px] text-danger">{error}</p> : null}
@@ -130,6 +144,21 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
         </form>
       )}
     </SettingsSection>
+  )
+}
+
+function LoopbackWarning({ address, label }: { address: PairingAddress; label: string }) {
+  return (
+    <div className="flex gap-2 rounded-lg border border-attention/25 bg-attention-surface px-3 py-2 text-[12px] text-muted-foreground" data-testid="pairing-loopback-warning">
+      <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-attention" />
+      <p>
+        {address.baseUrl} only works on {label} itself, so another device cannot use this link. To pair one, restart Forge
+        there with <code className="font-mono">--tailscale-serve</code>
+        {address.tailscaleUrl ? <> (it would be <span className="font-mono">{address.tailscaleUrl}</span>)</> : null}, or with{' '}
+        <code className="font-mono">--public-url</code> and a TLS certificate
+        {address.lanAddresses.length ? <> (its LAN address: <span className="font-mono">{address.lanAddresses.join(', ')}</span>)</> : null}.
+      </p>
+    </div>
   )
 }
 
