@@ -7,6 +7,8 @@ import { writeFileAtomic, writeJsonFileAtomic } from '../../utils/atomic-files.j
 import extract from '@electron-internal/extract-zip'
 import { chromium, type BrowserContext } from 'playwright-core'
 import { getBrowserProfileDir, getBrowserRuntimeDir } from '../storage/data-paths.js'
+import type { BrowserEngineSetupState } from '@forge/protocol'
+import { BROWSER_HOST_SETUP_COMMAND, needsLinuxBrowserHostSetup } from './linux-browser-sandbox.js'
 /** Chrome for Testing pins verified by T3 Tools Inc. @df26ef99 (MIT).
  * Updating this version requires replacing all hashes and archive lengths. */
 export const HEADLESS_CHROME_VERSION = '154.0.8037.92'
@@ -19,7 +21,12 @@ const releases = {
   win64: [120822223, '3ac2561f02d9d87aadc0399d00b9002d718a4c365624fa67db9e7bfaf6b1a568'],
 } as const
 export const LINUX_BROWSER_PACKAGES = 'libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2'
-export interface BrowserSetupState { browserEngineState: 'ready' | 'missing' | 'installing' | 'failed'; browserEngineMessage?: string }
+export interface BrowserSetupState { browserEngineState: BrowserEngineSetupState; browserEngineMessage?: string; browserEngineSetupCommand?: string }
+function browserEnvironment() {
+  // Provider credentials and private bootstrap capabilities must not be inherited.
+  const allowed = /^(PATH|HOME|USER|LOGNAME|TMPDIR|TMP|TEMP|LANG|LC_.*|SYSTEMROOT|WINDIR|LOCALAPPDATA|APPDATA|DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|LD_LIBRARY_PATH)$/i
+  return Object.fromEntries(Object.entries(process.env).filter(([key, value]) => allowed.test(key) && value !== undefined)) as Record<string, string>
+}
 function platformKey(): keyof typeof releases {
   if (!['x64', 'arm64', ...(process.platform === 'win32' ? ['ia32'] : [])].includes(process.arch)) throw new Error(`Chrome headless shell does not support ${process.platform}-${process.arch}.`)
   const key = process.platform === 'darwin' ? `mac-${process.arch === 'arm64' ? 'arm64' : 'x64'}` : process.platform === 'win32' ? process.arch === 'ia32' ? 'win32' : 'win64' : process.platform === 'linux' ? process.arch === 'arm64' ? 'linux-arm64' : 'linux64' : undefined
@@ -28,6 +35,7 @@ function platformKey(): keyof typeof releases {
 }
 export class HeadlessBrowser {
   private installing?: Promise<string>
+  private preparing?: Promise<void>
   private executable?: string
   private setup: BrowserSetupState = { browserEngineState: 'missing' }
   private readonly contexts = new Map<string, Promise<BrowserContext>>()
@@ -47,6 +55,20 @@ export class HeadlessBrowser {
   }
   state(): BrowserSetupState { return { ...this.setup } }
   private update(setup: BrowserSetupState) { this.setup = setup; this.options.onSetup?.(this.state()) }
+  /** Retry also verifies the host sandbox, even when Chrome is already cached. */
+  prepare(): Promise<void> {
+    if (this.preparing) return this.preparing
+    this.update({ browserEngineState: 'installing', browserEngineMessage: 'Checking the Forge browser…' })
+    this.preparing = (async () => {
+      const executablePath = await this.ensureExecutable()
+      this.update({ browserEngineState: 'installing', browserEngineMessage: 'Checking the browser sandbox…' })
+      try {
+        const browser = await chromium.launch({ executablePath, headless: true, chromiumSandbox: true, env: browserEnvironment() })
+        await browser.close(); this.update({ browserEngineState: 'ready' })
+      } catch (cause) { throw await this.launchFailure(cause) }
+    })().finally(() => { this.preparing = undefined })
+    return this.preparing
+  }
   async ensureExecutable(): Promise<string> {
     if (this.executable) return this.executable
     if (this.installing) return this.installing
@@ -93,20 +115,31 @@ export class HeadlessBrowser {
   private async launch(projectId: string): Promise<BrowserContext> {
     const executablePath = await this.ensureExecutable()
     const profile = getBrowserProfileDir(this.options.dataDir, projectId); await mkdir(profile, { recursive: true, mode: 0o700 })
-    // Provider credentials and private bootstrap capabilities must not be inherited.
-    const allowed = /^(PATH|HOME|USER|LOGNAME|TMPDIR|TMP|TEMP|LANG|LC_.*|SYSTEMROOT|WINDIR|LOCALAPPDATA|APPDATA|DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|LD_LIBRARY_PATH)$/i
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key, value]) => allowed.test(key) && value !== undefined)) as Record<string, string>
     try {
-      const context = await chromium.launchPersistentContext(profile, { executablePath, headless: true, chromiumSandbox: true, viewport: { width: 1280, height: 800 }, env })
+      const context = await chromium.launchPersistentContext(profile, { executablePath, headless: true, chromiumSandbox: true, viewport: { width: 1280, height: 800 }, env: browserEnvironment() })
       for (const page of context.pages()) await page.close()
       context.on('close', () => { this.contexts.delete(projectId) }); return context
-    } catch (cause) {
-      const raw = cause instanceof Error ? cause.message : String(cause)
-      const message = process.platform === 'linux' && /shared libraries|not found|host system is missing|lib.*\.so/.test(raw)
+    } catch (cause) { throw await this.launchFailure(cause) }
+  }
+  private async launchFailure(cause: unknown): Promise<Error> {
+    const raw = cause instanceof Error ? cause.message : String(cause)
+    let hostSetup = false
+    if (/sandbox|zygote|Operation not permitted|userns|namespace/i.test(raw)) {
+      try { hostSetup = await needsLinuxBrowserHostSetup() }
+      catch (error) {
+        const message = `Could not check the host browser sandbox policy: ${error instanceof Error ? error.message.slice(0, 700) : 'permission denied'}`
+        this.update({ browserEngineState: 'failed', browserEngineMessage: message }); return new Error(message)
+      }
+    }
+    if (hostSetup) {
+      const message = `This machine needs a one-time browser host setup: ${BROWSER_HOST_SETUP_COMMAND}. Then retry the Forge browser. Chromium’s sandbox remains enabled. Do not substitute other browsers.`
+      this.update({ browserEngineState: 'needs-host-setup', browserEngineMessage: message, browserEngineSetupCommand: BROWSER_HOST_SETUP_COMMAND })
+      return new Error(message)
+    }
+    const message = process.platform === 'linux' && /shared libraries|not found|host system is missing|lib.*\.so/.test(raw)
         ? `Browser system libraries are missing. On Debian/Ubuntu run: sudo apt-get install ${LINUX_BROWSER_PACKAGES}`
         : /sandbox|zygote|Operation not permitted/.test(raw) ? 'Chromium sandbox could not start. Enable unprivileged user namespaces or a supported sandbox on this host; Forge does not disable the sandbox.' : `Browser failed to start: ${raw.slice(0, 700)}`
-      this.update({ browserEngineState: 'failed', browserEngineMessage: message }); throw new Error(message)
-    }
+    this.update({ browserEngineState: 'failed', browserEngineMessage: message }); return new Error(message)
   }
   async shutdown() { await Promise.allSettled([...this.contexts.values()].map(async work => (await work).close())); this.contexts.clear() }
 }

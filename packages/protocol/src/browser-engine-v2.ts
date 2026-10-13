@@ -22,12 +22,15 @@ export const BrowserEngineTabSchema = O({
   recordingId: Type.Optional(id), error: Type.Optional(Type.String({ maxLength: 1024 })),
 })
 export type BrowserEngineTab = Static<typeof BrowserEngineTabSchema>
+export const BrowserEngineSetupStateSchema = E('ready', 'missing', 'installing', 'failed', 'needs-host-setup')
+export type BrowserEngineSetupState = Static<typeof BrowserEngineSetupStateSchema>
 export const BrowserEngineSnapshotSchema = O({ sessionId: id, projectId: id,
   tabs: Type.Array(BrowserEngineTabSchema, { maxItems: 100 }),
   activeTabId: Type.Union([id, Type.Null()]), revision: sequence,
-  browserEngineState: Type.Optional(E('ready', 'missing', 'installing', 'failed')),
+  browserEngineState: Type.Optional(BrowserEngineSetupStateSchema),
+  browserEngineSetupCommand: Type.Optional(Type.String({ maxLength: 512 })),
   browserEngineMessage: Type.Optional(Type.String({ maxLength: 1024 })) })
-export const BrowserEngineSetupSchema = O({ browserEngineState: E('ready', 'missing', 'installing', 'failed'), browserEngineMessage: Type.Optional(Type.String({ maxLength: 1024 })) })
+export const BrowserEngineSetupSchema = O({ browserEngineState: BrowserEngineSetupStateSchema, browserEngineMessage: Type.Optional(Type.String({ maxLength: 1024 })), browserEngineSetupCommand: Type.Optional(Type.String({ maxLength: 512 })) })
 export type BrowserEngineSnapshot = Static<typeof BrowserEngineSnapshotSchema>
 export const BrowserEngineStreamSchema = O({ kind: Type.Literal('snapshot'), snapshot: BrowserEngineSnapshotSchema })
 export const BrowserEngineInputSchema = Type.Union([
@@ -63,7 +66,7 @@ export const BrowserCookiePreviewSchema = Type.Union([
 ])
 export type BrowserCookiePreview = Static<typeof BrowserCookiePreviewSchema>
 export const BrowserCookieAuditSchema = O({ domains: Type.Array(O({ domain, importedAt: Type.String({ maxLength: 32 }), count: Type.Integer({ minimum: 0, maximum: 100000 }) }), { maxItems: 10000 }), skipped: Type.Optional(Type.Array(O({ domain, reason: E('expired', 'unsupported', 'conflict', 'failed'), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 100000 })) }), { maxItems: 1000 })) })
-export const BrowserEngineStatusSchema = O({ state: E('ready', 'missing', 'installing', 'failed'), message: Type.Optional(Type.String({ maxLength: 1024 })), version: Type.Optional(Type.String({ maxLength: 128 })) })
+export const BrowserEngineStatusSchema = O({ state: BrowserEngineSetupStateSchema, message: Type.Optional(Type.String({ maxLength: 1024 })), setupCommand: Type.Optional(Type.String({ maxLength: 512 })), version: Type.Optional(Type.String({ maxLength: 128 })) })
 /** Explicit one-time transfer only. Clients must keep this value in memory,
  * never in persisted caches, logs, artifacts or conversations. */
 export const BrowserCookieTransferSchema = O({ transferId: id, expiresAt: Type.String({ maxLength: 32 }), domains,

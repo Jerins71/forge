@@ -6,7 +6,7 @@ Forge’s Browser panel and built-in `browser_*` tools share one Playwright engi
 
 Forge Desktop owns sandboxed Electron `WebContentsView` tabs with persistent project partitions, retaining the established Forge partition names and permission policy so existing logins survive the engine replacement. The backend drives them with Playwright over the private parent/child IPC channel and a private local socket (a named pipe on Windows). The engine opens no TCP debugging port. The Browser panel presents the real native view; hiding the panel or reloading the renderer detaches the view while keeping the tab alive. Agent viewport changes use CDP emulation and do not change panel placement.
 
-When no Desktop host is attached, including remote environments, Forge launches a pinned Chrome for Testing `chrome-headless-shell` with a persistent context per project. Forge automatically downloads it on first use, verifies the archive SHA-256 and size, and installs it under the environment data directory. `browser.engine.status` reads the machine’s `ready`, `missing`, `installing`, or `failed` setup state without a session; `browser.engine.setup` starts or retries installation. The pinned version and platform checksums are in `apps/backend/src/swarm/browser-automation/headless-browser.ts`. `FORGE_BROWSER_CACHE_DIR` can place the verified executable cache in a shared fleet cache; profiles always stay in their own environment data directory.
+When no Desktop host is attached, including remote environments, Forge launches a pinned Chrome for Testing `chrome-headless-shell` with a persistent context per project. Forge automatically downloads it on first use, verifies the archive SHA-256 and size, and installs it under the environment data directory. `browser.engine.status` reads the machine’s `ready`, `missing`, `installing`, `failed`, or `needs-host-setup` state without a session; `browser.engine.setup` starts installation or retries a sandbox launch. The pinned version and platform checksums are in `apps/backend/src/swarm/browser-automation/headless-browser.ts`. `FORGE_BROWSER_CACHE_DIR` can place the verified executable cache in a shared fleet cache; profiles always stay in their own environment data directory.
 
 Chromium’s sandbox remains enabled. Linux hosts need the browser’s shared libraries. On Debian/Ubuntu 24.04, install:
 
@@ -15,6 +15,14 @@ sudo apt-get install libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3
 ```
 
 Older distributions may name the audio package `libasound2`. Missing libraries produce an actionable setup failure. Hosts must also permit Chromium’s sandbox and supported architecture. Forge uses the browser’s normal automation defaults.
+
+Ubuntu 24.04 and newer can restrict unprivileged user namespaces with AppArmor. If that blocks Chromium, the panel, Settings → Browser and agent tools report `needs-host-setup` with this command to run **on the machine hosting the browser**:
+
+```bash
+sudo forge browser setup
+```
+
+The command installs `/etc/apparmor.d/forge-chrome-headless-shell` and reloads it with `apparmor_parser -r`. Its `userns` grant applies only to `/**/runtimes/browser/*/linux*/chrome-headless-shell-linux*/chrome-headless-shell`, and includes optional administrator policy from `local/forge-chrome-headless-shell`. Re-running it is safe. Without root it prints the same sudo command and exits non-zero; hosts without the restriction need no change. Retry in the panel or Settings after setup; Forge verifies the sandbox without restarting the application. Keep custom caches under the same runtime layout for this policy to match. Forge does not turn off the sandbox, change the host restriction or substitute another browser.
 
 ## Tools and shared tab state
 
@@ -44,6 +52,8 @@ The former Chrome extension, native-messaging host, External Chrome relay, setup
 
 `scripts/environment-e2e/browser-engine.spec.ts` exercises real Playwright against fixture pages, the private native Electron relay, env-a/env-b tool calls, multiple viewers, cancellation, recordings, cookie import, and profile persistence. It writes repeatable proof artifacts under the E2E output directory. The fake Codex runtime supports `[fixture:browser-open <url>]` and `[fixture:browser-click <selector>]` and invokes the registered browser tools.
 
-Build the fixture UI with `VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build`, then run Playwright through `/tmp/forge-v2-gate.sh`. Tests and fleets set isolation flags and use explicit throwaway Chrome profiles. Cookie readers refuse the real default Chrome profile in that mode and refuse native Keychain/secret-service access without an injected synthetic key provider.
+Build the fixture UI with `VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build`, then run Playwright through `/tmp/forge-v2-gate.sh`. Test and fleet entrypoints permanently restrict cookie readers for the process lifetime and use explicit throwaway Chrome profiles. Cookie readers refuse the real default Chrome profile in that mode and refuse native Keychain/secret-service access without an injected synthetic key provider.
+
+Run the full desktop presentation smoke with `/tmp/forge-v2-gate.sh pnpm e2e:browser:desktop` after the fixture UI build, `pnpm --filter @forge/electron build`, and `pnpm --filter @forge/electron prepare:dev-native`. It exercises the real main/preload/renderer in a shown window, including resize, dialog hiding, session switching, and reload. The smoke validates all write paths before launching Electron, uses an owned home and synthetic credential storage, and saves composited screenshots under `.internal/browser-panel/`. It never changes the product’s install-hint location.
 
 The `agent-browser` Skill owns a separate CLI browser lifecycle. It does not join the Browser panel or share this engine’s tabs and profiles.

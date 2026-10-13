@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Download, Globe2, Loader2, MonitorOff, RotateCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScreencastSkeleton } from './BrowserScreencast'
+import { BrowserHostSetupCommand } from './BrowserHostSetupCommand'
 import type { BrowserPanelAvailability } from './browser-panel-port'
 
 function StateCard({ icon, title, detail, children, role }: { icon: ReactNode; title: string; detail: ReactNode; children?: ReactNode; role?: 'status' | 'alert' }) {
@@ -38,6 +39,11 @@ export function BrowserAvailabilityState({ availability, onSetup }: { availabili
     return <div className="relative min-h-0 flex-1"><ScreencastSkeleton /></div>
   }
   if (availability.kind === 'setup') {
+    if (availability.state === 'needs-host-setup') return (
+      <StateCard role="alert" icon={<TriangleAlert className="size-5 text-[var(--status-attention)]" />} title="This machine needs a one-time setup" detail={<>Run this command on {availability.machineLabel}, then retry.</>}>
+        <div><BrowserHostSetupCommand command={availability.setupCommand} />{onSetup ? <Button className="mt-3" size="sm" onClick={onSetup}>Retry</Button> : null}</div>
+      </StateCard>
+    )
     if (availability.state === 'installing') {
       return (
         <StateCard

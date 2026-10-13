@@ -4,7 +4,7 @@
  * with it, and survives a renderer reload. Window screenshots composite the native view over the
  * renderer (a renderer capture alone cannot see it) into .internal/browser-panel/.
  *   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build && pnpm --filter @forge/electron build
- *   pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/browser-desktop-smoke.ts
+ *   /tmp/forge-v2-gate.sh pnpm e2e:browser:desktop
  * Run pnpm --filter @forge/electron prepare:dev-native before this smoke. OS credential storage
  * is replaced by an ephemeral encrypted fixture; no login keychain access is needed. */
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
@@ -24,6 +24,7 @@ const { resolveDevBetterSqlite3Binding } = electronRequire('./src/dev-native-bin
 // Main otherwise opens a synchronous native error dialog before creating its
 // first window, so neither Playwright's timeout nor the capture IPC can finish.
 resolveDevBetterSqlite3Binding({ electronDir, electronVersion: electronRequire('electron/package.json').version, platform: process.platform, arch: process.arch })
+const { assertDesktopSmokeIsolation } = createRequire(import.meta.url)('./fixtures/desktop-smoke-isolation.cjs') as { assertDesktopSmokeIsolation(input: { root: string; env: NodeJS.ProcessEnv; cacheRoot: string }): void }
 const backendRequire = createRequire(join(repositoryRoot, 'apps/backend/package.json'))
 type Sharp = (input: Buffer) => { resize(width: number, height: number): { toBuffer(): Promise<Buffer> }; composite(layers: Array<{ input: Buffer; left: number; top: number }>): { png(): { toFile(path: string): Promise<unknown> } } }
 const sharp = backendRequire('sharp') as Sharp
@@ -113,13 +114,15 @@ try {
   await until(() => fixtureRpcOnce(environment.baseUrl, bootstrap, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000)
   await controlEnvironment(fleet.manifest, environment.name, 'stop')
   step('serve built UI'); ui = await serveBuiltUi(join(repositoryRoot, 'apps/ui/.output/public'), '', { port: fleet.manifest.uiPort })
+  const desktopEnv = { ...sanitizedEnvironment(), FORGE_DATA_DIR: environment.dataDir, FORGE_INSTALLATION_STATE_DIR: environment.installationStateDir,
+    FORGE_ELECTRON_USER_DATA_DIR: join(fleet.manifest.root, 'desktop-user-data'), FORGE_ELECTRON_DEV_SERVER_URL: ui.url, FORGE_HOST: '127.0.0.1',
+    FORGE_PORT: String(environment.port), FORGE_CWD_ALLOWLIST_ROOTS: environment.checkout, FORGE_E2E_CHECKOUT: environment.checkout, FORGE_E2E_DESKTOP_ENTRY: join(electronDir, 'dist/main.js'), FORGE_E2E_DESKTOP_HOME: join(fleet.manifest.root, 'desktop-home'), FORGE_E2E_DESKTOP_ROOT: fleet.manifest.root, CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs'),
+    FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), FORGE_TELEMETRY: 'false', OTEL_SDK_DISABLED: 'true' }
+  assertDesktopSmokeIsolation({ root: fleet.manifest.root, env: desktopEnv, cacheRoot: join(repositoryRoot, '.internal/browser-engine-runtime') })
+  report.storagePreflight = 'owned paths verified before Electron launch'
   step('launch Electron'); application = await electron.launch({
-    ...(process.env.FORGE_E2E_ELECTRON_BINARY ? { executablePath: process.env.FORGE_E2E_ELECTRON_BINARY } : {}),
     args: [join(repositoryRoot, 'scripts/environment-e2e/fixtures/browser-desktop-main.cjs')], cwd: join(repositoryRoot, 'apps/electron'), timeout: 60_000,
-    env: { ...sanitizedEnvironment(), FORGE_DATA_DIR: environment.dataDir, FORGE_INSTALLATION_STATE_DIR: environment.installationStateDir,
-      FORGE_ELECTRON_USER_DATA_DIR: join(fleet.manifest.root, 'desktop-user-data'), FORGE_ELECTRON_DEV_SERVER_URL: ui.url, FORGE_HOST: '127.0.0.1',
-      FORGE_PORT: String(environment.port), FORGE_CWD_ALLOWLIST_ROOTS: environment.checkout, FORGE_E2E_CHECKOUT: environment.checkout, FORGE_E2E_DESKTOP_ENTRY: join(electronDir, 'dist/main.js'), FORGE_E2E_DESKTOP_HOME: join(fleet.manifest.root, 'desktop-home'), CODEX_BIN: join(repositoryRoot, 'scripts/environment-e2e/fake-codex.mjs'),
-      FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), FORGE_TELEMETRY: 'false', OTEL_SDK_DISABLED: 'true' },
+    env: desktopEnv,
   })
   const electronLog: string[] = []
   report.electronLog = electronLog
