@@ -26,20 +26,18 @@ function gate() {
   return { promise, resolve }
 }
 
-function fixture(quiesce = vi.fn(async () => {})) {
+function fixture() {
   expect(beforeQuit).not.toBe('')
   expect(prepareUpdate).not.toBe('')
   const backend = gate()
   const app = { exit: vi.fn() }
   const backendSupervisor = { stop: vi.fn(() => backend.promise) }
-  const disposeBrowserPreviewRuntime = vi.fn()
+  const hideBrowser = vi.fn()
   const context = vm.createContext({
-    app, backendSupervisor, managedHosts: { dispose: vi.fn(async () => {}) }, externalChromeCoordinator: { quiesce }, disposeBrowserPreviewRuntime,
+    app, backendSupervisor, managedHosts: { dispose: vi.fn(async () => {}) }, desktopBrowserHost: { hide: hideBrowser },
     lifecycleLog: { record: vi.fn() }, console: { warn: vi.fn() },
     stopPackagedRemoteUiServer: vi.fn(async () => {}),
-    browserPopoutWindow: null, sleepBlockerService: null, browserWorkspaceIpc: null,
-    mainRendererRecovery: null, disposeBrowserHost: null,
-    disposeExternalChromeIpc: null, disposeOpenPdfIpc: null, allowPopoutClose: false,
+    sleepBlockerService: null, mainRendererRecovery: null, disposeOpenPdfIpc: null,
   })
   const script = ts.transpileModule(`
     let appIsQuitting = false;
@@ -54,7 +52,7 @@ function fixture(quiesce = vi.fn(async () => {})) {
     context.onBeforeQuit(event)
     return event
   }
-  return { backend, app, backendSupervisor, context, quit, quiesce, disposeBrowserPreviewRuntime }
+  return { backend, app, backendSupervisor, context, quit, hideBrowser }
 }
 
 describe('Electron quit cleanup', () => {
@@ -65,8 +63,7 @@ describe('Electron quit cleanup', () => {
     expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
     expect(fx.quit().preventDefault).toHaveBeenCalledOnce()
     expect(fx.app.exit).not.toHaveBeenCalled()
-    expect(fx.quiesce).toHaveBeenCalledOnce()
-    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
+    expect(fx.hideBrowser).toHaveBeenCalledOnce()
     fx.backend.resolve()
     await vi.waitFor(() => expect(fx.app.exit).toHaveBeenCalledExactlyOnceWith(0))
   })
@@ -80,7 +77,7 @@ describe('Electron quit cleanup', () => {
     await preparation
     expect(fx.quit().preventDefault).not.toHaveBeenCalled()
     expect(fx.backendSupervisor.stop).toHaveBeenCalledOnce()
-    expect(fx.disposeBrowserPreviewRuntime).toHaveBeenCalledOnce()
+    expect(fx.hideBrowser).toHaveBeenCalledOnce()
     expect(fx.app.exit).not.toHaveBeenCalled()
   })
 })

@@ -15,9 +15,8 @@ import { fileURLToPath } from 'node:url'
 const RELEASE_EVENT = 'workflow_dispatch'
 const VALIDATION_EVENT = 'push'
 
-function unsignedWindowsSigningEnvironment(buildMode) {
+function unsignedWindowsSigningEnvironment() {
   return {
-    FORGE_EXTERNAL_CHROME_BUILD_MODE: buildMode,
     WIN_CSC_LINK: '',
     WIN_CSC_KEY_PASSWORD: '',
     WIN_CSC_NAME: '',
@@ -30,9 +29,9 @@ function unsignedWindowsSigningEnvironment(buildMode) {
   }
 }
 
-export function resolveWindowsCiSigningEnv({ eventName, env = {} } = {}) {
-  if (eventName === RELEASE_EVENT) return unsignedWindowsSigningEnvironment('release')
-  if (eventName === VALIDATION_EVENT) return unsignedWindowsSigningEnvironment('validation')
+export function resolveWindowsCiSigningEnv({ eventName } = {}) {
+  if (eventName === RELEASE_EVENT) return unsignedWindowsSigningEnvironment()
+  if (eventName === VALIDATION_EVENT) return unsignedWindowsSigningEnvironment()
   throw new Error(`Unsupported Electron CI event for signing env: ${eventName || '<unset>'}`)
 }
 

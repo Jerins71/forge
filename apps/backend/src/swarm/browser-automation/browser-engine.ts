@@ -6,11 +6,11 @@ import { readFile, rm } from 'node:fs/promises'
 import { Value } from '@sinclair/typebox/value'
 import sharp from 'sharp'
 import type { Page, CDPSession, Locator, BrowserContext } from 'playwright-core'
-import { BROWSER_AUTOMATION_OPERATIONS, BROWSER_HOST_PROTOCOL_VERSION, BROWSER_VIEWPORT_PRESETS, BrowserEngineSnapshotSchema,
+import { BROWSER_VIEWPORT_PRESETS, BrowserEngineSnapshotSchema,
   type BrowserEngineTab, type BrowserEngineSnapshot, type BrowserEngineInput, type BrowserScreencastItem, type BrowserAutomationOperation,
-  type BrowserAutomationInputByOperation, type BrowserAutomationResultByOperation, type BrowserTabSnapshot, type BrowserSnapshotResult,
+  type BrowserAutomationInputByOperation, type BrowserAutomationResultByOperation, type BrowserSnapshotResult,
   type BrowserConsoleEntry, type BrowserNetworkEntry } from '@forge/protocol'
-import type { BrowserAutomationInvocationResult } from './browser-automation-service.js'
+import type { BrowserAutomationInvocationResult } from './browser-automation-manager-adapter.js'
 import { writeJsonFileAtomic } from '../../utils/atomic-files.js'
 import { getSessionBrowserStatePath, getSessionBrowserArtifactsDir } from '../storage/data-paths.js'
 import { HeadlessBrowser, HEADLESS_CHROME_VERSION, type BrowserSetupState } from './headless-browser.js'
@@ -69,7 +69,7 @@ class ScreencastHub {
   private deliver(viewer: Viewer) { if (!this.latest || viewer.pending !== undefined || this.latest.frameId <= viewer.last) return; viewer.pending = this.latest.frameId; viewer.last = this.latest.frameId; viewer.send(this.latest) }
   attach(send: Viewer['send']) {
     const viewer: Viewer = { send, last: 0 }; this.viewers.add(viewer)
-    send({ kind: 'state', tabId: this.tab.state.tabId, state: 'ready' }); this.deliver(viewer)
+    send({ kind: 'state', tabId: this.tab.state.tabId, state: this.invalidFrame ? 'error' : 'ready', ...(this.invalidFrame ? { message: 'Browser viewport is too small for live view. Resize it to at least 240 × 240.' } : {}) }); this.deliver(viewer)
     return { ack: async (frameId: number) => { if (viewer.pending !== frameId) return; viewer.pending = undefined; this.deliver(viewer) }, release: async () => { this.viewers.delete(viewer); if (!this.viewers.size) { if (this.tab.stream === this) this.tab.stream = undefined; await this.stop() } } }
   }
   async stop() { if (this.stopped) return; this.stopped = true; this.tab.cdp.off('Page.screencastFrame', this.onFrame); for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'closed' }); this.viewers.clear(); await this.tab.cdp.send('Page.stopScreencast').catch(() => {}) }
@@ -169,7 +169,7 @@ export class BrowserEngine {
     finally { tab.state.loading = false; this.publish(session); await this.persist(session) }
     return this.snapshot(session)
   }
-  async resize(sessionId: string, tabId: string, viewport: BrowserEngineTab['viewport']) { if (viewport.width * viewport.height > 3840 * 2160) throw new Error('Browser viewport exceeds its area budget.'); const { session, tab } = await this.tab(sessionId, tabId); await tab.page.setViewportSize(viewport); if (tab.state.host === 'desktop') this.desktop.resize(tabId, viewport); tab.state.viewport = viewport; this.publish(session); await this.persist(session); return this.snapshot(session) }
+  async resize(sessionId: string, tabId: string, viewport: BrowserEngineTab['viewport']) { if (viewport.width * viewport.height > 3840 * 2160) throw new Error('Browser viewport exceeds its area budget.'); const { session, tab } = await this.tab(sessionId, tabId); await tab.page.setViewportSize(viewport); tab.state.viewport = viewport; this.publish(session); await this.persist(session); return this.snapshot(session) }
   private humanInput(session: Session, tab: LiveTab) { tab.actionEpoch++; tab.action?.abort(new Error('User input interrupted this browser action.')); tab.state.controller = 'human'; delete tab.state.agentAction; delete tab.state.agentCursor; this.publish(session) }
   async input(sessionId: string, tabId: string, input: BrowserEngineInput) {
     const { session, tab } = await this.tab(sessionId, tabId); this.humanInput(session, tab)
@@ -178,11 +178,13 @@ export class BrowserEngine {
     else if (input.kind === 'wheel') { const { kind: _kind, ...params } = input; await tab.cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...params }) }
     else { const { kind: _kind, ...params } = input; await tab.cdp.send('Input.dispatchMouseEvent', params) }
   }
-  async screencast(sessionId: string, tabId: string, options: { maxWidth?: number; maxHeight?: number; quality?: number }, send: (item: BrowserScreencastItem) => void) {
+  async screencast(sessionId: string, tabId: string, options: { maxWidth?: number; maxHeight?: number; quality?: number }, send: (item: BrowserScreencastItem) => void): Promise<{ ack(frameId: number): Promise<void>; release(): Promise<void> }> {
     const { tab } = await this.tab(sessionId, tabId)
-    if (!tab.stream) { const stream = new ScreencastHub(tab); tab.stream = stream; try { await stream.start(options) } catch (error) { tab.stream = undefined; await stream.stop(); throw error } }
-    await tab.stream.ready
-    return tab.stream.attach(send)
+    if (!tab.stream) { const stream = new ScreencastHub(tab); tab.stream = stream; void stream.start(options).catch(async () => { if (tab.stream === stream) tab.stream = undefined; await stream.stop() }) }
+    const stream = tab.stream
+    await stream.ready
+    if (tab.stream !== stream) return this.screencast(sessionId, tabId, options, send)
+    return stream.attach(send)
   }
   async recordingStart(sessionId: string, tabId: string) {
     const { session, tab } = await this.tab(sessionId, tabId)
@@ -213,8 +215,8 @@ export class BrowserEngine {
     } catch (error) { return { ok: false, operation, error: { code: error instanceof Error && /interrupt|abort/i.test(error.message) ? 'request-cancelled' : 'execution-failed', message: error instanceof Error ? error.message.slice(0, 1024) : 'Browser operation failed.', retryable: false } } }
   }
   private async perform(sessionId: string, operation: BrowserAutomationOperation, input: BrowserAutomationInputByOperation[BrowserAutomationOperation]): Promise<unknown> {
-    if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: true, host: { connected: true, hostId: 'playwright', hostGeneration: 1, focused: false, capabilities: { protocolVersions: { minimum: BROWSER_HOST_PROTOCOL_VERSION, maximum: BROWSER_HOST_PROTOCOL_VERSION }, supportedOperations: BROWSER_AUTOMATION_OPERATIONS, maxResponseBytes: 8388608 }, connectedAt: null }, panelVisible: false, panelRevealRequested: false, physicalTabVisible: false, selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ? legacyTab(snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId)!) : null, eligibleTabs: [], eligibleTabsTruncated: false } }
-    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: legacyTab((await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!), created: !existing, panelRevealRequested: value.show !== false } }
+    if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: snapshot.browserEngineState !== 'failed', ...this.setupState(), selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ?? null, tabs: snapshot.tabs } }
+    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false } }
     const { session, tab } = await this.tab(sessionId, input.tabId)
     const actionEpoch = tab.actionEpoch
     const run = async () => {
@@ -229,7 +231,7 @@ export class BrowserEngine {
   private async action(session: Session, tab: LiveTab, operation: BrowserAutomationOperation, raw: BrowserAutomationInputByOperation[BrowserAutomationOperation], signal: AbortSignal): Promise<unknown> {
     const tabId = tab.state.tabId; const page = tab.page
     switch (operation) {
-      case 'navigate': { const input = raw as BrowserAutomationInputByOperation['navigate']; const url = input.url ?? `${input.environmentProtocol ?? 'http'}://127.0.0.1:${input.environmentPort}${input.path ?? '/'}`; await this.navigate(session.snapshot.sessionId, tabId, { url }, signal, input.readiness === 'none' ? 'commit' : input.readiness === 'domContentLoaded' ? 'domcontentloaded' : 'load'); return { tab: legacyTab(tab.state), readiness: input.readiness } }
+      case 'navigate': { const input = raw as BrowserAutomationInputByOperation['navigate']; const url = input.url ?? `${input.environmentProtocol ?? 'http'}://127.0.0.1:${input.environmentPort}${input.path ?? '/'}`; await this.navigate(session.snapshot.sessionId, tabId, { url }, signal, input.readiness === 'none' ? 'commit' : input.readiness === 'domContentLoaded' ? 'domcontentloaded' : 'load'); return { tab: structuredClone(tab.state), readiness: input.readiness } }
       case 'resize': { const input = raw as BrowserAutomationInputByOperation['resize']; const viewport = input.mode === 'freeform' ? { width: input.width, height: input.height } : input.mode === 'preset' ? { ...BROWSER_VIEWPORT_PRESETS[input.presetId] } : { width: 1280, height: 800 }; if (input.mode === 'preset' && input.orientation === 'landscape') [viewport.width, viewport.height] = [viewport.height, viewport.width]; await this.resize(session.snapshot.sessionId, tabId, viewport); return { tabId, setting: { mode: 'freeform', ...viewport }, viewport: { ...viewport, deviceScaleFactor: 1 } } }
       case 'recordingStart': return this.recordingStart(session.snapshot.sessionId, tabId)
       case 'recordingStop': return this.recordingStop(session.snapshot.sessionId, tabId)
@@ -283,4 +285,3 @@ export class BrowserEngine {
 function normalizeUrl(raw: string) { const url = new URL(raw); if (!['http:', 'https:', 'about:'].includes(url.protocol) || url.username || url.password || (url.protocol === 'about:' && url.href !== 'about:blank')) throw new Error('Browser navigation requires HTTP(S) or about:blank, without URL credentials.'); return url.href }
 function locate(page: Page, input: { selector?: string; locator?: string }) { if (input.selector) return page.locator(input.selector); const locator = input.locator ?? ':focus'; if (locator.startsWith('label=')) return page.getByLabel(locator.slice(6), { exact: true }); if (locator.startsWith('text=')) return page.getByText(locator.slice(5), { exact: true }); const role = /^role=([\w-]+)(?:\[name=["'](.*)["']\])?$/.exec(locator); if (role) return page.getByRole(role[1] as Parameters<Page['getByRole']>[0], role[2] ? { name: role[2], exact: true } : {}); return page.locator(locator) }
 function actionLabel(operation: string, input: object) { const value = input as { locator?: string; selector?: string }; const target = value.locator?.replace(/^(label|text)=/, '').replace(/^role=\w+\[name=["'](.*)["']\]$/, '$1') ?? value.selector; const verb = ({ click: 'Clicking', type: 'Typing into', navigate: 'Navigating', snapshot: 'Inspecting the page', waitFor: 'Waiting for', evaluate: 'Evaluating page JavaScript', scroll: 'Scrolling', press: 'Pressing a key', resize: 'Resizing' } as Record<string, string>)[operation] ?? operation; return `${verb}${target ? ` “${target}”` : ''}`.slice(0, 256) }
-function legacyTab(tab: BrowserEngineTab): BrowserTabSnapshot { const now = new Date().toISOString(); return { targetAffinity: 'managed-electron', tabId: tab.tabId, sessionAgentId: tab.sessionId, profileId: tab.projectId, url: tab.url, title: tab.title, lifecycle: tab.error ? 'failed' : tab.loading ? 'loading' : 'ready', loading: tab.loading, live: true, canGoBack: tab.canGoBack, canGoForward: tab.canGoForward, zoomFactor: 1, controller: tab.controller, agentCursor: tab.agentCursor ? { ...tab.agentCursor, createdAt: now } : null, recording: null, viewportSetting: { mode: 'freeform', ...tab.viewport }, renderedViewport: { ...tab.viewport, deviceScaleFactor: 1 }, error: tab.error ? { code: tab.errorCode ?? 'execution-failed', message: tab.error } : null, createdAt: now, updatedAt: now } }

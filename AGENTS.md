@@ -49,9 +49,8 @@ installed Forge (`~/.forge` by default); set `FORGE_DATA_DIR` to a fresh directo
   `src/environment/` holds the environment service and control plane; `src/environment/control/orchestration/`
   is the kernel that decides runs, attempts, bindings, choices, assignments, and recovery.
 - `apps/ui/` — TanStack Start/Vite React application.
-- `apps/electron/` — desktop packaging, runtime staging, updates, releases, and the local Automatic Browser Host.
+- `apps/electron/` — desktop packaging, runtime staging, updates, releases, and the local embedded browser host.
 - `apps/stream-deck/` — optional local Forge Desktop Stream Deck plugin and packaging assets.
-- `apps/chrome-extension/` and `apps/native-messaging-host/` — optional Chrome adapter extension and bounded native relay.
 - `packages/protocol/` — shared wire types, API contracts, and event definitions.
 - `packages/cli/` — first-party Forge CLI, including `forge serve` for running a backend.
 - `packages/client-runtime/` — the environment client shared by the UI and CLI.
@@ -65,7 +64,7 @@ installed Forge (`~/.forge` by default); set `FORGE_DATA_DIR` to a fresh directo
 | V2 overview: running it, environments, remote machines, testing | [`docs/V2.md`](docs/V2.md) |
 | Configuration, environment variables, data layout | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `.env.example` |
 | Local validation tiers and reports | [`docs/QUALITY.md`](docs/QUALITY.md) |
-| Automatic Browser Host | [`docs/BROWSER_AUTOMATION.md`](docs/BROWSER_AUTOMATION.md) |
+| Browser engine | [`docs/BROWSER_AUTOMATION.md`](docs/BROWSER_AUTOMATION.md) |
 | Model catalog and model additions | [`docs/MODEL_CATALOG.md`](docs/MODEL_CATALOG.md) and [`docs/ADDING_MODELS.md`](docs/ADDING_MODELS.md) |
 | Worker presets | [`docs/SPECIALISTS.md`](docs/SPECIALISTS.md) |
 | Project resources | [`docs/PROJECT_RESOURCES.md`](docs/PROJECT_RESOURCES.md) |
@@ -96,13 +95,11 @@ variable catalogs, or release runbooks back into this file. Link to their mainta
   file-backed. Do not move them into SQLite.
 - Model-specific instructions are optional, user-authored per-model additions. Forge does not provide
   built-in model-specific instruction defaults.
-- Forge Desktop's Automatic Browser is a local Builder capability, not a Skill. An enabled and
-  authenticated Forge extension grants profile-wide access to eligible ordinary Chrome tabs;
-  `browser_status` exposes a bounded inventory transiently to the manager/model path, not Browser
-  workspace UI or canonical renderer state, and `browser_open` can select an inventory tab ID or the
-  active/most-recent eligible tab without OS focus. Non-open operations remain sticky, and possibly
-  mutating operations are never replayed during fallback. Browser recording and saved browser
-  artifacts remain embedded-only.
+- Forge’s Browser panel and built-in browser tools share a Playwright engine. Desktop tabs are
+  embedded Electron views; remote environments use a headless host with an authenticated live view.
+  Tabs belong to sessions, and persistent project profiles stay on their own machine. Chrome cookie
+  import is explicit and domain-scoped; selected cookies are forwarded only through an explicit send.
+  Agents never drive the user’s everyday Chrome.
 
 ## Safety
 

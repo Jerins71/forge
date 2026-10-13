@@ -69,7 +69,7 @@ export const BrowserEngineStatusSchema = O({ state: E('ready', 'missing', 'insta
 export const BrowserCookieTransferSchema = O({ transferId: id, expiresAt: Type.String({ maxLength: 32 }), domains,
   cookies: Type.Array(O({ name: Type.String({ maxLength: 4096 }), value: Type.String({ maxLength: 16384 }),
     domain, path: Type.String({ maxLength: 4096 }), expires: Type.Number(), httpOnly: Type.Boolean(), secure: Type.Boolean(),
-    sameSite: E('Strict', 'Lax', 'None') }), { maxItems: 2000 }) })
+    sameSite: E('Strict', 'Lax', 'None'), partitionKey: Type.Optional(url), partitionHasCrossSiteAncestor: Type.Optional(Type.Boolean()) }), { maxItems: 2000 }) })
 export type BrowserCookieTransfer = Static<typeof BrowserCookieTransferSchema>
 export const browserEngineSchemas = {
   session: O({ sessionId: id }), tab: O({ sessionId: id, tabId: id }),
@@ -99,7 +99,6 @@ export type DesktopBrowserCommand =
   | { type: 'forge:browser:create'; requestId: string; tabId: string; projectId: string; viewport: { width: number; height: number } }
   | { type: 'forge:browser:close'; tabId: string }
   | { type: 'forge:browser:cdp'; tabId: string; message: string }
-  | { type: 'forge:browser:resize'; tabId: string; viewport: { width: number; height: number } }
 export type DesktopBrowserEvent =
   | { type: 'forge:browser:cookies.result'; requestId: string; cookies?: Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>; error?: BrowserCookieError }
   | { type: 'forge:browser:created'; requestId: string; tabId: string }
@@ -107,3 +106,8 @@ export type DesktopBrowserEvent =
   | { type: 'forge:browser:cdp'; tabId: string; message: string }
   | { type: 'forge:browser:input'; tabId: string }
   | { type: 'forge:browser:error'; requestId: string; message: string }
+
+export const BrowserRecordingV2Schema = Type.Union([
+  O({ recordingId: id, tabId: id, recording: Type.Boolean(), startedAt: Type.String({ maxLength: 32 }), mimeType: Type.String({ maxLength: 256 }), width: dimension, height: dimension }),
+  O({ recordingId: id, tabId: id, path: Type.String({ maxLength: 4096 }), mimeType: Type.String({ maxLength: 256 }), extension: Type.String({ maxLength: 32 }), sizeBytes: sequence, width: dimension, height: dimension, createdAt: Type.String({ maxLength: 32 }) }),
+])

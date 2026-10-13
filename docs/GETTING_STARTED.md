@@ -139,7 +139,7 @@ When Source Control has a linked worktree selected, that worktree scopes Files b
 
 ### Browser Automation
 
-Forge Desktop provides one local Automatic Browser for the selected Builder manager. Select **Browser** in the desktop rail: embedded tabs render in Forge with navigation, viewport, transient screenshot, recording, and dock/pop-out controls. Chrome-backed targets stay entirely in Chrome and their transient references do not appear in the Browser workspace. Physical resize and recording are embedded-only. A trusted click, key press, scroll, or touch interrupts active agent control; Forge settles the in-flight command and requires a fresh snapshot before another mutation when the exact lease can safely remain attached-idle. Idle pointer movement is ignored, but a mismatched synthetic pointer move cancels an active sequence. Eligible page navigation is revalidated on the same target rather than silently migrating. **Take Control** is terminal human takeover. See [Browser automation](BROWSER_AUTOMATION.md) for lifecycle and troubleshooting details.
+Forge’s Browser panel and built-in `browser_*` tools share a Playwright engine: local Desktop tabs are embedded views, while remote environments use headless Chrome with a live view and input. Logins stay in the project profile on that machine. **Import from Chrome** previews domains before applying selected cookies; sending cookies to another environment requires an explicit selection. User input cancels the agent’s current action in that tab. See [Browser automation](BROWSER_AUTOMATION.md).
 
 Forge chooses the target automatically. When the Forge extension is enabled and authenticated, it grants profile-wide access to eligible ordinary web tabs. `browser_status` returns a bounded `eligibleTabs` inventory across ready authenticated profiles; its transient manager/model metadata is not shown in Browser workspace UI or persisted renderer state. Tabless `browser_open(reuseExistingTab: true)` (the default) selects the active or most recently accessed eligible tab without requiring Chrome or the operating system to be focused; passing an inventory `tabId` selects that exact tab. Non-open operations remain sticky, and normal supported navigation stays on the same Chrome-backed target. `reuseExistingTab: false`, or no eligible tab, may create an inactive neutral `about:blank` tab for one authorized initial navigation. An explicit Chrome-backed tab never migrates, and Chrome-internal or other restricted pages remain excluded by the platform capability.
 
@@ -562,11 +562,11 @@ Go to **Settings → Skills** to configure optional skill-backed agent capabilit
 
 - **Brave Search** — Paste your Brave API key here. Use Brave for exact or navigational lookup, country or freshness controls, and direct URL or page-content extraction. Agents use it when a task needs that kind of search; they do not search the web on every turn.
 - **Exa Search** — Paste your Exa API key here. Use Exa for semantic or conceptual discovery, unfamiliar topics, and multi-source research. Prefer Exa when the question needs a source landscape rather than a known page or exact phrasing.
-- **`agent-browser`** — Use the separately installed Vercel Labs CLI and its browser lifecycle; this is separate from Forge Desktop's Automatic Browser.
+- **`agent-browser`** — Use the separately installed Vercel Labs CLI and its browser lifecycle; this is separate from Forge’s Browser panel.
 - **Custom skills** — Reusable custom skills can be scaffolded and validated with the built-in `create-skill` helper, which can create global skills, profile/project skills, or repository `.forge/skills` skills as needed.
 - **Skill sharing** — Share a user-created global or project skill to generate a temporary bearer link from the skill share service. Recipients can open the link or a `forge://skill-import` deep link, but Forge always shows a preview first and never auto-installs. Conflicts default to reject; replacing an existing directory or installing an override requires explicit confirmation. Built-in and repository skills are not shareable in v1.
 
-The Automatic Browser is not configured as a Skill and remains local to Forge Desktop. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**.
+The Browser panel and engine are independent of Skills and work on local and remote environments. Chrome is used only for explicit, site-scoped cookie import.
 
 ### System Prompt Preview
 

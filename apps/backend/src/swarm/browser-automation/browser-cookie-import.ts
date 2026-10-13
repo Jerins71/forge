@@ -59,7 +59,7 @@ export class BrowserCookieImport {
         const domain = site(cookie.domain)
         if (cookie.expires > 0 && cookie.expires <= Date.now() / 1000) { skip(domain, 'expired'); continue }
         if (cookie.name.length > 4096 || cookie.value.length > 16384 || cookie.domain.length > 253 || !cookie.path.startsWith('/')) { skip(domain, 'unsupported'); continue }
-        try { const { lastUsedAt: _lastUsedAt, ...value } = cookie; await context.addCookies([value]); imported.set(domain, (imported.get(domain) ?? 0) + 1) }
+        try { const { lastUsedAt: _lastUsedAt, partitionHasCrossSiteAncestor, ...value } = cookie; await context.addCookies([{ ...value, ...(value.partitionKey ? { _crHasCrossSiteAncestor: partitionHasCrossSiteAncestor ?? true } : {}) }]); imported.set(domain, (imported.get(domain) ?? 0) + 1) }
         catch { skip(domain, 'failed') }
       }
     })

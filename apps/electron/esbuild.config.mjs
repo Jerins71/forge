@@ -21,24 +21,4 @@ await Promise.all([
     ...sharedOptions,
     entryPoints: ['src/preload.ts'],
   }),
-  build({
-    ...sharedOptions,
-    entryPoints: [{ in: 'src/browser/guest-preload.ts', out: 'guest-preload' }],
-  }),
-  build({
-    ...sharedOptions,
-    entryPoints: [{ in: 'src/browser/fixture-smoke-main.ts', out: 'browser-fixture-smoke-main' }],
-  }),
-  build({
-    ...sharedOptions,
-    entryPoints: [{ in: 'src/browser/popout-reparent-fixture-main.ts', out: 'browser-popout-reparent-smoke-main' }],
-  }),
-  build({
-    ...sharedOptions,
-    entryPoints: [{ in: 'src/browser/managed-browser-popout-fixture-main.ts', out: 'managed-browser-popout-fixture-main' }],
-  }),
-  build({
-    ...sharedOptions,
-    entryPoints: [{ in: 'src/browser/preview-capture-fixture-main.ts', out: 'browser-preview-capture-smoke-main' }],
-  }),
 ])

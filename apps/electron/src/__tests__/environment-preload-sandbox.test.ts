@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest'
 import { build } from 'esbuild'
 import { runInNewContext } from 'node:vm'
 import { resolve } from 'node:path'
-it.each(['main', 'managed-browser-popout'])(
+it.each(['main'])(
   'bundled %s preload exposes its role bridge in the Electron sandbox',
   async (role) => {
     const bundle = await build({
@@ -20,7 +20,6 @@ it.each(['main', 'managed-browser-popout'])(
         platform: 'darwin',
         appRuntime: 'installed',
         appStartedAt: new Date().toISOString(),
-        managedBrowserPopoutAvailable: true,
         backendUrl: 'http://127.0.0.1:49991',
         backendWsUrl: 'ws://127.0.0.1:49991',
         version: '0.26.1',
@@ -57,10 +56,9 @@ it.each(['main', 'managed-browser-popout'])(
       }),
     ).not.toThrow()
     expect(exposed?.windowRole).toBe(role)
-    if (role === 'main')
-      expect(typeof (exposed?.managedHosts as { status: unknown }).status).toBe(
-        'function',
-      )
-    else expect(exposed).not.toHaveProperty('managedHosts')
+    expect(typeof (exposed?.managedHosts as { status: unknown }).status).toBe('function')
+    expect(exposed).toHaveProperty('browserEngine')
+    expect(exposed).not.toHaveProperty('externalChrome')
+    expect(exposed).not.toHaveProperty('browserAutomation')
   },
 )

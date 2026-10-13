@@ -1,5 +1,4 @@
 import { createBrowserEngineClient } from './browser-engine.js'
-import { createBrowserHostClient } from './browser-host.js'
 import type {
   ProjectAgentReferenceWrite, ProjectAgentReferenceDelete, ProjectAgentReferenceMutationResult,
   ProjectResourcesSnapshotResponse,
@@ -341,12 +340,9 @@ export interface EnvironmentFeatureClients {
       input: TerminalIssueTicketRequest,
     ): Promise<TerminalIssueTicketResponse>
   }
-  /** Desktop's embedded browser host. Attach only on the primary environment; the subscription is the host connection. */
   browserEngine: ReturnType<typeof createBrowserEngineClient>
-  browserHost: ReturnType<typeof createBrowserHostClient>
 
 }
-// A host command is JSON text split to fit the RPC frame limit; matches the browser.host.send part bound.
 export interface HttpFeatureTransport {
   entry: { environmentId: string }
   fetch(path: string, init?: RequestInit): Promise<Response>
@@ -696,7 +692,6 @@ export function createFeatureClients(
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
     },
     browserEngine: createBrowserEngineClient(rpc),
-    browserHost: createBrowserHostClient(rpc),
 
   }
 }

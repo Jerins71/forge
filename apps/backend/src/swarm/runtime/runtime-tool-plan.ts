@@ -1,3 +1,4 @@
+import { isEligibleBrowserManager } from "../browser-automation/browser-automation-manager-adapter.js";
 import { getCatalogProvider, type ProviderScope, type ProviderToolHostMechanism } from "@forge/protocol";
 import type { ToolHostBinding } from "./provider-contract.js";
 import type { SecureRuntimeBinding } from "../secure-sessions/runtime/secure-runtime-binding.js";
@@ -228,14 +229,7 @@ export function isInternalSessionPurpose(descriptor: Pick<AgentDescriptor, "sess
   return descriptor.sessionPurpose !== undefined && descriptor.sessionPurpose !== "side_chat";
 }
 
-export function isBrowserAutomationEligible(descriptor: AgentDescriptor): boolean {
-  return descriptor.role === "manager"
-    && typeof descriptor.profileId === "string"
-    && descriptor.profileId.length > 0
-    && descriptor.sessionPurpose === undefined
-    && descriptor.cli === undefined
-    && descriptor.externalThread === undefined;
-}
+export const isBrowserAutomationEligible = isEligibleBrowserManager;
 
 // A side chat is a temporary aside: no delegation, scheduling, peer messaging,
 // user publication, new secret requests, or durable memory/knowledge writes.

@@ -36,7 +36,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       if (stopped || socket.destroyed) return true;
       deps.access.authorize(authenticated, []);
       // Object identity is the stream lease and attachment owner for this socket.
-      const principal: Principal = { deviceSessionId: authenticated.deviceSessionId, scopes: authenticated.scopes, localBrowserHost: authenticated.localBrowserHost, integration: authenticated.integration };
+      const principal: Principal = { deviceSessionId: authenticated.deviceSessionId, scopes: authenticated.scopes, integration: authenticated.integration };
       server.handleUpgrade(request, socket, head, client => connect(client, principal));
     } catch (error) {
       const wire = rpcError(error);
@@ -128,10 +128,9 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
           const streamMethod = method as StreamMethod;
           const count = [...subscriptions.values()].filter(s => s.method === streamMethod).length;
           if ((streamMethod === "session.subscribe" || streamMethod === "session.features.subscribe") &&
-              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "session.features.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || (streamMethod === "shell.subscribe" || streamMethod === "browser.host.attach") && count >= 1) {
+              [...subscriptions.values()].filter(s => s.method === "session.subscribe" || s.method === "session.features.subscribe").length >= 32 || streamMethod === "terminal.attach" && count >= 8 || (streamMethod === "shell.subscribe") && count >= 1) {
             throw new StreamFault("RATE_LIMITED", "Subscription limit reached.");
           }
-          if (method === 'browser.host.attach' && !principal.localBrowserHost) throw new StreamFault('FORBIDDEN', 'Local Desktop browser capability is required');
           const id = randomUUID();
           let stream: AsyncIterable<unknown>;
           switch (streamMethod) {
@@ -146,10 +145,6 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
             case "session.features.subscribe":
               if (!deps.featureStream) throw new StreamFault("UNAVAILABLE", "Detail feature stream is not composed");
               stream = deps.featureStream.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
-            case "browser.subscribe":
-              if (!deps.browser) throw new StreamFault('UNAVAILABLE', 'Browser workspace is unavailable');
-              stream = deps.browser.subscribe(principal, input as RpcInput<typeof streamMethod>, controller.signal); break;
-            case "browser.host.attach": stream = deps.browserHost.attach(principal, controller.signal); break;
             case "terminal.attach": stream = deps.terminalTransport.attach(principal, input as RpcInput<typeof streamMethod>, controller.signal, id); break;
           }
           subscriptions.set(id, { method: streamMethod, controller });

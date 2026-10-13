@@ -62,6 +62,5 @@ export class DesktopBrowserChannel {
       return { page, browser, close: async () => { await browser.close(); await entry.close() } }
     } catch (error) { await entry.close(); throw error }
   }
-  resize(tabId: string, viewport: { width: number; height: number }) { this.send({ type: 'forge:browser:resize', tabId, viewport }) }
   async shutdown() { process.off('message', this.onMessage); for (const pending of this.imports.values()) pending.reject(new Error('Desktop browser disconnected.')); this.imports.clear(); await Promise.allSettled([...this.entries.values()].map(entry => entry.close())) }
 }

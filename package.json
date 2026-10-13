@@ -12,8 +12,6 @@
     "apps/backend",
     "apps/ui",
     "apps/electron",
-    "apps/chrome-extension",
-    "apps/native-messaging-host",
     "apps/stream-deck",
     "apps/skill-share-worker",
     "packages/protocol",

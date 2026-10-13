@@ -25,8 +25,6 @@ export type ControlMethod = CommandReceipt["method"];
 export interface Principal {
   /** Server-derived provenance; this grants no additional authority. */
   integration?: "cli" | "stream-deck";
-  /** Private platform capability, minted only on a loopback Desktop ticket. Never a grant scope. */
-  localBrowserHost?: boolean;
   deviceSessionId: string;
   scopes: ReadonlySet<Scope>;
 }

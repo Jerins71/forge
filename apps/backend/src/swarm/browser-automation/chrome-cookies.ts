@@ -1,11 +1,10 @@
 /** Cookie reads happen only after explicit import intent. Native consent stays
  * in the calling Forge process. Decrypted rows and keys never touch disk. */
-import { readFile, open, access } from 'node:fs/promises'
+import { readFile, open, access, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve, relative, isAbsolute } from 'node:path'
 import { createDecipheriv, pbkdf2Sync, createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
-import { chromium } from 'playwright-core'
 import type { BrowserCookieError, BrowserCookieTransfer } from '@forge/protocol'
 export type ImportCookie = BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }
 export class ChromeCookieReadError extends Error {
@@ -17,20 +16,33 @@ export function chromeUserDataDir(platform = process.platform) {
   if (platform === 'win32') return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Google', 'Chrome', 'User Data')
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'google-chrome')
 }
-export async function readRunningChrome(userDataDir = chromeUserDataDir()): Promise<ImportCookie[]> {
+function fixtureMode() { return !!(process.env.FORGE_E2E || process.env.FORGE_E2E_CHECKOUT || process.env.FORGE_E2E_MANIFEST || process.env.FORGE_E2E_RUN_ID || process.env.FORGE_BROWSER_FIXTURE_REPO || process.env.VITEST) }
+async function sourceProfile(explicit: string | undefined, platform = process.platform) {
+  const configured = explicit ?? process.env.FORGE_BROWSER_TEST_CHROME_PROFILE
+  if (!fixtureMode()) return configured ?? chromeUserDataDir(platform)
+  if (!configured) return fail('source-unavailable', 'Chrome import in a test fleet requires an explicit isolated test profile. Real Chrome and Keychain access are disabled.')
+  const selected = await realpath(resolve(configured)).catch(() => resolve(configured))
+  const realDefault = resolve(chromeUserDataDir(platform)), rel = relative(realDefault, selected)
+  if (!rel || (!rel.startsWith('..') && !isAbsolute(rel))) return fail('source-unavailable', 'Test fleets cannot read the user’s real Chrome profile.')
+  return selected
+}
+export async function readRunningChrome(userDataDir?: string): Promise<ImportCookie[]> {
+  userDataDir = await sourceProfile(userDataDir)
   let endpoint: string
   try {
     const source = await readFile(join(userDataDir, 'DevToolsActivePort'), 'utf8'); const [port, path] = source.trim().split(/\r?\n/)
     if (!/^\d+$/.test(port ?? '') || Number(port) < 1 || Number(port) > 65535 || !/^\/devtools\/browser\/[\w-]+$/.test(path ?? '')) return fail('chrome-not-running', 'Enable remote debugging in Chrome 144+ at chrome://inspect/#remote-debugging, then retry Import from Chrome.')
     endpoint = `ws://127.0.0.1:${port}${path}`
   } catch { return fail('chrome-not-running', 'Chrome is not sharing its browser connection. In Chrome 144+, enable remote debugging at chrome://inspect/#remote-debugging and retry.') }
+  const { chromium } = await import('playwright-core')
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>>
   try { browser = await chromium.connectOverCDP(endpoint, { timeout: 15000 }) }
   catch { return fail('chrome-consent-required', 'Allow Forge in Chrome’s remote-debugging consent dialog, then retry. If Chrome is closed, reopen it and enable the inspect toggle.') }
   try {
     const cdp = await browser.newBrowserCDPSession(); const response = await cdp.send('Storage.getCookies')
-    return response.cookies.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite ?? 'Lax' }))
-  } catch { return fail('chrome-disconnected', 'Chrome disconnected while reading cookies. Keep Chrome open and retry.') }
+    if (response.cookies.some(cookie => cookie.partitionKeyOpaque)) return fail('source-unavailable', 'Chrome contains opaque cookie partitions that cannot be imported safely.')
+    return response.cookies.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite ?? 'Lax', ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey.topLevelSite, partitionHasCrossSiteAncestor: cookie.partitionKey.hasCrossSiteAncestor } : {}) }))
+  } catch (error) { if (error instanceof ChromeCookieReadError) throw error; return fail('chrome-disconnected', 'Chrome disconnected while reading cookies. Keep Chrome open and retry.') }
   finally { await browser.close() }
 }
 async function macPassphrase(): Promise<string> {
@@ -61,7 +73,7 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
   const platform = options.platform ?? process.platform
   if (platform === 'win32') return fail('unsupported-platform', 'On Windows, use Chrome 144+ with remote debugging enabled at chrome://inspect/#remote-debugging. Cookie database import is not supported.')
   if (platform !== 'darwin' && platform !== 'linux') return fail('unsupported-platform', 'Cookie database import is supported on macOS and Linux only.')
-  const root = options.userDataDir ?? chromeUserDataDir(platform)
+  const root = await sourceProfile(options.userDataDir, platform)
   let databasePath = join(root, 'Default', 'Network', 'Cookies')
   try { await access(databasePath) } catch (error) { if (platform === 'darwin' && ['EPERM', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) throw new ChromeCookieReadError({ code: 'files-folders-denied', message: 'Allow Forge to read Chrome cookies in System Settings → Privacy & Security → Files & Folders, then retry.', settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders' }); databasePath = join(root, 'Default', 'Cookies') }
   try { const file = await open(databasePath, 'r'); await file.close() }
@@ -74,9 +86,11 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
     const schema = Number((database.prepare("SELECT value FROM meta WHERE key='version'").get() as { value?: string } | undefined)?.value ?? 0)
     const columns = new Set((database.prepare('PRAGMA table_info(cookies)').all() as Array<{ name: string }>).map(column => column.name))
     const lastUsed = columns.has('last_access_utc') && columns.has('creation_utc') ? '(CASE WHEN last_access_utc > 0 THEN last_access_utc ELSE creation_utc END)/1000000.0 - 11644473600' : columns.has('creation_utc') ? 'creation_utc/1000000.0 - 11644473600' : 'NULL'
-    const rows = database.prepare(`SELECT ${lastUsed} AS last_used,host_key,name,value,encrypted_value,path,CASE WHEN expires_utc > 0 THEN expires_utc/1000000.0 - 11644473600 ELSE -1 END AS expires,is_secure,is_httponly,samesite FROM cookies LIMIT 20001`).all() as unknown as Array<{ host_key: string; name: string; value: string; encrypted_value: Uint8Array; path: string; expires: number; is_secure: number; is_httponly: number; samesite: number; last_used: number | null }>
+    const partition = columns.has('top_frame_site_key') ? 'top_frame_site_key' : "''", crossSite = columns.has('has_cross_site_ancestor') ? 'has_cross_site_ancestor' : '1'
+    const rows = database.prepare(`SELECT ${partition} AS partition_key,${crossSite} AS cross_site,${lastUsed} AS last_used,host_key,name,value,encrypted_value,path,CASE WHEN expires_utc > 0 THEN expires_utc/1000000.0 - 11644473600 ELSE -1 END AS expires,is_secure,is_httponly,samesite FROM cookies LIMIT 20001`).all() as unknown as Array<{ host_key: string; name: string; value: string; encrypted_value: Uint8Array; path: string; expires: number; is_secure: number; is_httponly: number; samesite: number; last_used: number | null; partition_key: string; cross_site: number }>
     if (rows.length > 20000) return fail('source-unavailable', 'Chrome has too many cookies for one import. Use its inspect toggle or remove unused sites first.')
     const needsKey = rows.some(row => row.encrypted_value.length > 0 && (platform === 'darwin' || Buffer.from(row.encrypted_value).subarray(0, 3).toString() === 'v11'))
+    if (needsKey && fixtureMode() && !options.passphrase) return fail('source-unavailable', 'Native Keychain and secret-service reads are disabled in test fleets. Inject a synthetic fixture key provider.')
     const passphrase = needsKey ? await (options.passphrase ?? (platform === 'darwin' ? macPassphrase : linuxPassphrase))() : ''
     const key = pbkdf2Sync(platform === 'darwin' ? passphrase : 'peanuts', 'saltysalt', platform === 'darwin' ? 1003 : 1, 16, 'sha1')
     const v11 = platform === 'linux' && needsKey ? pbkdf2Sync(passphrase, 'saltysalt', 1, 16, 'sha1') : undefined
@@ -97,7 +111,7 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
         if (!plaintext) return fail('source-unavailable', 'Chrome cookies could not be decrypted with the approved key. Use its inspect toggle instead.')
         value = plaintext.toString('utf8')
       }
-      cookies.push({ name: row.name, value, domain: row.host_key, path: row.path, expires: row.expires, secure: !!row.is_secure, httpOnly: !!row.is_httponly, sameSite: row.samesite === 0 ? 'None' : row.samesite === 2 ? 'Strict' : 'Lax', ...(row.last_used && row.last_used > 0 ? { lastUsedAt: new Date(row.last_used * 1000).toISOString() } : {}) })
+      cookies.push({ ...(row.partition_key ? { partitionKey: row.partition_key, partitionHasCrossSiteAncestor: !!row.cross_site } : {}), name: row.name, value, domain: row.host_key, path: row.path, expires: row.expires, secure: !!row.is_secure, httpOnly: !!row.is_httponly, sameSite: row.samesite === 0 ? 'None' : row.samesite === 2 ? 'Strict' : 'Lax', ...(row.last_used && row.last_used > 0 ? { lastUsedAt: new Date(row.last_used * 1000).toISOString() } : {}) })
     }
     return cookies
   } finally { database.close() }

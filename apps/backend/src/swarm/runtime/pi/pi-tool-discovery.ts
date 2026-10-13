@@ -55,7 +55,7 @@ export function createPiBrowserDiscovery(browserTools: readonly ToolDefinition[]
       loaded = true;
       apply();
       const details = { [RECEIPT]: { version: 1, browser: true, fingerprint } };
-      return { content: [{ type: "text", text: JSON.stringify({ loaded: "browser", tools: names, guidance: "Use browser_status to inspect available tabs and browser_open to select one. Take a snapshot before interacting. Browser recording is embedded-only." }) }], details };
+      return { content: [{ type: "text", text: JSON.stringify({ loaded: "browser", tools: names, guidance: "Use browser_status to inspect available tabs and browser_open to select one. Take a snapshot before interacting. Browser tabs and recording run on this environment." }) }], details };
     },
   };
   const extensionFactory: ExtensionFactory = (pi) => {

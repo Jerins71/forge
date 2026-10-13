@@ -23,7 +23,7 @@ import {
 } from "../runtime/image-utils.js";
 
 const TOOL_TEXT_MAX_BYTES = 128 * 1_024;
-const tabId = Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Target tab ID. browser_open also accepts a canonical eligibleTabs ID from browser_status." }));
+const tabId = Type.Optional(Type.String({ minLength: 1, maxLength: 128, description: "Target tab ID from browser_status." }));
 const timeoutMs = Type.Optional(Type.Integer({ minimum: 1, maximum: BROWSER_AUTOMATION_MAX_TIMEOUT_MS, default: 15_000 }));
 const locator = Type.String({ minLength: 1, maxLength: BROWSER_AUTOMATION_MAX_URL_LENGTH });
 const selector = Type.String({ minLength: 1, maxLength: BROWSER_AUTOMATION_MAX_URL_LENGTH });
@@ -33,9 +33,6 @@ const schemas: Record<BrowserAutomationOperation, TSchema> = {
   open: Type.Object({
     tabId,
     url: Type.Optional(Type.String({ minLength: 1, maxLength: BROWSER_AUTOMATION_MAX_URL_LENGTH })),
-    target: Type.Optional(Type.Literal("managed", {
-      description: "Create an in-app Forge browser tab instead of using Automatic Browser selection. Cannot be combined with tabId.",
-    })),
     show: Type.Optional(Type.Boolean({ default: true })),
     reuseExistingTab: Type.Optional(Type.Boolean({ default: true })),
   }, { additionalProperties: false }),
@@ -128,8 +125,8 @@ const labels: Record<BrowserAutomationOperation, string> = {
 };
 
 const descriptions: Record<BrowserAutomationOperation, string> = {
-  status: "Inspect the selected Forge browser tab and the bounded eligible External Chrome tab inventory across authenticated profiles.",
-  open: "Open or reselect a persistent browser tab. Set target='managed' to create an in-app Forge browser tab. Otherwise, with reuseExistingTab enabled, omit tabId to select the active/most-recent eligible Chrome tab, or pass an eligibleTabs ID from browser_status to select that exact tab.",
+  status: "Inspect the selected Forge browser tab, session tab list and browser setup state on this environment.",
+  open: "Open or reselect a persistent Forge browser tab on this environment. Logins persist in the project profile. Reuse the selected session tab by default, or set reuseExistingTab=false to create a new tab.",
   navigate: "Navigate the selected Forge browser tab to a URL or local environment port and optionally wait for readiness.",
   resize: "Resize the selected Forge browser tab using fill, freeform dimensions, or a device preset.",
   snapshot: "Inspect visible page text, semantic elements, accessibility and diagnostics, and receive a native PNG screenshot.",
@@ -139,7 +136,7 @@ const descriptions: Record<BrowserAutomationOperation, string> = {
   scroll: "Scroll the viewport or a semantic locator/CSS container by horizontal or vertical deltas.",
   evaluate: "Execute arbitrary JavaScript in the Forge browser page, optionally awaiting promises and returning a by-value result.",
   waitFor: "Wait until all supplied locator, CSS, text, and URL conditions match in the Forge browser page.",
-  recordingStart: "Start the single active desktop browser recording. The target tab must be visible.",
+  recordingStart: "Start a recording of the selected browser tab on this environment.",
   recordingStop: "Stop an explicit or active browser recording and return its canonical local artifact metadata.",
 };
 
@@ -150,32 +147,12 @@ export function buildBrowserAutomationTools(host: SwarmToolHost, descriptor: Age
     description: descriptions[operation],
     parameters: schemas[operation],
     async execute(_toolCallId, params) {
-      const requestedTarget = operation === "open"
-        ? (params as { target?: unknown }).target
-        : undefined;
-      if (requestedTarget !== undefined && requestedTarget !== "managed") {
-        return formatFailure(operation, {
-          code: "invalid-input",
-          message: "browser_open target must be 'managed' when provided.",
-          retryable: false,
-        });
-      }
-      const protocolParams = requestedTarget === undefined
-        ? params
-        : Object.fromEntries(Object.entries(params as Record<string, unknown>).filter(([key]) => key !== "target"));
       let input: BrowserAutomationInputByOperation[typeof operation];
       try {
-        input = parseBrowserAutomationInput(operation, protocolParams);
+        input = parseBrowserAutomationInput(operation, params);
       } catch (error) {
         const message = error instanceof BrowserAutomationContractError ? error.message : String(error);
         return formatFailure(operation, { code: "invalid-input", message, retryable: false });
-      }
-      if (requestedTarget === "managed" && (input as { tabId?: string }).tabId) {
-        return formatFailure(operation, {
-          code: "invalid-input",
-          message: "browser_open target='managed' cannot be combined with tabId.",
-          retryable: false,
-        });
       }
       if (!host.invokeBrowserAutomation) {
         return formatFailure(operation, {
@@ -184,10 +161,7 @@ export function buildBrowserAutomationTools(host: SwarmToolHost, descriptor: Age
           retryable: true,
         });
       }
-      const routing = requestedTarget === "managed" ? { requiredTargetAffinity: "managed-electron" as const } : undefined;
-      const result = routing
-        ? await host.invokeBrowserAutomation(descriptor.agentId, operation, input, routing)
-        : await host.invokeBrowserAutomation(descriptor.agentId, operation, input);
+      const result = await host.invokeBrowserAutomation(descriptor.agentId, operation, input);
       if (!result.ok) return formatFailure(operation, result.error);
       return formatSuccess(operation, result.result);
     },

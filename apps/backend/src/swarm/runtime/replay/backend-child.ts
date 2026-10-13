@@ -148,7 +148,6 @@ const unavailable = () => { throw new Error("No terminal in replay"); };
 const rpc = rpcModule.createEnvironmentRpcServer({ access, control: core.controlService, shellStream, detailStream,
   lifecycle: createSessionLifecycleRpc({ swarmManager: manager, control: core.controlService }),
   detailFeatures: detailRpcModule.createDetailFeatureRpc({ swarmManager: manager, control: core.controlService }),
-  browserHost: features.browserHost, browser: features.browser,
   terminalTransport: { attach: unavailable, input: async () => unavailable(), resize: async () => unavailable(), closeDevice: async () => {} },
 });
 const server = createServer((request, response) => {

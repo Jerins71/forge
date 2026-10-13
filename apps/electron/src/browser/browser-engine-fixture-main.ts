@@ -12,7 +12,7 @@ void app.whenReady().then(async () => {
     cwd: process.env.FORGE_BROWSER_FIXTURE_REPO!, execArgv: ['--import', join(process.env.FORGE_BROWSER_FIXTURE_REPO!, 'apps/backend/node_modules/tsx/dist/loader.mjs')],
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   })
-  const host = new DesktopBrowserHost(); host.attach(child); child.stdout?.resume(); child.stderr?.on('data', data => process.stderr.write(data))
+  const host = new DesktopBrowserHost(); host.trackWindow(window); host.attach(child); child.stdout?.resume(); child.stderr?.on('data', data => process.stderr.write(data))
   const pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>()
   let ready: () => void = () => {}; const initialized = new Promise<void>(resolve => { ready = resolve })
   child.on('message', raw => {

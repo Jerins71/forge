@@ -35,30 +35,3 @@ describe('typed feature consumers', () => {
     lease.release(); expect(releases).toContain('session.features.subscribe'); expect(lease.store.getSnapshot().transient.size).toBe(0)
   })
 })
-
-// Failure mode: separately bounded live conversation and Browser projections
-// exceed the existing cache quota together when Browser bytes are not counted.
-it('counts canonical Browser state in the mounted detail cache quota', async () => {
-  const { defaultFixtureSeeds } = await import('../fixture.js')
-  const seed = defaultFixtureSeeds()[0]!.details!['session-1']!
-  const observers = new Map<string, { next(item: unknown): void }>()
-  const batches: (() => void)[] = []
-  const supervisor = { subscribe: (method: string, input: () => { sessionId: string }, observer: { next(item: unknown): void }) => {
-    const key = `${method}:${input().sessionId}`; observers.set(key, observer); return () => observers.delete(key)
-  } } as unknown as EnvironmentSupervisor
-  const cache = new DetailCache(supervisor, { scheduleBatch: (fn: () => void) => { batches.push(fn); return () => {} } } as RuntimePorts, () => {}, () => {})
-  const leases = []
-  try {
-    for (let index = 0; index < 20; index++) {
-      const id = `session-${index}`; leases.push(cache.acquire(id))
-      const detail = observers.get(`session.subscribe:${id}`)!
-      detail.next({ kind: 'snapshot', streamEpoch: epoch, sequence: 1, snapshot: { ...seed, session: { ...seed.session, sessionId: id }, items: [] } })
-      for (let itemIndex = 0; itemIndex < 190; itemIndex++) detail.next({ kind: 'event', streamEpoch: epoch, sequence: itemIndex + 2, event: { type: 'item.upsert', item: { ...seed.items[0]!, itemId: `item-${itemIndex}`, actorId: id, text: 't'.repeat(8192) } } })
-      for (const flush of batches.splice(0)) flush()
-      const now = '2026-10-10T00:00:00.000Z'
-      observers.get(`browser.subscribe:${id}`)!.next({ snapshot: { schemaVersion: 2, sessionAgentId: id, profileId: 'forge', hostingState: 'hosted', activeTabId: null, defaultTabId: null, panelVisible: false, recentActions: [], revision: 1, createdAt: now, updatedAt: now,
-        tabs: Array.from({ length: 100 }, (_, tabIndex) => ({ targetAffinity: 'managed-electron', tabId: `tab-${tabIndex}`, sessionAgentId: id, profileId: 'forge', url: 'about:blank', title: 't'.repeat(4096), lifecycle: 'ready', loading: false, live: true, canGoBack: false, canGoForward: false, zoomFactor: 1, controller: 'none', agentCursor: null, recording: null, viewportSetting: { mode: 'fill' }, renderedViewport: null, error: null, createdAt: now, updatedAt: now })) } })
-    }
-    expect(leases.some(lease => lease.store.getSnapshot().freshness === 'unavailable')).toBe(true)
-  } finally { cache.dispose() }
-})

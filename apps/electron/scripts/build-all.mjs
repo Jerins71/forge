@@ -8,8 +8,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build as esbuild } from 'esbuild'
 import { prepareElectronBetterSqlite3Binding } from './prepare-dev-native.mjs'
 import { verifyElectronRuntime } from './verify-electron-runtime.mjs'
-import { stageExternalChromeResources } from './stage-external-chrome.mjs'
-import { assertReleaseEnvironment } from '../../native-messaging-host/scripts/release-signing.mjs'
 import { isStreamDeckSetupEnabled } from '../../../scripts/stream-deck-setup.mjs'
 import { assertResolvedInsideStage } from './staged-native-runtime-smoke.mjs'
 
@@ -38,11 +36,8 @@ const uiStageDir = path.join(stageDir, 'ui')
 const cliStageDir = path.join(stageDir, 'cli')
 const cliStagedEntry = path.join(cliStageDir, 'cli.js')
 const forgeResourcesDir = path.join(stageDir, 'forge-resources')
-const browserRuntimeDir = path.join(stageDir, 'browser-runtime')
-const externalChromeStageDir = path.join(stageDir, 'external-chrome')
 const streamDeckStageDir = path.join(stageDir, 'stream-deck')
 const stagedNativeRuntimeSmokeScript = path.join(scriptDir, 'staged-native-runtime-smoke.mjs')
-const stagedPlaywrightCoreDir = path.join(browserRuntimeDir, 'playwright-core')
 const stagedBuiltinSkillsDir = path.join(forgeResourcesDir, 'apps', 'backend', 'src', 'swarm', 'skills', 'builtins')
 const stagedBuiltinArchetypesDir = path.join(forgeResourcesDir, 'apps', 'backend', 'src', 'swarm', 'archetypes', 'builtins')
 const stagedBuiltinSpecialistsDir = path.join(forgeResourcesDir, 'apps', 'backend', 'src', 'swarm', 'specialists', 'builtins')
@@ -68,6 +63,9 @@ const pnpmCommand = 'pnpm'
 const useShell = process.platform === 'win32'
 
 export const BACKEND_BUNDLE_EXTERNAL_PACKAGES = [
+  { name: 'playwright-core', optional: false, validateLoadedModule: loaded => typeof loaded?.chromium?.connectOverCDP === 'function' ? null : 'expected Chromium CDP API' },
+  { name: '@electron-internal/extract-zip', optional: false, validateLoadedModule: loaded => typeof loaded?.extract === 'function' ? null : 'expected native archive extractor' },
+  { name: '@napi-rs/keyring', optional: false, validateLoadedModule: loaded => typeof loaded?.Entry === 'function' ? null : 'expected in-process keyring API' },
   {
     name: '@anthropic-ai/claude-agent-sdk',
     optional: false,
@@ -166,7 +164,6 @@ export async function cleanReleaseDir(targetDir = releaseDir) {
 
 async function main() {
   await verifyElectronRuntime()
-  const externalChromeRelease = await assertReleaseEnvironment()
   await cleanReleaseDir()
   await rm(stageDir, { recursive: true, force: true })
   await mkdir(stageDir, { recursive: true })
@@ -178,9 +175,6 @@ async function main() {
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/backend', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/ui', 'build'])
   await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/cli', 'build'])
-  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/chrome-extension', 'build'])
-  await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/external-chrome-native-host', 'build'])
-  await run(externalChromeRelease.seaNode, [path.join(repoRoot, 'apps', 'native-messaging-host', 'scripts', 'package-current.mjs')])
   if (streamDeckSetupEnabled) {
     await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'build'])
     await run(pnpmCommand, ['--dir', repoRoot, '--filter', '@forge/stream-deck', 'run', 'validate'])
@@ -192,8 +186,6 @@ async function main() {
   await stageRendererAssets()
   await stageBackendResources()
   await stageBrowserRuntime()
-  await stageExternalChromeResources({ outputRoot: externalChromeStageDir, requireExecutable: true })
-  await run(process.execPath, [path.join(electronDir, 'scripts', 'external-chrome-package-content-smoke.mjs'), externalChromeStageDir])
   await stageCliArtifact()
   await mkdir(streamDeckStageDir, { recursive: true })
   if (streamDeckSetupEnabled) await stageStreamDeckArtifact()
@@ -217,9 +209,7 @@ async function main() {
   if (streamDeckSetupEnabled) {
     await assertExists(path.join(streamDeckStageDir, path.basename(streamDeckArtifactPath)), 'staged Stream Deck plugin installer')
   }
-  await assertExists(path.join(stagedPlaywrightCoreDir, 'lib', 'coreBundle.js'), 'staged Playwright injected runtime')
-  await assertExists(path.join(browserRuntimeDir, 'THIRD_PARTY_NOTICES.md'), 'staged browser third-party notice')
-  await assertExists(path.join(externalChromeStageDir, 'package-manifest.json'), 'staged External Chrome package manifest')
+  await assertExists(path.join(forgeResourcesDir, 'THIRD_PARTY_NOTICES.md'), 'staged browser third-party notice')
 
   await validatePackagedRuntimePreflight()
   await validateStagedCliPreflight()
@@ -432,29 +422,12 @@ async function validateStagedElectronNativeRuntime() {
 }
 
 export async function stageBrowserRuntime() {
-  const playwright = await resolveInstalledPackage('playwright-core', path.join(electronDir, 'package.json'), false)
-  if (playwright.manifest.version !== '1.60.0') {
-    throw new Error(`Browser runtime requires playwright-core 1.60.0, found ${playwright.manifest.version}`)
-  }
-  await mkdir(path.dirname(stagedPlaywrightCoreDir), { recursive: true })
-  await cp(playwright.packageRoot, stagedPlaywrightCoreDir, { recursive: true, dereference: true })
-
-  const coreBundlePath = path.join(stagedPlaywrightCoreDir, 'lib', 'coreBundle.js')
-  const coreBundle = await readFile(coreBundlePath, 'utf8')
-  if (!coreBundle.includes('source3 = ') || !coreBundle.includes(';\n  }\n});')) {
-    throw new Error(`Staged playwright-core ${playwright.manifest.version} does not contain the validated injected-runtime markers`)
-  }
-
-  const rootNotice = path.join(repoRoot, 'THIRD_PARTY_NOTICES.md')
-  const noticeTarget = path.join(browserRuntimeDir, 'THIRD_PARTY_NOTICES.md')
-  if (!existsSync(rootNotice)) {
-    throw new Error(
-      `Maintained browser third-party notice is missing at ${rootNotice}. Electron packaging requires the exact root THIRD_PARTY_NOTICES.md (T3 MIT notice, adapted-file mapping, and Playwright attribution).`,
-    )
-  }
-  await mkdir(browserRuntimeDir, { recursive: true })
-  await cp(rootNotice, noticeTarget)
-  console.log(`[electron/build-all] Staged playwright-core ${playwright.manifest.version} and browser notices`)
+  // Playwright is staged once with the backend dependency closure. Chrome and
+  // FFmpeg install on demand in the owning machine's data directory.
+  const notice = path.join(repoRoot, 'THIRD_PARTY_NOTICES.md')
+  await assertExists(notice, 'browser third-party notice')
+  await mkdir(forgeResourcesDir, { recursive: true })
+  await cp(notice, path.join(forgeResourcesDir, 'THIRD_PARTY_NOTICES.md'))
 }
 
 export async function stageCliArtifact(outputDir = cliStageDir) {

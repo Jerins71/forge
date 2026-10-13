@@ -33,7 +33,6 @@ export const control: ControlService = {
   execute: async (_principal, method, input) => receipt(method, input.commandId),
   getReceipt: async (_principal, commandId) => receipt("session.send", commandId),
 };
-export const emptyBrowserHost: RpcDependencies["browserHost"] = { attach: async function* () {}, send: async () => ({}), execute: async () => { throw new StreamFault("UNAVAILABLE", "Browser host unavailable"); } };
 export const emptyTerminal: RpcDependencies["terminalTransport"] = { attach: async function* () {}, input: async () => ({}), resize: async () => ({}), closeDevice: async () => {} };
 
 export async function streamFixture() {
@@ -92,7 +91,7 @@ export async function socketFixture(overrides: Partial<RpcDependencies> = {}) {
     },
   };
   const streams = await streamFixture();
-  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, browserHost: emptyBrowserHost, terminalTransport: emptyTerminal, ...overrides };
+  const deps: RpcDependencies = { access, control: streams.core.controlService, shellStream: streams.shellStream, detailStream: streams.detailStream, terminalTransport: emptyTerminal, ...overrides };
   const rpc = createEnvironmentRpcServer(deps);
   const sockets = new Set<WebSocket>();
   const server = createServer(async (request, response) => {
