@@ -435,8 +435,8 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   ├── state/
 │   │   ├── mobile-devices.json
 │   │   ├── project-agent-shares.json
-│   │   ├── sync/state.json                # Configuration sync: agreed versions and open conflicts
-│   │   ├── sync/history/<time>/<key>      # Every file sync replaced or deleted, for undo
+│   │   ├── sync/state.json                # Configuration sync: agreed versions, open conflicts, hub lease
+│   │   ├── sync/history/<batch>/          # Every file sync replaced or deleted (entries.json + copies), for Restore
 │   │   └── .*-done                        # One-time migration/reconciliation sentinels
 │   ├── knowledge/
 │   │   ├── common.md                      # Global memory (user-editable)
@@ -558,7 +558,15 @@ Each environment records the version it last agreed on for every file. One chang
 everywhere; a file changed differently on two environments, including one edited while its machine
 was offline, becomes a conflict that leaves both copies untouched. Settle it with **Keep …**, by
 editing either copy, or with **Ask an agent to resolve**, which starts a session on this machine to
-merge them. Every file sync overwrites or deletes is first copied to `shared/state/sync/history/`.
+merge them; the environment the agent runs on writes its instructions. Every file sync overwrites
+or deletes is first copied to `shared/state/sync/history/`, and **History** in Settings → Sync lists
+recent ones with **Restore**, which writes the old version back on its machine so it syncs out like
+any edit.
+
+Files over 2 MB are listed under **Not synced** and stay where they are. Writes are sent in batches of
+up to 8 MB, and a batch that fails is listed with its error and retried on the next pass. With
+several Forge windows or devices open, one holds a short hub lease (kept in the first reachable
+environment's sync state) and the others wait; **Sync now** in another window takes over.
 
 ### Machine-local skills
 

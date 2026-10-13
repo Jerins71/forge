@@ -1,5 +1,5 @@
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
-import type { ConfigSyncApplyRequest } from "@forge/protocol";
+import type { ConfigSyncApplyRequest, ConfigSyncLeaseRequest, ConfigSyncResolvePromptRequest, ConfigSyncRestoreRequest } from "@forge/protocol";
 import { createConfigSyncStore, isConfigSyncKeyError } from "../../../environment/sync/config-sync.js";
 import { isEnoentError } from "../../../utils/fs-errors.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
@@ -32,6 +32,17 @@ export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[
     }),
     route("apply", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.apply(await readJsonBody(request, 32 * 1024 * 1024) as ConfigSyncApplyRequest) });
+    }),
+    route("history", "GET", async (_request, response) => { sendJson(response, 200, { ...await store.history() }); }),
+    route("restore", "POST", async (request, response) => {
+      await store.restore(await readJsonBody(request) as ConfigSyncRestoreRequest);
+      sendJson(response, 200, { ok: true });
+    }),
+    route("lease", "POST", async (request, response) => {
+      sendJson(response, 200, { ...await store.lease(await readJsonBody(request) as ConfigSyncLeaseRequest) });
+    }),
+    route("resolve-prompt", "POST", async (request, response) => {
+      sendJson(response, 200, { ...await store.resolvePrompt(await readJsonBody(request, 8 * 1024 * 1024) as ConfigSyncResolvePromptRequest) });
     }),
   // The same access as editing presets, skills and prompts directly, so existing pairings can sync.
   ], { GET: { scopes: ["session:read"] }, POST: { scopes: ["workspace:write"] } });

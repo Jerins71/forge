@@ -162,3 +162,50 @@ test('"Ask an agent to resolve" starts a session here, and its merge resolves th
   await shot(page, '05-resolved')
   expect(await read(1, 'shared/config/secrets.json')).toBeNull()
 })
+
+test('a file over the size cap is listed as not synced instead of disappearing', async ({ page }) => {
+  await write(0, 'skills/big-skill/SKILL.md', '# Big skill\n')
+  await write(0, 'skills/big-skill/model.bin', 'x'.repeat(2 * 1024 * 1024 + 1))
+  await syncNow(page)
+  await expect.poll(() => read(1, 'skills/big-skill/SKILL.md'), { timeout: 30_000 }).toBe('# Big skill\n')
+  const skipped = page.getByRole('list', { name: 'Files not synced' })
+  await expect(skipped).toContainText('model.bin')
+  await expect(skipped).toContainText('Larger than 2 MB')
+  await expect(page.getByTestId('sync-status')).toContainText('1 file skipped')
+  expect(await read(1, 'skills/big-skill/model.bin')).toBeNull()
+  await shot(page, '06-not-synced', page.locator('section').filter({ has: skipped }))
+})
+
+test('History restores a replaced version on its machine, and it syncs out like an edit', async ({ page }) => {
+  // B's presets were replaced by the agent's merge; its own version before that is in B's history.
+  const before = presets(['fixture-worker', 'reviewer', 'from-a', 'second-b'])
+  await expect(page.getByRole('list', { name: 'Sync history' })).toBeVisible({ timeout: 30_000 })
+  await shot(page, '07-history', page.locator('section').filter({ has: page.getByRole('list', { name: 'Sync history' }) }))
+  await page.getByRole('button', { name: new RegExp(`^Restore Worker presets on ${fleet.b.label} `) }).first().click()
+  await expect(page.getByRole('list', { name: 'Sync history' }).locator('..').getByRole('status')).toContainText(`Restored Worker presets on ${fleet.b.label}`)
+  await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect.poll(() => read(0, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0)
+})
+
+test('with two windows open only one syncs, and Sync now in the other takes over', async ({ page }) => {
+  const second = await context.newPage()
+  second.on('pageerror', error => renderErrors.push(error.message))
+  try {
+    await second.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+    // The first window holds the hub lease, so the second defers on its own passes.
+    await expect(second.getByTestId('sync-status')).toContainText('Another open Forge window is syncing', { timeout: 30_000 })
+    await shot(second, '08-second-window-defers', second.getByTestId('settings-sync').locator('section').first())
+    await second.getByRole('button', { name: 'Sync now' }).click()
+    await expect(second.getByTestId('sync-status')).toContainText('Last synced', { timeout: 30_000 })
+    // The first window now defers on its next timed pass.
+    await expect(page.getByTestId('sync-status')).toContainText('Another open Forge window is syncing', { timeout: 30_000 })
+    // Changes still flow through the window that holds the lease.
+    await write(0, PRESETS, presets(['fixture-worker', 'after-handover']))
+    await second.getByRole('button', { name: 'Sync now' }).click()
+    await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(presets(['fixture-worker', 'after-handover']))
+  } finally {
+    await second.close()
+  }
+})

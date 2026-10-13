@@ -39,6 +39,14 @@ export interface ConfigSyncManifest {
   conflicts: Record<string, ConfigSyncConflict>
   /** True until this environment completes its first sync; a joining environment adopts the group's versions. */
   joining: boolean
+  /** Allowlisted files that cannot sync, with the reason. */
+  skipped: ConfigSyncSkipped[]
+}
+
+export interface ConfigSyncSkipped {
+  key: string
+  size: number
+  reason: 'too-large'
 }
 
 export interface ConfigSyncFile {
@@ -75,3 +83,56 @@ export interface ConfigSyncApplyResponse {
 }
 
 export const CONFIG_SYNC_MAX_FILE_BYTES = 2 * 1024 * 1024
+/** Writes per apply request are batched to stay under this many content bytes. */
+export const CONFIG_SYNC_MAX_REQUEST_BYTES = 8 * 1024 * 1024
+
+/** One file sync replaced or deleted, kept so it can be restored. */
+export interface ConfigSyncHistoryEntry {
+  /** The history batch; with `key`, identifies the kept copy. */
+  id: string
+  key: string
+  action: 'overwrite' | 'delete' | 'restore'
+  at: string
+  size: number
+}
+
+export interface ConfigSyncHistoryResponse {
+  entries: ConfigSyncHistoryEntry[]
+}
+
+/** Writes a kept version back as an ordinary local edit, which then syncs out. */
+export interface ConfigSyncRestoreRequest {
+  id: string
+  key: string
+}
+
+/**
+ * The active hub. Only the holder of an unexpired lease runs sync passes, so two open clients do
+ * not duplicate work. The lease lives on the first reachable participant.
+ */
+export interface ConfigSyncLeaseRequest {
+  holder: string
+  /** 0 releases the lease if `holder` has it. */
+  ttlMs: number
+  /** Take the lease from another holder (an explicit "Sync now"). */
+  takeover?: boolean
+}
+
+export interface ConfigSyncLeaseResponse {
+  granted: boolean
+  holder: string | null
+  until: string | null
+}
+
+/** Asks the environment holding `key` to write the prompt for an agent that merges a conflict. */
+export interface ConfigSyncResolvePromptRequest {
+  key: string
+  /** What the file is, as the user sees it, such as "Worker presets". */
+  subject: string
+  versions: { label: string; contentBase64: string | null }[]
+}
+
+export interface ConfigSyncResolvePromptResponse {
+  title: string
+  text: string
+}

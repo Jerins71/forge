@@ -1,7 +1,8 @@
-import { useMemo, useState, useSyncExternalStore } from 'react'
-import { AlertTriangle, Bot, Check, ChevronDown, Loader2, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { AlertTriangle, Bot, Check, ChevronDown, History, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import type { ConfigSyncConflictItem, ConfigSyncParticipant } from '@forge/client-runtime'
-import { readConfigSyncText } from '@forge/client-runtime'
+import { configSyncLogicalKey, readConfigSyncFile, readConfigSyncText } from '@forge/client-runtime'
+import type { ConfigSyncResolvePromptResponse } from '@forge/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -35,6 +36,9 @@ function SettingsSyncContent() {
   const chosen = new Set(settings.environmentIds)
   const statusFor = (id: string) => report?.environments.find((e) => e.environmentId === id)
   const unreachable = (report?.environments ?? []).filter((e) => !e.ok).map((e) => e.label)
+  /** A local key as the logical key the rest of the screen names, when its project syncs. */
+  const logicalFor = (environmentId: string, key: string) =>
+    configSyncLogicalKey(key, hub.participants().find((p) => p.environmentId === environmentId)?.projects ?? new Map()) ?? key
 
   const toggleEnvironment = (id: string, on: boolean) => {
     const environmentIds = on ? [...settings.environmentIds.filter((x) => x !== id), id] : settings.environmentIds.filter((x) => x !== id)
@@ -53,7 +57,7 @@ function SettingsSyncContent() {
         label="Sync"
         description="Keep worker presets, skills, prompts, slash commands and memory the same on every environment you choose. Secrets, sign-ins, sessions and transcripts never leave their machine."
         cta={
-          <Button size="sm" variant="outline" className="gap-1.5" disabled={!settings.enabled || running} onClick={() => void hub.syncNow()}>
+          <Button size="sm" variant="outline" className="gap-1.5" disabled={!settings.enabled || running} onClick={() => void hub.syncNow({ manual: true })}>
             {running ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />} Sync now
           </Button>
         }
@@ -92,13 +96,16 @@ function SettingsSyncContent() {
         </ul>
         {settings.enabled ? (
           <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground" data-testid="sync-status">
-            {running ? <Loader2 className="size-3.5 animate-spin" /> : report?.conflicts.length || unreachable.length ? <AlertTriangle className="size-3.5 text-amber-500" /> : <Check className="size-3.5 text-emerald-500" />}
+            {running ? <Loader2 className="size-3.5 animate-spin" /> : report?.conflicts.length || unreachable.length || report?.skipped.length || report?.activeHub ? <AlertTriangle className="size-3.5 text-amber-500" /> : <Check className="size-3.5 text-emerald-500" />}
             {chosen.size < 2
               ? 'Choose at least two environments.'
-              : report
+              : report?.activeHub
+                ? 'Another open Forge window is syncing these environments. Sync now here to take over.'
+                : report
                 ? `Last synced ${new Date(report.finishedAt).toLocaleTimeString()}${
                   report.conflicts.length ? ` · ${report.conflicts.length} conflict${report.conflicts.length === 1 ? '' : 's'}`
                     : unreachable.length ? ` · ${unreachable.join(', ')} will catch up when reachable`
+                      : report.skipped.length ? ` · ${report.skipped.length} file${report.skipped.length === 1 ? '' : 's'} skipped`
                       : ' · Up to date'}`
                 : 'Waiting for the first sync…'}
             {state.error ? <span className="text-destructive">{state.error}</span> : null}
@@ -112,7 +119,7 @@ function SettingsSyncContent() {
           description="These files changed differently on more than one environment. Both versions are untouched. Keep one, or ask an agent to merge them; editing either copy also resolves the conflict."
         >
           {report.conflicts.map((conflict) => (
-            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(environmentId) => hub.syncNow({ key: conflict.key, environmentId })} />
+            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(environmentId) => hub.syncNow({ keep: { key: conflict.key, environmentId } })} />
           ))}
         </SettingsSection>
       ) : null}
@@ -130,6 +137,30 @@ function SettingsSyncContent() {
           </ul>
         </SettingsSection>
       ) : null}
+
+      {settings.enabled && report?.skipped.length ? (
+        <SettingsSection
+          label="Not synced"
+          description="These files stay where they are. Files that could not be written are retried on every pass."
+        >
+          <ul className="space-y-1.5 text-[12.5px]" aria-label="Files not synced">
+            {report.skipped.map((item) => {
+              const described = describeSyncKey(logicalFor(item.environmentId, item.key), groups)
+              return (
+                <li key={`${item.environmentId}-${item.key}`} className="flex items-baseline gap-2">
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={item.key}>{described.title}{described.detail ? <span className="text-subtle-foreground"> · {described.detail}</span> : null}</span>
+                  <span className="shrink-0 text-muted-foreground">
+                    {item.reason === 'too-large' ? `Larger than 2 MB (${formatSize(item.size ?? 0)})` : `Could not be written: ${item.detail ?? 'unknown error'}`}
+                  </span>
+                  <Badge variant="outline" className="shrink-0">{item.label}</Badge>
+                </li>
+              )
+            })}
+          </ul>
+        </SettingsSection>
+      ) : null}
+
+      {settings.enabled ? <SyncHistory reportAt={report?.finishedAt ?? null} describe={(environmentId, key) => describeSyncKey(logicalFor(environmentId, key), groups)} /> : null}
 
       {settings.enabled && localOnly.length ? (
         <SettingsSection
@@ -197,23 +228,23 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
       const projects = [...client.shell.getSnapshot().projects.values()]
       const projectId = /^profile\/([^/]+)\//.exec(target.localKey)?.[1] ?? projects[0]?.projectId
       if (!projectId) throw new Error(`${target.label} has no project to run an agent in.`)
-      const versions = texts ?? await loadTexts()
-      const file = await client.features.settings.fetchJson<{ path: string }>(`/api/settings/sync/file?key=${encodeURIComponent(target.localKey)}`).catch(() => null)
-      const text = [
-        `Resolve a Forge configuration sync conflict for "${describe.title}"${describe.detail ? ` (${describe.detail})` : ''}.`,
-        '',
-        `The file changed differently on ${conflict.sides.map((s) => s.label).join(' and ')}. Merge the versions below so that no one's intended change is lost, then write the merged result to:`,
-        file?.path ?? target.localKey,
-        '',
-        'Write only that file. Sync propagates your edit to the other environments automatically.',
-        ...conflict.sides.map((side) => `\n--- Version from ${side.label} ---\n${side.hash === null ? '(deleted on this environment)' : clip(versions[side.environmentId] ?? '(could not be read)')}`),
-      ].join('\n')
+      // The environment the agent runs on writes the prompt; this client only gathers the versions.
+      const versions = (await Promise.all(conflict.sides.map(async (side) => {
+        if (side.hash === null) return { label: side.label, contentBase64: null }
+        const p = participant(side.environmentId)
+        const file = p ? await readConfigSyncFile(p, side.localKey) : null
+        return file ? { label: side.label, contentBase64: file.contentBase64 } : []
+      }))).flat()
+      const prompt = await client.features.settings.fetchJson<ConfigSyncResolvePromptResponse>('/api/settings/sync/resolve-prompt', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ key: target.localKey, subject: describe.detail ? `${describe.title} (${describe.detail})` : describe.title, versions }),
+      })
       const receipt = await client.request('session.launch', {
         commandId: crypto.randomUUID(),
         projectId,
-        title: `Resolve sync conflict: ${describe.title}`.slice(0, 120),
+        title: prompt.title,
         workspaceStrategy: { kind: 'current_checkout' },
-        initialMessage: { text, artifactIds: [] },
+        initialMessage: { text: prompt.text, artifactIds: [] },
       })
       setMessage(receipt.state === 'failed' ? receipt.error?.message ?? 'The agent could not start.' : `An agent is merging this on ${target.label}. The conflict clears when it saves the file.`)
     } catch (error) {
@@ -268,6 +299,54 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
   )
 }
 
-function clip(text: string): string {
-  return text.length > 40_000 ? `${text.slice(0, 40_000)}\n…(truncated)` : text
+function formatSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`
+}
+
+const HISTORY_ACTION: Record<string, string> = { overwrite: 'Replaced', delete: 'Deleted', restore: 'Replaced by a restore' }
+
+/** Versions sync replaced or deleted, on every synced environment, with Restore. */
+function SyncHistory({ reportAt, describe }: { reportAt: string | null; describe: (environmentId: string, key: string) => { title: string; detail?: string } }) {
+  const registry = useEnvironmentRegistry()
+  const hub = getConfigSyncHub(registry)
+  const [entries, setEntries] = useState<Awaited<ReturnType<typeof hub.history>> | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    void hub.history().then((next) => { if (live) setEntries(next) })
+    return () => { live = false }
+  }, [hub, reportAt])
+  if (!entries?.length) return null
+  return (
+    <SettingsSection
+      label="History"
+      description="Every file sync replaced or deleted is kept on its machine. Restoring one writes it back there, and it syncs out like any edit."
+    >
+      <ul className="space-y-1.5 text-[12.5px]" aria-label="Sync history">
+        {entries.slice(0, 15).map((entry) => {
+          const id = `${entry.environmentId}:${entry.id}:${entry.key}`
+          const described = describe(entry.environmentId, entry.key)
+          return (
+            <li key={id} className="flex items-center gap-2" data-testid="sync-history-entry">
+              <History className="size-3.5 shrink-0 text-subtle-foreground" />
+              <span className="w-28 shrink-0 tabular-nums text-subtle-foreground">{new Date(entry.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+              <span className="min-w-0 flex-1 truncate text-foreground" title={entry.key}>{described.title}{described.detail ? <span className="text-subtle-foreground"> · {described.detail}</span> : null}</span>
+              <span className="shrink-0 text-muted-foreground">{HISTORY_ACTION[entry.action] ?? entry.action} on {entry.label}</span>
+              <Button size="sm" variant="ghost" className="h-7 gap-1 px-2 text-[12px]" disabled={busy !== null} aria-label={`Restore ${described.title} on ${entry.label} from ${entry.at}`}
+                onClick={async () => {
+                  setBusy(id); setMessage(null)
+                  try { await hub.restore(entry.environmentId, { id: entry.id, key: entry.key }); setMessage(`Restored ${described.title} on ${entry.label}.`) }
+                  catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
+                  finally { setBusy(null) }
+                }}>
+                {busy === id ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />} Restore
+              </Button>
+            </li>
+          )
+        })}
+      </ul>
+      {message ? <p className="text-[12.5px] text-muted-foreground" role="status">{message}</p> : null}
+    </SettingsSection>
+  )
 }

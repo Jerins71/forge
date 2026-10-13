@@ -1,4 +1,5 @@
-import { runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup } from '@forge/client-runtime'
+import { configSyncLogicalKey, runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup } from '@forge/client-runtime'
+import type { ConfigSyncHistoryEntry, ConfigSyncHistoryResponse } from '@forge/protocol'
 
 /**
  * Configuration sync hub. This app reaches every paired environment, so it compares their
@@ -55,6 +56,8 @@ export class ConfigSyncHub {
   private readonly listeners = new Set<() => void>()
   private timer: ReturnType<typeof setInterval> | null = null
   private inflight: Promise<void> | null = null
+  /** This client's hub lease id. Another open client defers to whichever holds the lease. */
+  private readonly holder = crypto.randomUUID()
 
   constructor(private readonly registry: EnvironmentRegistry) {
     this.state = { settings: loadSettings(), running: false, report: null, error: null, activity: [] }
@@ -85,6 +88,14 @@ export class ConfigSyncHub {
     if (this.timer) clearInterval(this.timer)
     window.removeEventListener('focus', this.tick)
     this.timer = null
+    // Hand the hub role over now rather than when the lease expires. Only the holder's release counts.
+    let participants: ConfigSyncParticipant[] = []
+    try { participants = this.participants() } catch { /* The registry is already gone; the lease expires on its own. */ }
+    for (const participant of participants) {
+      void participant.fetchJson('/api/settings/sync/lease', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ holder: this.holder, ttlMs: 0 }),
+      }).catch(() => {})
+    }
   }
 
   updateSettings(settings: ConfigSyncSettings) {
@@ -108,13 +119,17 @@ export class ConfigSyncHub {
     })
   }
 
-  /** Runs one pass now, or joins the pass already running. `keep` resolves one conflict for an environment. */
-  syncNow(keep?: { key: string; environmentId: string }): Promise<void> {
-    if (this.inflight && !keep) return this.inflight
+  /**
+   * Runs one pass now, or joins the pass already running. A pass the user asked for (`manual`, or
+   * `keep` to settle a conflict) takes the hub role from another open client; a timed pass defers.
+   */
+  syncNow(options: { keep?: { key: string; environmentId: string }; manual?: boolean } = {}): Promise<void> {
+    const explicit = options.manual === true || options.keep !== undefined
+    if (this.inflight && !explicit) return this.inflight
     const run = (this.inflight ?? Promise.resolve()).then(async () => {
       this.set({ running: true })
       try {
-        const report = await runConfigSync(this.participants(), keep)
+        const report = await runConfigSync(this.participants(), { holder: this.holder, takeover: explicit, ...(options.keep ? { force: options.keep } : {}) })
         const pushed = report.pushed.map((p) => ({ at: report.finishedAt, ...p }))
         this.set({ report, error: null, activity: [...pushed.reverse(), ...this.state.activity].slice(0, 50) })
       } catch (error) {
@@ -126,6 +141,29 @@ export class ConfigSyncHub {
     this.inflight = run
     void run.finally(() => { if (this.inflight === run) this.inflight = null })
     return run
+  }
+
+  /** Recent replaced and deleted versions on every participant, newest first. */
+  async history(): Promise<(ConfigSyncHistoryEntry & { environmentId: string; label: string; logicalKey: string | null })[]> {
+    const lists = await Promise.all(this.participants().map(async (participant) => {
+      try {
+        const { entries } = await participant.fetchJson<ConfigSyncHistoryResponse>('/api/settings/sync/history')
+        return entries.map((entry) => ({ ...entry, environmentId: participant.environmentId, label: participant.label, logicalKey: configSyncLogicalKey(entry.key, participant.projects) }))
+      } catch {
+        return []
+      }
+    }))
+    return lists.flat().sort((a, b) => b.at.localeCompare(a.at)).slice(0, 30)
+  }
+
+  /** Writes a kept version back on its environment; the next pass syncs it out like any edit. */
+  async restore(environmentId: string, entry: { id: string; key: string }): Promise<void> {
+    const participant = this.participants().find((p) => p.environmentId === environmentId)
+    if (!participant) throw new Error('That environment is not syncing.')
+    await participant.fetchJson('/api/settings/sync/restore', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(entry),
+    })
+    await this.syncNow({ manual: true })
   }
 }
 

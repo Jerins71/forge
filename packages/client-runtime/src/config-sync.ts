@@ -1,15 +1,23 @@
+import { CONFIG_SYNC_MAX_REQUEST_BYTES } from '@forge/protocol'
 import type {
   ConfigSyncApplyRequest,
   ConfigSyncApplyResponse,
   ConfigSyncConflict,
   ConfigSyncFile,
   ConfigSyncHash,
+  ConfigSyncLeaseResponse,
   ConfigSyncManifest,
+  ConfigSyncWrite,
 } from '@forge/protocol'
 
 const MANIFEST_PATH = '/api/settings/sync/manifest'
 const FILE_PATH = '/api/settings/sync/file'
 const APPLY_PATH = '/api/settings/sync/apply'
+const LEASE_PATH = '/api/settings/sync/lease'
+/** Long enough to cover a pass; the holder renews it every pass. */
+export const CONFIG_SYNC_LEASE_MS = 30_000
+/** Base64 grows content by a third; a batch stays under the request cap after encoding. */
+const MAX_BATCH_BASE64 = Math.ceil(CONFIG_SYNC_MAX_REQUEST_BYTES * 4 / 3)
 
 /** One environment's view of a logical key. `base` is undefined until the key is first agreed. */
 export interface ConfigSyncSide {
@@ -87,6 +95,19 @@ export interface ConfigSyncReport {
   conflicts: ConfigSyncConflictItem[]
   /** Profile ids per environment whose files stay local. */
   localOnly: { environmentId: string; profileId: string }[]
+  /** Files that did not sync this pass, with why. A failed write is retried on the next pass. */
+  skipped: { key: string; environmentId: string; label: string; reason: 'too-large' | 'failed'; size?: number; detail?: string }[]
+  /** Set when another client holds the hub lease; this pass did nothing. */
+  activeHub?: string
+}
+
+export interface ConfigSyncOptions {
+  /** Resolve one conflict in favour of one environment. */
+  force?: { key: string; environmentId: string }
+  /** This client's lease holder id; without it the pass runs unconditionally. */
+  holder?: string
+  /** Take the lease from another client. */
+  takeover?: boolean
 }
 
 interface Loaded {
@@ -97,7 +118,7 @@ interface Loaded {
 }
 
 /** Logical key for a local key, or null when its profile does not sync. */
-function logicalKey(localKey: string, projects: ReadonlyMap<string, string>): string | null {
+export function configSyncLogicalKey(localKey: string, projects: ReadonlyMap<string, string>): string | null {
   if (localKey.startsWith('global/')) return localKey
   const match = /^profile\/([^/]+)\/(.+)$/.exec(localKey)
   if (!match) return null
@@ -121,9 +142,10 @@ function localKeyFor(logical: string, participant: ConfigSyncParticipant): strin
  */
 export async function runConfigSync(
   participants: readonly ConfigSyncParticipant[],
-  force?: { key: string; environmentId: string },
+  options: ConfigSyncOptions = {},
 ): Promise<ConfigSyncReport> {
-  const report: ConfigSyncReport = { finishedAt: '', environments: [], pushed: [], conflicts: [], localOnly: [] }
+  const { force } = options
+  const report: ConfigSyncReport = { finishedAt: '', environments: [], pushed: [], conflicts: [], localOnly: [], skipped: [] }
   const loaded: Loaded[] = []
   await Promise.all(participants.map(async (participant) => {
     try {
@@ -131,13 +153,16 @@ export async function runConfigSync(
       const local = new Map<string, string>()
       const keys = new Set([...manifest.files.map((f) => f.key), ...Object.keys(manifest.base), ...Object.keys(manifest.conflicts)])
       for (const key of keys) {
-        const logical = logicalKey(key, participant.projects)
+        const logical = configSyncLogicalKey(key, participant.projects)
         if (logical) local.set(logical, key)
       }
       for (const key of keys) {
         const profile = /^profile\/([^/]+)\//.exec(key)?.[1]
         if (profile && !participant.projects.has(profile) && !report.localOnly.some((l) => l.environmentId === participant.environmentId && l.profileId === profile))
           report.localOnly.push({ environmentId: participant.environmentId, profileId: profile })
+      }
+      for (const item of manifest.skipped ?? []) {
+        report.skipped.push({ key: item.key, environmentId: participant.environmentId, label: participant.label, reason: item.reason, size: item.size })
       }
       loaded.push({ participant, manifest, local })
       report.environments.push({ environmentId: participant.environmentId, label: participant.label, ok: true, files: manifest.files.length })
@@ -148,6 +173,14 @@ export async function runConfigSync(
   report.environments.sort((a, b) => participants.findIndex((p) => p.environmentId === a.environmentId) - participants.findIndex((p) => p.environmentId === b.environmentId))
   loaded.sort((a, b) => participants.indexOf(a.participant) - participants.indexOf(b.participant))
   if (loaded.length < 2) return { ...report, finishedAt: new Date().toISOString() }
+  if (options.holder) {
+    // The lease lives on the first reachable participant, so every client with the same choices asks the same place.
+    const lease = await loaded[0]!.participant.fetchJson<ConfigSyncLeaseResponse>(LEASE_PATH, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ holder: options.holder, ttlMs: CONFIG_SYNC_LEASE_MS, takeover: options.takeover === true }),
+    })
+    if (!lease.granted) return { ...report, activeHub: lease.holder ?? 'another client', finishedAt: new Date().toISOString() }
+  }
 
   const passAt = new Date().toISOString()
   const requests = new Map<string, Required<Pick<ConfigSyncApplyRequest, 'writes' | 'base' | 'conflicts'>>>(
@@ -216,30 +249,65 @@ export async function runConfigSync(
   await Promise.allSettled(pending)
 
   await Promise.all(loaded.map(async (l) => {
-    const request = requests.get(l.participant.environmentId)!
-    const body: ConfigSyncApplyRequest = { ...request, joined: true }
-    try {
-      const response = await l.participant.fetchJson<ConfigSyncApplyResponse>(APPLY_PATH, {
-        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-      })
-      if (response.stale.length) report.environments.find((e) => e.environmentId === l.participant.environmentId)!.error = `${response.stale.length} file(s) changed during sync; retrying next pass`
-    } catch (error) {
-      const entry = report.environments.find((e) => e.environmentId === l.participant.environmentId)!
-      entry.ok = false
-      entry.error = error instanceof Error ? error.message : String(error)
+    const entry = report.environments.find((e) => e.environmentId === l.participant.environmentId)!
+    let failed = false
+    const batches = splitApply(requests.get(l.participant.environmentId)!)
+    for (const [index, batch] of batches.entries()) {
+      const body: ConfigSyncApplyRequest = { ...batch, ...(index === batches.length - 1 && !failed ? { joined: true } : {}) }
+      try {
+        const response = await l.participant.fetchJson<ConfigSyncApplyResponse>(APPLY_PATH, {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+        })
+        if (response.stale.length) entry.error = `${response.stale.length} file(s) changed during sync; retrying next pass`
+      } catch (error) {
+        failed = true
+        const detail = error instanceof Error ? error.message : String(error)
+        entry.error = detail
+        for (const write of batch.writes) report.skipped.push({ key: write.key, environmentId: l.participant.environmentId, label: l.participant.label, reason: 'failed', detail })
+      }
     }
   }))
   return { ...report, finishedAt: new Date().toISOString() }
 }
 
-/** Reads one environment's copy of a file as text, for showing both sides of a conflict. */
-export async function readConfigSyncText(participant: Pick<ConfigSyncParticipant, 'fetchJson'>, localKey: string): Promise<string | null> {
+type ApplyParts = Required<Pick<ConfigSyncApplyRequest, 'writes' | 'base' | 'conflicts'>>
+
+/**
+ * Splits one environment's apply into requests under the size cap. A key's base and conflict
+ * state travel with its write, so a failed request records nothing for the files it carried.
+ */
+export function splitApply(request: ApplyParts): ApplyParts[] {
+  const withWrite = new Set(request.writes.map((w) => w.key))
+  const first: ApplyParts = { writes: [], base: {}, conflicts: {} }
+  for (const [key, base] of Object.entries(request.base)) if (!withWrite.has(key)) first.base[key] = base
+  for (const [key, conflict] of Object.entries(request.conflicts)) if (!withWrite.has(key)) first.conflicts[key] = conflict
+  const batches: ApplyParts[] = [first]
+  let size = 0
+  for (const write of request.writes) {
+    const bytes = write.contentBase64?.length ?? 0
+    let batch = batches[batches.length - 1]!
+    if (batch.writes.length && size + bytes > MAX_BATCH_BASE64) { batch = { writes: [], base: {}, conflicts: {} }; batches.push(batch); size = 0 }
+    batch.writes.push(write as ConfigSyncWrite)
+    size += bytes
+    if (write.key in request.base) batch.base[write.key] = request.base[write.key]!
+    if (write.key in request.conflicts) batch.conflicts[write.key] = request.conflicts[write.key]!
+  }
+  return batches
+}
+
+/** Reads one environment's copy of a file, or null when it cannot be read. */
+export async function readConfigSyncFile(participant: Pick<ConfigSyncParticipant, 'fetchJson'>, localKey: string): Promise<ConfigSyncFile | null> {
   try {
-    const file = await participant.fetchJson<ConfigSyncFile>(`${FILE_PATH}?key=${encodeURIComponent(localKey)}`)
-    return decodeBase64Utf8(file.contentBase64)
+    return await participant.fetchJson<ConfigSyncFile>(`${FILE_PATH}?key=${encodeURIComponent(localKey)}`)
   } catch {
     return null
   }
+}
+
+/** Reads one environment's copy of a file as text, for showing both sides of a conflict. */
+export async function readConfigSyncText(participant: Pick<ConfigSyncParticipant, 'fetchJson'>, localKey: string): Promise<string | null> {
+  const file = await readConfigSyncFile(participant, localKey)
+  return file ? decodeBase64Utf8(file.contentBase64) : null
 }
 
 function decodeBase64Utf8(value: string): string {

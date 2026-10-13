@@ -101,3 +101,69 @@ describe("config sync store", () => {
     expect(manifest.joining).toBe(false);
   });
 });
+
+// Failure modes for this round: an oversize file vanishing without a trace, a restore that loses the
+// version it replaces or does not look like a local edit, two hubs both holding the lease, a lease
+// that never frees when its holder goes away, and a resolve prompt missing a version or the path.
+describe("config sync store: skipped files, history, lease and resolve prompt", () => {
+  it("reports files over the size cap instead of dropping them", async () => {
+    await put("skills/big/model.bin", "x".repeat(2 * 1024 * 1024 + 1));
+    await put("skills/big/SKILL.md", "ok");
+    const manifest = await createConfigSyncStore(dataDir).manifest();
+    expect(manifest.files.map((f) => f.key)).toEqual(["global/skills/big/SKILL.md"]);
+    expect(manifest.skipped).toEqual([{ key: "global/skills/big/model.bin", size: 2 * 1024 * 1024 + 1, reason: "too-large" }]);
+  });
+
+  it("lists replaced and deleted versions newest first and restores one as a local edit", async () => {
+    await put("shared/config/worker-presets.json", "v1");
+    const store = createConfigSyncStore(dataDir);
+    const hash = async () => (await store.manifest()).files.find((f) => f.key === "global/worker-presets.json")?.hash ?? null;
+    await store.apply({ writes: [{ key: "global/worker-presets.json", expectHash: await hash(), contentBase64: b64("v2") }] });
+    await store.apply({ writes: [{ key: "global/worker-presets.json", expectHash: await hash(), contentBase64: null }] });
+
+    const { entries } = await store.history();
+    expect(entries.map((e) => [e.key, e.action, e.size])).toEqual([
+      ["global/worker-presets.json", "delete", 2],
+      ["global/worker-presets.json", "overwrite", 2],
+    ]);
+    const v1 = entries[1]!;
+    await store.restore({ id: v1.id, key: v1.key });
+    expect(await readFile(join(dataDir, "shared/config/worker-presets.json"), "utf8")).toBe("v1");
+
+    // Restoring over v3 keeps v3 too.
+    await writeFile(join(dataDir, "shared/config/worker-presets.json"), "v3");
+    await store.restore({ id: entries[0]!.id, key: v1.key });
+    expect(await readFile(join(dataDir, "shared/config/worker-presets.json"), "utf8")).toBe("v2");
+    const after = await store.history();
+    expect(after.entries[0]).toMatchObject({ key: "global/worker-presets.json", action: "restore", size: 2 });
+
+    await expect(store.restore({ id: "../../config", key: v1.key })).rejects.toThrow();
+    await expect(store.restore({ id: v1.id, key: "global/../secrets.json" })).rejects.toThrow(/not synced/);
+  });
+
+  it("grants the hub lease to one holder at a time, renews it, frees it on release or expiry, and allows a takeover", async () => {
+    const store = createConfigSyncStore(dataDir);
+    expect(await store.lease({ holder: "a", ttlMs: 30_000 })).toMatchObject({ granted: true, holder: "a" });
+    expect(await store.lease({ holder: "b", ttlMs: 30_000 })).toMatchObject({ granted: false, holder: "a" });
+    expect(await store.lease({ holder: "a", ttlMs: 30_000 })).toMatchObject({ granted: true, holder: "a" });
+    expect(await store.lease({ holder: "b", ttlMs: 30_000, takeover: true })).toMatchObject({ granted: true, holder: "b" });
+    expect(await createConfigSyncStore(dataDir).lease({ holder: "a", ttlMs: 30_000 })).toMatchObject({ granted: false, holder: "b" });
+    await store.lease({ holder: "b", ttlMs: 0 });
+    expect(await store.lease({ holder: "a", ttlMs: 1 })).toMatchObject({ granted: true, holder: "a" });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await store.lease({ holder: "b", ttlMs: 30_000 })).toMatchObject({ granted: true, holder: "b" });
+  });
+
+  it("writes the resolve prompt with every version and this machine's path", async () => {
+    await put("shared/config/worker-presets.json", "mine");
+    const prompt = await createConfigSyncStore(dataDir).resolvePrompt({
+      key: "global/worker-presets.json", subject: "Worker presets",
+      versions: [{ label: "Mac", contentBase64: b64("version from mac") }, { label: "Dev1", contentBase64: null }],
+    });
+    expect(prompt.title).toBe("Resolve sync conflict: Worker presets");
+    expect(prompt.text).toContain(join(dataDir, "shared/config/worker-presets.json"));
+    expect(prompt.text).toContain("--- Version from Mac ---\nversion from mac");
+    expect(prompt.text).toContain("--- Version from Dev1 ---\n(deleted on this environment)");
+    await expect(createConfigSyncStore(dataDir).resolvePrompt({ key: "global/auth.json", subject: "x", versions: [] })).rejects.toThrow(/not synced/);
+  });
+});

@@ -9,8 +9,16 @@ import {
   type ConfigSyncConflict,
   type ConfigSyncFile,
   type ConfigSyncHash,
+  type ConfigSyncHistoryEntry,
+  type ConfigSyncHistoryResponse,
+  type ConfigSyncLeaseRequest,
+  type ConfigSyncLeaseResponse,
   type ConfigSyncManifest,
   type ConfigSyncManifestEntry,
+  type ConfigSyncResolvePromptRequest,
+  type ConfigSyncResolvePromptResponse,
+  type ConfigSyncRestoreRequest,
+  type ConfigSyncSkipped,
 } from "@forge/protocol";
 import { readJsonFileIfExists, writeFileAtomic, writeJsonFileAtomic } from "../../utils/atomic-files.js";
 import { isEnoentError } from "../../utils/fs-errors.js";
@@ -42,7 +50,12 @@ interface SyncState {
   base: Record<string, ConfigSyncBase>;
   conflicts: Record<string, ConfigSyncConflict>;
   joined: boolean;
+  /** The active hub's lease; see `ConfigSyncLeaseRequest`. */
+  hub?: { holder: string; until: number };
 }
+
+const HISTORY_LIST_LIMIT = 50;
+const PROMPT_VERSION_MAX_CHARS = 40_000;
 
 class NotSyncedError extends Error {
   constructor(key: string) { super(`${key} is not synced`); }
@@ -100,13 +113,15 @@ export function createConfigSyncStore(dataDir: string) {
 
   async function loadState(): Promise<SyncState> {
     const raw = await readJsonFileIfExists<Partial<SyncState>>(statePath);
-    return { base: raw?.base ?? {}, conflicts: raw?.conflicts ?? {}, joined: raw?.joined === true };
+    return { base: raw?.base ?? {}, conflicts: raw?.conflicts ?? {}, joined: raw?.joined === true, ...(raw?.hub ? { hub: raw.hub } : {}) };
   }
 
-  async function entry(key: string, absolute: string): Promise<ConfigSyncManifestEntry | null> {
+  /** One file's manifest entry; a file over the size cap is reported in `skipped` instead. */
+  async function entry(key: string, absolute: string, skipped: ConfigSyncSkipped[]): Promise<ConfigSyncManifestEntry | null> {
     try {
       const stat = await lstat(absolute);
-      if (!stat.isFile() || stat.size > CONFIG_SYNC_MAX_FILE_BYTES) return null;
+      if (!stat.isFile()) return null;
+      if (stat.size > CONFIG_SYNC_MAX_FILE_BYTES) { skipped.push({ key, size: stat.size, reason: "too-large" }); return null; }
       return { key, hash: sha256(await readFile(absolute)), size: stat.size, mtimeMs: Math.round(stat.mtimeMs) };
     } catch (error) {
       if (isEnoentError(error)) return null;
@@ -114,7 +129,7 @@ export function createConfigSyncStore(dataDir: string) {
     }
   }
 
-  async function walk(keyPrefix: string, dir: string, out: ConfigSyncManifestEntry[]): Promise<void> {
+  async function walk(keyPrefix: string, dir: string, out: ConfigSyncManifestEntry[], skipped: ConfigSyncSkipped[]): Promise<void> {
     let names: string[];
     try { names = await readdir(dir); } catch (error) { if (isEnoentError(error) || (error as NodeJS.ErrnoException).code === "ENOTDIR") return; throw error; }
     for (const name of names.sort()) {
@@ -122,9 +137,9 @@ export function createConfigSyncStore(dataDir: string) {
       const absolute = join(dir, name);
       const stat = await lstat(absolute).catch(() => null);
       if (!stat || stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) await walk(`${keyPrefix}/${name}`, absolute, out);
+      if (stat.isDirectory()) await walk(`${keyPrefix}/${name}`, absolute, out, skipped);
       else {
-        const found = await entry(`${keyPrefix}/${name}`, absolute);
+        const found = await entry(`${keyPrefix}/${name}`, absolute, skipped);
         if (found) out.push(found);
       }
     }
@@ -132,23 +147,24 @@ export function createConfigSyncStore(dataDir: string) {
 
   async function manifest(): Promise<ConfigSyncManifest> {
     const files: ConfigSyncManifestEntry[] = [];
+    const skipped: ConfigSyncSkipped[] = [];
     for (const [key, rel] of Object.entries(GLOBAL_FILES)) {
-      const found = await entry(`global/${key}`, join(dataDir, rel));
+      const found = await entry(`global/${key}`, join(dataDir, rel), skipped);
       if (found) files.push(found);
     }
-    for (const [key, rel] of Object.entries(GLOBAL_TREES)) await walk(`global/${key}`, join(dataDir, rel), files);
+    for (const [key, rel] of Object.entries(GLOBAL_TREES)) await walk(`global/${key}`, join(dataDir, rel), files, skipped);
     let profiles: string[] = [];
     try { profiles = await readdir(getProfilesDir(dataDir)); } catch (error) { if (!isEnoentError(error)) throw error; }
     for (const profileId of profiles.sort()) {
       if (!validSegment(profileId) || sanitizePathSegment(profileId) !== profileId) continue;
       for (const [key, rel] of Object.entries(PROFILE_FILES)) {
-        const found = await entry(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)));
+        const found = await entry(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)), skipped);
         if (found) files.push(found);
       }
-      for (const [key, rel] of Object.entries(PROFILE_TREES)) await walk(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)), files);
+      for (const [key, rel] of Object.entries(PROFILE_TREES)) await walk(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)), files, skipped);
     }
     const state = await loadState();
-    return { files, base: state.base, conflicts: state.conflicts, joining: !state.joined };
+    return { files, base: state.base, conflicts: state.conflicts, joining: !state.joined, skipped };
   }
 
   async function readSyncFile(key: string): Promise<ConfigSyncFile> {
@@ -168,20 +184,17 @@ export function createConfigSyncStore(dataDir: string) {
     return serialized(async () => {
       const applied: string[] = [];
       const stale: string[] = [];
-      const historyDir = join(syncDir, "history", `${new Date().toISOString().replace(/[:.]/g, "-")}-${process.hrtime.bigint()}`);
+      const keep = keeper();
       for (const [index, write] of writes.entries()) {
         const target = targets[index]!;
         const current = await currentHash(target);
         if (current !== write.expectHash) { stale.push(write.key); continue; }
-        if (current !== null) {
-          const kept = join(historyDir, write.key);
-          await mkdir(dirname(kept), { recursive: true });
-          await copyFile(target, kept);
-        }
+        if (current !== null) await keep(write.key, target, write.contentBase64 === null ? "delete" : "overwrite");
         if (write.contentBase64 === null) await rm(target, { force: true });
         else await writeFileAtomic(target, Buffer.from(write.contentBase64, "base64"));
         applied.push(write.key);
       }
+      await keep.finish();
       const state = await loadState();
       for (const [key, base] of Object.entries(request.base ?? {})) {
         if (stale.includes(key)) continue;
@@ -199,7 +212,84 @@ export function createConfigSyncStore(dataDir: string) {
     });
   }
 
-  return { manifest, readFile: async (key: string) => readSyncFile(key), apply };
+  /** Copies files about to be replaced into one history batch, with an index of what happened. */
+  function keeper() {
+    const at = new Date().toISOString();
+    const id = `${at.replace(/[:.]/g, "-")}-${process.hrtime.bigint()}`;
+    const dir = join(syncDir, "history", id);
+    const entries: ConfigSyncHistoryEntry[] = [];
+    const keep = async (key: string, target: string, action: ConfigSyncHistoryEntry["action"]) => {
+      const kept = join(dir, key);
+      await mkdir(dirname(kept), { recursive: true });
+      await copyFile(target, kept);
+      entries.push({ id, key, action, at, size: (await lstat(kept)).size });
+    };
+    keep.finish = async () => { if (entries.length) await writeJsonFileAtomic(join(dir, "entries.json"), entries); };
+    return keep;
+  }
+
+  async function history(): Promise<ConfigSyncHistoryResponse> {
+    let ids: string[] = [];
+    try { ids = await readdir(join(syncDir, "history")); } catch (error) { if (!isEnoentError(error)) throw error; }
+    const entries: ConfigSyncHistoryEntry[] = [];
+    for (const id of ids.sort().reverse()) {
+      const batch = await readJsonFileIfExists<ConfigSyncHistoryEntry[]>(join(syncDir, "history", id, "entries.json"));
+      for (const item of [...(batch ?? [])].reverse()) entries.push(item);
+      if (entries.length >= HISTORY_LIST_LIMIT) break;
+    }
+    return { entries: entries.slice(0, HISTORY_LIST_LIMIT) };
+  }
+
+  /** Writes a kept version back; the version it replaces is kept too. Sync then sees an ordinary local edit. */
+  async function restore(request: ConfigSyncRestoreRequest): Promise<void> {
+    const target = join(dataDir, resolveConfigSyncKey(request.key));
+    if (typeof request.id !== "string" || !validSegment(request.id)) throw new NotSyncedError(`history ${String(request.id)}`);
+    const bytes = await readFile(join(syncDir, "history", request.id, request.key));
+    await serialized(async () => {
+      const keep = keeper();
+      if (await currentHash(target) !== null) await keep(request.key, target, "restore");
+      await writeFileAtomic(target, bytes);
+      await keep.finish();
+    });
+  }
+
+  function lease(request: ConfigSyncLeaseRequest): Promise<ConfigSyncLeaseResponse> {
+    if (typeof request.holder !== "string" || !request.holder || typeof request.ttlMs !== "number" || request.ttlMs < 0) {
+      return Promise.reject(new Error("Lease needs a holder and a ttlMs"));
+    }
+    return serialized(async () => {
+      const state = await loadState();
+      const now = Date.now();
+      const free = !state.hub || state.hub.until <= now || state.hub.holder === request.holder || request.takeover === true;
+      if (free) {
+        if (request.ttlMs === 0) delete state.hub;
+        else state.hub = { holder: request.holder, until: now + Math.min(request.ttlMs, 5 * 60_000) };
+        await writeJsonFileAtomic(statePath, state);
+      }
+      const hub = state.hub;
+      return { granted: free, holder: hub?.holder ?? null, until: hub ? new Date(hub.until).toISOString() : null };
+    });
+  }
+
+  /** The one place the merge instructions for an agent are written. */
+  async function resolvePrompt(request: ConfigSyncResolvePromptRequest): Promise<ConfigSyncResolvePromptResponse> {
+    const path = join(dataDir, resolveConfigSyncKey(request.key));
+    const subject = String(request.subject ?? request.key).slice(0, 200);
+    const clip = (text: string) => text.length > PROMPT_VERSION_MAX_CHARS ? `${text.slice(0, PROMPT_VERSION_MAX_CHARS)}\n…(truncated)` : text;
+    const versions = Array.isArray(request.versions) ? request.versions : [];
+    const text = [
+      `Resolve a Forge configuration sync conflict for "${subject}".`,
+      "",
+      `The file changed differently on ${versions.map((v) => v.label).join(" and ") || "more than one environment"}. Merge the versions below so that no one's intended change is lost, then write the merged result to:`,
+      path,
+      "",
+      "Write only that file. Sync propagates your edit to the other environments automatically, and the replaced versions stay in sync history.",
+      ...versions.map((v) => `\n--- Version from ${v.label} ---\n${v.contentBase64 === null ? "(deleted on this environment)" : clip(Buffer.from(v.contentBase64, "base64").toString("utf8"))}`),
+    ].join("\n");
+    return { title: `Resolve sync conflict: ${subject}`.slice(0, 120), text };
+  }
+
+  return { manifest, readFile: async (key: string) => readSyncFile(key), apply, history, restore, lease, resolvePrompt };
 }
 
 export type ConfigSyncStore = ReturnType<typeof createConfigSyncStore>;
