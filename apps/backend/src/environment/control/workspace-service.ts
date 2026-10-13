@@ -40,21 +40,25 @@ function pathKey(path: string): string { return process.platform === "linux" ? r
 
 /** Returns only a credential-free grouping hint; local remotes never identify a repository. */
 export function normalizeRepositoryRemote(remote: string): string | null {
-  const scp = /^(?:[^@/:]+@)?([^/:]+):([^/].*)$/.exec(remote);
+  const scp = /^(?:([^@/:]+)@)?([^/:]+):(.+)$/.exec(remote);
   if (scp && !remote.includes("://") && !/^[A-Za-z]:[\\/]/.test(remote)) {
-    return normalizeParts(scp[1]!, scp[2]!.split(/[?#]/)[0]!);
+    const [, user, host, path] = scp;
+    const service = ["github.com", "gitlab.com", "bitbucket.org"].includes(host!.toLowerCase()) && user === "git";
+    if (!path!.startsWith("/") && !service) return null;
+    return normalizeParts(host!, path!);
   }
   try {
     const url = new URL(remote);
     if (!["https:", "http:", "ssh:", "git:"].includes(url.protocol)) return null;
+    if (url.protocol === "ssh:" && /(?:^|\/)~/.test(url.pathname)) return null;
     const defaults: Record<string, string> = { "https:": "443", "http:": "80", "ssh:": "22", "git:": "9418" };
     const host = url.hostname.toLowerCase() + (url.port && url.port !== defaults[url.protocol] ? `:${url.port}` : "");
     return normalizeParts(host, url.pathname);
   } catch { return null; }
 }
 function normalizeParts(host: string, path: string): string | null {
-  const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "").replace(/\/+$/, "");
-  if (!host || !normalized || /[\s\\]/.test(host) || normalized.includes("@")) return null;
+  const normalized = path.replace(/^\/+|\/+$/g, "").replace(/\.git$/, "");
+  if (!host || !normalized || /[\s\\@]/.test(host + normalized) || /[%?#]/.test(normalized) || normalized.split("/").some(part => !part || part === "." || part === ".." || part.startsWith("~"))) return null;
   return `${host.toLowerCase()}/${normalized}`;
 }
 
@@ -138,7 +142,7 @@ export function createWorkspaceService({ database, dataDir, swarmManager }: { da
       }
       if (!cached.canonicalRemote) return null;
       const subpath = relative(repo.root, await realpath(cwd)).split(sep).join("/");
-      return { canonicalRemote: cached.canonicalRemote, subpath, key: createHash("sha256").update(`${cached.canonicalRemote}\n${subpath}`).digest("hex") };
+      return { verifiedForSync: true, canonicalRemote: cached.canonicalRemote, subpath, key: createHash("sha256").update(`${cached.canonicalRemote}\n${subpath}`).digest("hex") };
     },
   };
   async function ensure(commandId: string): Promise<{ cwd: string; branch: string | null }> {

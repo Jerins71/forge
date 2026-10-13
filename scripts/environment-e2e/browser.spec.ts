@@ -70,6 +70,8 @@ async function pairB(page: Page) {
   const link = await fleet.mintGrant(fleet.b, 'link')
   await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
+  // Receiving selected Chrome cookies changes the project's authenticated identity.
+  await page.getByRole('dialog').getByRole('checkbox', { name: 'Change settings' }).check()
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
   await page.getByRole('button', { name: 'Done' }).click()
@@ -385,5 +387,21 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('old-forum.example')
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('expired')
     await shot(page, 'import-skipped')
+    await page.keyboard.press('Escape')
+
+    // Closing the dialog after reading sites releases that preview on the machine at once.
+    await page.getByRole('button', { name: 'Import from Chrome…' }).click()
+    await dialog.getByRole('button', { name: 'Show sites' }).click()
+    await expect(dialog.locator('[data-site]').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(() => mock(`engine.settings.calls.filter(call => call.method === 'cancel').length`)).toBe(1)
+
+    // Without Change settings for this machine, importing is unavailable and says why.
+    await mock(`(engine.settings.canImport = false, true)`)
+    await reopenTab()
+    await expect(page.getByRole('button', { name: 'Import from Chrome…' })).toBeDisabled()
+    await expect(page.getByTestId('settings-browser')).toContainText('needs this app’s Change settings permission')
+    await mock(`(engine.settings.canImport = true, true)`)
   })
 })

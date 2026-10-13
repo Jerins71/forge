@@ -80,6 +80,7 @@ export const browserEngineSchemas = {
   screencast: O({ sessionId: id, tabId: id, maxWidth: Type.Optional(dimension), maxHeight: Type.Optional(dimension), quality: Type.Optional(Type.Integer({ minimum: 20, maximum: 85 })) }),
   ack: O({ subscriptionId: id, frameId: sequence }),
   preview: O({ sessionId: id, source: BrowserCookieSourceSchema }),
+  cancel: O({ sessionId: id, importId: id }),
   apply: O({ sessionId: id, importId: id, domains }),
   prepareSend: O({ sessionId: id, importId: id, domains }),
   receive: O({ sessionId: id, transfer: BrowserCookieTransferSchema }),

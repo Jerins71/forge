@@ -424,6 +424,8 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   ├── state/
 │   │   ├── mobile-devices.json
 │   │   ├── project-agent-shares.json
+│   │   ├── sync/state.json                # Configuration sync: causal versions, retained heads, mutation journal
+│   │   ├── sync/history/<operation>/      # Displaced inodes plus hash-bound history entries, for Restore
 │   │   └── .*-done                        # One-time migration/reconciliation sentinels
 │   ├── knowledge/
 │   │   ├── common.md                      # Global memory (user-editable)
@@ -502,6 +504,77 @@ Headless project cookies and site storage stay under that environment’s data d
 | Windows | `%LOCALAPPDATA%\forge` |
 
 Override with `FORGE_DATA_DIR` in your environment or `.env` file.
+
+### Configuration sync
+
+**Settings → Sync** keeps user-authored configuration the same on the environments you choose. The
+app is the hub: it already reaches every paired environment, so it compares their files every ten
+seconds (and on **Sync now** or window focus) while it is open. Environments never contact each other
+and no new credentials are involved.
+
+What syncs is an allowlist (`apps/backend/src/environment/sync/config-sync.ts`):
+
+| Synced | Path in the data directory |
+|---|---|
+| Worker presets | `shared/config/worker-presets.json` |
+| Global slash commands | `shared/config/slash-commands.json` |
+| Global skills | `skills/**` |
+| Project memory, manager memory | `profiles/<p>/memory.md`, `profiles/<p>/sessions/<p>/memory.md` |
+| Project skills, prompts, slash commands | `profiles/<p>/pi/skills/**`, `profiles/<p>/prompts/{archetypes,operational}/*.md`, `profiles/<p>/slash-commands.json` |
+
+Secrets, sign-ins, credential pools, environment identity and pairing, databases, transcripts,
+sessions, caches and machine paths are not addressable and never leave their machine. Project files
+sync only between projects with a backend-verified repository identity (host, full repository path
+and project subdirectory), with exactly one matching project per environment. Manual sidebar grouping
+never authorizes sync. Missing or ambiguous remotes, forks and duplicate clones are local only, with
+an explanation in Settings. Relative SSH paths that depend on a login user's home are ambiguous;
+standard Git hosting service remotes such as `git@github.com:owner/repo.git` identify their namespace.
+
+Each backend observes local edits, deletions and restores and persists a per-file version vector
+keyed by its stable environment UUID. Content hashes identify retained, complete immutable copies;
+timestamps are for display. Clients relay causal heads. A backend uses an expected version/content
+check and replaces a file only with a causally newer version. Concurrent heads remain recoverable
+and appear as one conflict with every version. A deletion is a causal tombstone; a machine that has
+never held a file has no version. Legacy agreement timestamps are not treated as ancestry.
+
+**Keep …** or **Ask an agent to resolve** acknowledges exact version ids. The resolver's new version
+extends the component-wise maximum of those heads and increments its own durable counter. A third
+independent offline edit remains a conflict. An ordinary edit during a conflict advances only the
+copy it was based on. Agent resolution requires complete, hash-verified inputs and gives the agent
+paths to immutable retained files, including large inputs, without truncation. Each agent operation
+owns its immutable input ids, displayed version precondition and separate output file. After a
+launch, any compatible app hub discovers unfinished operations from the backend and explicitly
+commits completed output verified against its completion hash. Browser registration and local storage
+do not control recovery; reconnecting or different hubs resume the same idempotent operation.
+Saving the live file never implicitly resolves a conflict. A stale operation keeps its output
+for recovery and requires a new comparison; another agent operation cannot replace its inputs.
+Keep also carries the displayed precondition. The backend refuses any resolution whose next local
+counter would consume a head outside the acknowledged ancestry.
+
+Before replacement or deletion, sync durably indexes a unique history entry and moves the actual
+file inode to `shared/state/sync/history/`. It checks the displaced contents and installs a staged
+file exclusively, refusing an intervening save instead of overwriting it. A journal recovers an
+interrupted mutation without hiding history. Rollback installs a distinct live inode; listed history
+remains bound to immutable bytes even if an editor later saves through the displaced inode.
+**Restore** requires the current version it is replacing,
+uses the same mutation primitive and creates an ordinary local version. File modes and skill
+executable bits are preserved.
+
+Every read, enumeration, history operation and mutation validates the same filesystem boundary:
+components under the canonical data root must be real paths without symbolic links, and directory
+identities are checked before and after mutation. Unsupported case or Unicode filename aliases are
+reported without choosing or deleting a version. This protects against legacy/accidental links and
+untrusted peer paths; an attacker who already controls the local account is outside this boundary's
+threat model. No native dependency is required by sync.
+
+Files over 2 MB, unreadable files and blocked paths are listed under **Not synced**. Their versions
+are unavailable rather than absent, so the key cannot trigger changes on other participants.
+Deliveries are batched and a failed or stale delivery records no agreement; recent changes show only
+acknowledged applied writes. Sync's versioned capability is required; older environments display
+**Update required** and are skipped. Read access requires the resource scopes, including
+`workspace:read` for skill content, manifests and history; mutation requires `workspace:write`.
+Several windows can relay overlapping subsets safely. A short hub lease reduces duplicate passes;
+**Sync now** can take it over, but leases and wall clocks never determine correctness.
 
 ### Machine-local skills
 

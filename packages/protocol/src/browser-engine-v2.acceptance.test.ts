@@ -1,10 +1,27 @@
 import { describe, expect, it } from 'vitest'
 import { Value } from '@sinclair/typebox/value'
-import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema } from './environment-v2.js'
+import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema, DeviceSessionSchema } from './environment-v2.js'
 
 describe('environment browser engine wire contract', () => {
+  it('already projects import authority in the current device session scopes', () => {
+    const session = { deviceSessionId: '11111111-1111-1111-1111-111111111111', deviceName: 'test', kind: 'browser', createdAt: '2026-10-13T12:00:00.000Z', lastSeenAt: '2026-10-13T12:00:00.000Z', expiresAt: '2026-10-13T13:00:00.000Z', revokedAt: null, isCurrent: true }
+    for (const scopes of [['session:operate'], ['settings:admin']]) {
+      const device = decodeEnvironmentValue(DeviceSessionSchema, { ...session, scopes })
+      expect(device?.scopes.includes('settings:admin')).toBe(scopes.includes('settings:admin'))
+    }
+  })
+  it('requires admin for all source import and export operations, with strict cancel input', () => {
+    for (const method of ['browser.cookies.preview', 'browser.cookies.apply', 'browser.cookies.prepareSend', 'browser.cookies.receive', 'browser.cookies.cancel'] as const)
+      expect(rpcScopes[method]).toBe('settings:admin')
+    expect(rpcScopes['browser.cookies.audit']).toBe('session:read')
+    expect(rpcScopes['browser.cookies.forget']).toBe('session:operate')
+    expect(Value.Check(rpcSchemas['browser.cookies.cancel'].input, { sessionId: 's', importId: 'i' })).toBe(true)
+    expect(Value.Check(rpcSchemas['browser.cookies.cancel'].input, { sessionId: 's', importId: 'i', domains: [] })).toBe(false)
+    expect(Value.Check(rpcSchemas['browser.cookies.cancel'].input, { sessionId: 's' })).toBe(false)
+    expect(Value.Check(rpcSchemas['browser.cookies.cancel'].output, {})).toBe(true)
+  })
   it('uses scoped ephemeral actions with no durable command or host lease', () => {
-    for (const method of ['browser.tabs.open', 'browser.tabs.close', 'browser.tabs.navigate', 'browser.tabs.input', 'browser.cookies.apply'] as const) {
+    for (const method of ['browser.tabs.open', 'browser.tabs.close', 'browser.tabs.navigate', 'browser.tabs.input'] as const) {
       expect(rpcSchemas[method].receipt).toBe(false)
       expect(rpcScopes[method]).toBe('session:operate')
     }
@@ -41,6 +58,6 @@ describe('environment browser engine wire contract', () => {
     expect(Value.Check(BrowserEngineSnapshotSchema, snapshot)).toBe(true)
     expect(rpcScopes['browser.tabs.subscribe']).toBe('session:read')
     expect(rpcScopes['browser.screencast.subscribe']).toBe('session:read')
-    expect(rpcScopes['browser.cookies.preview']).toBe('session:operate')
+    expect(rpcScopes['browser.cookies.preview']).toBe('settings:admin')
   })
 })

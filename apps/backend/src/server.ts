@@ -97,7 +97,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
   let environment: EnvironmentService | undefined;
   const browserEngine = new BrowserEngine({ dataDir: config.paths.dataDir,
     desktop: new DesktopBrowserChannel(options.desktopBrowserParent === true),
-    resolveSession: id => { const descriptor = swarmManager?.getAgent(id); return descriptor?.role === "manager" ? descriptor.profileId : undefined; },
+    resolveSession: id => {
+      const descriptor = swarmManager?.getAgent(id);
+      return descriptor?.role === "manager" && !swarmManager?.isAgentEffectivelyArchived(id) ? descriptor.profileId : undefined;
+    },
   });
   try {
     await seedBuiltins(config.paths.dataDir);

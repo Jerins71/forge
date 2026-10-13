@@ -1,0 +1,350 @@
+// Configuration sync across paired environments, driven by the built UI as the hub:
+//   - turning sync on for A, B and C settles their first sync without conflicts;
+//   - a worker preset changed on A appears on B and C; a shared project's manager memory written on A
+//     appears on B, while C (another repository) shows that project as local only;
+//   - editing the presets on A and on B while B is offline is one visible conflict with both versions,
+//     settled with "Keep A", and B's replaced version is kept in its sync history;
+//   - "Ask an agent to resolve" starts a session on this machine, and the merged file written there
+//     resolves the conflict on every environment;
+//   - nothing outside the allowlist (secrets, auth) is ever copied.
+//   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
+//   pnpm exec playwright test scripts/environment-e2e/sync.spec.ts --config scripts/environment-e2e/playwright.config.ts
+import { createHash, randomUUID } from 'node:crypto'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
+import type { CommandReceipt, SessionSummary } from '@forge/protocol/environment-v2'
+import type { ConfigSyncManifest, ConfigSyncResolvePromptResponse } from '@forge/protocol'
+import { test as base } from './fixtures/test.js'
+import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
+import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
+import { exchangePairing } from '../../packages/cli/src/commands/pair.js'
+import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js'
+
+const evidenceRoot = join(repositoryRoot, '.internal/sync')
+const assertions: Record<string, unknown> = {}
+const renderErrors: string[] = []
+let fleet: UiFleet
+let manifest: FleetManifest
+let context: BrowserContext
+let sharedPage: Page
+const test = base.extend({ page: async ({}, use) => { await use(sharedPage) } })
+test.describe.configure({ mode: 'serial' })
+test.use({ environmentSuite: 'sync', screenshot: 'off', actionTimeout: 10_000 })
+
+const PRESETS = 'shared/config/worker-presets.json'
+const dataDir = (index: number) => manifest.environments[index]!.dataDir
+const read = (index: number, rel: string) => readFile(join(dataDir(index), rel), 'utf8').catch(() => null)
+async function write(index: number, rel: string, content: string) {
+  await mkdir(dirname(join(dataDir(index), rel)), { recursive: true })
+  await writeFile(join(dataDir(index), rel), content)
+}
+const presets = (names: string[]) => `${JSON.stringify({ version: 2, presets: names.map((name) => ({ name, provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high' })) }, null, 2)}\n`
+async function shot(page: Page, name: string, focus?: Locator) {
+  const path = join(evidenceRoot, `${name}.png`)
+  if (focus) { await focus.scrollIntoViewIfNeeded(); await focus.screenshot({ path }) }
+  else await page.screenshot({ path })
+  assertions[`screenshot:${name}`] = path
+}
+async function latestResolution(index: number) {
+  const dir = join(dataDir(index), 'shared/state/sync/resolutions')
+  return (await Promise.all((await readdir(dir)).map(id => readFile(join(dir, id, 'operation.json'), 'utf8').then(JSON.parse)))).sort((a, b) => b.at.localeCompare(a.at))[0]
+}
+async function completeResolution(index: number, operation: { id: string }, content: string) {
+  const dir = `shared/state/sync/resolutions/${operation.id}`
+  await write(index, `${dir}/result`, content)
+  await write(index, `${dir}/complete.json`, JSON.stringify({ hash: createHash('sha256').update(content).digest('hex') }))
+}
+async function launchWithoutClientRegistration(name: string) {
+  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const headers = { Authorization: `Bearer ${admin.bearer}`, 'content-type': 'application/json' }
+  const response = await fetch(`${fleet.a.baseUrl}/api/settings/sync/manifest`, { headers })
+  expect(response.ok).toBe(true)
+  const current = await response.json() as ConfigSyncManifest, key = `global/skills/discovery/${name}.md`, entry = current.entries[key]!
+  const prepared = await fetch(`${fleet.a.baseUrl}/api/settings/sync/resolve-prompt`, { method: 'POST', headers, body: JSON.stringify({ key, subject: name, expectedVersionId: entry.current, acknowledgedVersionIds: entry.heads.map(v => v.id), versions: entry.heads.map(version => ({ label: version.author, version })) }) })
+  expect(prepared.ok).toBe(true)
+  const prompt = await prepared.json() as ConfigSyncResolvePromptResponse
+  const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+  try {
+    await rpc.call('shell.subscribe', {})
+    const snapshot = await until<{ projects: { projectId: string }[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+    const commandId = randomUUID()
+    await rpc.call('session.launch', { commandId, projectId: snapshot!.projects[0]!.projectId, title: prompt.title, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: prompt.text, artifactIds: [] } })
+    const receipt = await until(() => rpc.call<CommandReceipt>('command.get', { commandId }), r => r.state !== 'accepted' && r.state !== 'running')
+    expect(receipt.state).toBe('succeeded')
+  } finally { rpc.close() }
+  return prompt
+}
+async function reopenSync() {
+  sharedPage = await context.newPage()
+  sharedPage.on('pageerror', error => renderErrors.push(error.message))
+  await sharedPage.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+  await syncNow(sharedPage)
+  return sharedPage
+}
+const syncNow = (page: Page) => page.getByRole('button', { name: 'Sync now' }).click()
+
+test.beforeAll(async ({ browser, environmentManifest }) => {
+  await mkdir(evidenceRoot, { recursive: true })
+  manifest = await readManifest(environmentManifest)
+  fleet = await openUiFleet(environmentManifest)
+  context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+  sharedPage = await context.newPage()
+  sharedPage.on('pageerror', error => renderErrors.push(error.message))
+})
+test.afterAll(async () => {
+  assertions.renderErrors = renderErrors
+  await writeFile(join(evidenceRoot, 'assertions.json'), `${JSON.stringify(assertions, null, 2)}\n`)
+  await context?.close(); await fleet?.dispose()
+})
+test.afterEach(() => { expect(renderErrors).toEqual([]) })
+
+test('turning sync on settles the first sync without conflicts', async ({ page }) => {
+  // A secret on A must never travel.
+  await write(0, 'shared/config/secrets.json', '{"FIXTURE_SECRET":"never-synced"}\n')
+  // The browser reaches B and C once they are paired.
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
+  for (const environment of [fleet.b, fleet.c]) {
+    const link = await fleet.mintGrant(environment, 'link')
+    await page.getByRole('button', { name: 'Add a machine' }).click()
+    await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
+    await page.getByRole('button', { name: 'Pair', exact: true }).click()
+    await expect(page.getByTestId('pairing-success')).toContainText(environment.label)
+    await page.getByRole('button', { name: 'Done' }).click()
+  }
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+  await expect(page.getByTestId('settings-sync')).toBeVisible()
+  await shot(page, '01-sync-off')
+  await page.getByRole('switch', { name: 'Sync configuration' }).click()
+  for (const environment of [fleet.a, fleet.b, fleet.c]) await page.getByRole('checkbox', { name: `Sync ${environment.label}` }).check()
+  await syncNow(page)
+  await expect(page.getByTestId('sync-status')).toContainText('Up to date', { timeout: 30_000 })
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0)
+  expect(await read(1, 'shared/config/secrets.json')).toBeNull()
+  expect(await read(2, 'shared/config/secrets.json')).toBeNull()
+  assertions.firstSync = { presetsEqual: (await read(0, PRESETS)) === (await read(1, PRESETS)) }
+})
+
+test('a preset changed on A appears on B and C; shared project memory reaches B only', async ({ page }) => {
+  await write(0, PRESETS, presets(['fixture-worker', 'reviewer']))
+  const memory = `profiles/${fleet.a.sessionId}/sessions/${fleet.a.sessionId}/memory.md`
+  await write(0, memory, '# Manager memory\n- Remember: deploys need a changelog entry.\n')
+  await syncNow(page)
+  await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(presets(['fixture-worker', 'reviewer']))
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toBe(presets(['fixture-worker', 'reviewer']))
+  await expect.poll(() => read(1, memory), { timeout: 30_000 }).toContain('changelog entry')
+  // C holds another repository, so its project is local only and gets nothing from A's project.
+  expect(await read(2, memory)).not.toContain('changelog entry')
+  await expect(page.getByRole('list', { name: 'Local-only projects' })).toContainText(fleet.c.projectTitle)
+  await expect(page.getByRole('list', { name: 'Recent sync changes' })).toContainText('Worker presets')
+  await shot(page, '02-synced')
+  // The Worker presets screen on B shows the preset made on A.
+  assertions.presetOnB = (await read(1, PRESETS))?.includes('reviewer')
+})
+
+test('edits on both sides while B is offline become a conflict that "Keep A" settles', async ({ page }) => {
+  await fleet.stop(fleet.b)
+  await write(0, PRESETS, presets(['fixture-worker', 'reviewer', 'from-a']))
+  await syncNow(page)
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toContain('from-a')
+  await write(1, PRESETS, presets(['fixture-worker', 'reviewer', 'from-b']))
+  await fleet.start(fleet.b)
+  await expect.poll(async () => { await syncNow(page); return page.getByTestId('sync-conflict').count() }, { timeout: 60_000, intervals: [2_000] }).toBe(1)
+  const conflict = page.getByTestId('sync-conflict')
+  await expect(conflict).toContainText('Worker presets')
+  await conflict.getByRole('button', { name: /Compare/ }).click()
+  // One column per distinct version: A and C agree, B differs.
+  await expect(conflict.getByTestId('sync-conflict-version')).toHaveCount(2)
+  await expect(conflict.getByTestId('sync-conflict-version').first()).toContainText(`${fleet.a.label} · ${fleet.c.label}`)
+  await expect(conflict).toContainText('from-a')
+  await expect(conflict).toContainText('from-b')
+  // Both versions stay untouched while the conflict is open.
+  expect(await read(0, PRESETS)).toContain('from-a')
+  expect(await read(1, PRESETS)).toContain('from-b')
+  await shot(page, '03-conflict')
+  await shot(page, '03b-conflict-compare', page.locator('section').filter({ has: conflict }))
+  await conflict.getByRole('button', { name: `Keep ${fleet.a.label}` }).click()
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  await expect.poll(() => read(1, PRESETS)).toContain('from-a')
+  // B's own edit is kept in its sync history.
+  const history = join(dataDir(1), 'shared/state/sync/history')
+  const kept = await Promise.all((await readdir(history)).map((dir) => readFile(join(history, dir, 'global/worker-presets.json'), 'utf8').catch(() => '')))
+  expect(kept.some((text) => text.includes('from-b'))).toBe(true)
+  assertions.keepA = { bHistoryKeepsFromB: true }
+})
+
+test('"Ask an agent to resolve" starts a session here, and its merge resolves the conflict everywhere', async ({ page }) => {
+  await fleet.stop(fleet.b)
+  await write(0, PRESETS, presets(['fixture-worker', 'reviewer', 'from-a', 'second-a']))
+  await syncNow(page)
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toContain('second-a')
+  await write(1, PRESETS, presets(['fixture-worker', 'reviewer', 'from-a', 'second-b']))
+  await fleet.start(fleet.b)
+  await expect.poll(async () => { await syncNow(page); return page.getByTestId('sync-conflict').count() }, { timeout: 60_000, intervals: [2_000] }).toBe(1)
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
+  await expect(page.getByTestId('sync-conflict').getByRole('status')).toContainText(`An agent is merging this on ${fleet.a.label}`, { timeout: 30_000 })
+  await shot(page, '04-agent-asked', page.locator('section').filter({ has: page.getByTestId('sync-conflict') }))
+  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+  try {
+    await rpc.call('shell.subscribe', {})
+    const snapshot = await until<{ sessions: SessionSummary[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+    expect(snapshot!.sessions.some((s) => s.title.startsWith('Resolve sync conflict: Worker presets'))).toBe(true)
+  } finally { rpc.close() }
+  // The scripted provider cannot edit files, so the agent's merge is written as it would be.
+  const merged = presets(['fixture-worker', 'reviewer', 'from-a', 'second-a', 'second-b'])
+  await completeResolution(0, await latestResolution(0), merged)
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(merged)
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toBe(merged)
+  await shot(page, '05-resolved')
+  expect(await read(1, 'shared/config/secrets.json')).toBeNull()
+})
+
+test('a reconnecting hub discovers a completed agent operation after the launch reply was lost before registration', async ({ page }) => {
+  const name = 'lost-registration', rel = `skills/discovery/${name}.md`
+  await write(0, rel, 'A input'); await write(1, rel, 'B input'); await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  const prompt = await launchWithoutClientRegistration(name)
+  // The initiating client disappears with no registration or browser operation list.
+  await page.close(); await fleet.stop(fleet.a); await fleet.start(fleet.a)
+  await completeResolution(0, prompt.operation, 'Recovered without registration')
+  const reconnected = await reopenSync()
+  await expect(reconnected.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  for (let env = 0; env < 3; env++) await expect.poll(() => read(env, rel)).toBe('Recovered without registration')
+  assertions.lostRegistrationRecovered = prompt.operation.id
+  await shot(reconnected, '05b-lost-registration-recovered')
+})
+
+test('a different tab discovers both completed operations after stale browser lists overwrite each other', async ({ page }) => {
+  for (const name of ['tab-x', 'tab-y']) { await write(0, `skills/discovery/${name}.md`, `A-${name}`); await write(1, `skills/discovery/${name}.md`, `B-${name}`) }
+  await syncNow(page); await expect(page.getByTestId('sync-conflict')).toHaveCount(2)
+  const second = await context.newPage(); await second.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+  const x = await launchWithoutClientRegistration('tab-x'), y = await launchWithoutClientRegistration('tab-y')
+  // Legacy tabs persist independently from their stale empty snapshots, then disappear.
+  await page.evaluate(operation => localStorage.setItem('forge.configSync.resolutions.v2', JSON.stringify([{ environmentId: operation.environmentId, operation: operation.value }])), { environmentId: fleet.a.environmentId, value: x.operation })
+  await second.evaluate(operation => localStorage.setItem('forge.configSync.resolutions.v2', JSON.stringify([{ environmentId: operation.environmentId, operation: operation.value }])), { environmentId: fleet.a.environmentId, value: y.operation })
+  await page.close(); await second.close()
+  await completeResolution(0, x.operation, 'Recovered X'); await completeResolution(0, y.operation, 'Recovered Y')
+  const different = await reopenSync()
+  await expect(different.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  for (let env = 0; env < 3; env++) for (const [name, text] of [['tab-x', 'Recovered X'], ['tab-y', 'Recovered Y']]) await expect.poll(() => read(env, `skills/discovery/${name}.md`)).toBe(text)
+  assertions.staleTabListsRecovered = [x.operation.id, y.operation.id]
+  await shot(different, '05c-stale-tab-lists-recovered')
+})
+
+test('a file over the size cap is listed as not synced instead of disappearing', async ({ page }) => {
+  await write(0, 'skills/big-skill/SKILL.md', '# Big skill\n')
+  await write(0, 'skills/big-skill/model.bin', 'small first')
+  await syncNow(page)
+  await expect.poll(() => read(1, 'skills/big-skill/model.bin'), { timeout: 30_000 }).toBe('small first')
+  await write(0, 'skills/big-skill/model.bin', 'x'.repeat(2 * 1024 * 1024 + 1))
+  await syncNow(page)
+  await expect.poll(() => read(1, 'skills/big-skill/SKILL.md'), { timeout: 30_000 }).toBe('# Big skill\n')
+  const skipped = page.getByRole('list', { name: 'Files not synced' })
+  await expect(skipped).toContainText('model.bin')
+  await expect(skipped).toContainText('Larger than 2 MB')
+  await expect(page.getByTestId('sync-status')).toContainText('1 file skipped')
+  expect(await read(1, 'skills/big-skill/model.bin')).toBe('small first')
+  await shot(page, '06-not-synced', page.locator('section').filter({ has: skipped }))
+})
+
+test('History restores a replaced version on its machine, and it syncs out like an edit', async ({ page }) => {
+  // B's presets were replaced by the agent's merge; its own version before that is in B's history.
+  const before = presets(['fixture-worker', 'reviewer', 'from-a', 'second-b'])
+  await expect(page.getByRole('list', { name: 'Sync history' })).toBeVisible({ timeout: 30_000 })
+  await shot(page, '07-history', page.locator('section').filter({ has: page.getByRole('list', { name: 'Sync history' }) }))
+  await page.getByRole('button', { name: new RegExp(`^Restore Worker presets on ${fleet.b.label} `) }).first().click()
+  await expect(page.getByRole('list', { name: 'Sync history' }).locator('..').getByRole('status')).toContainText(`Restored Worker presets on ${fleet.b.label}`)
+  await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect.poll(() => read(0, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect.poll(() => read(2, PRESETS), { timeout: 30_000 }).toBe(before)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0)
+})
+
+test('with two windows open only one syncs, and Sync now in the other takes over', async ({ page }) => {
+  const second = await context.newPage()
+  second.on('pageerror', error => renderErrors.push(error.message))
+  try {
+    await second.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+    // The first window holds the hub lease, so the second defers on its own passes.
+    await expect(second.getByTestId('sync-status')).toContainText('Another open Forge window is syncing', { timeout: 30_000 })
+    await shot(second, '08-second-window-defers', second.getByTestId('settings-sync').locator('section').first())
+    await second.getByRole('button', { name: 'Sync now' }).click()
+    await expect(second.getByTestId('sync-status')).toContainText('Last synced', { timeout: 30_000 })
+    // The first window now defers on its next timed pass.
+    await expect(page.getByTestId('sync-status')).toContainText('Another open Forge window is syncing', { timeout: 30_000 })
+    // Changes still flow through the window that holds the lease.
+    await write(0, PRESETS, presets(['fixture-worker', 'after-handover']))
+    await second.getByRole('button', { name: 'Sync now' }).click()
+    await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(presets(['fixture-worker', 'after-handover']))
+  } finally {
+    await second.close()
+  }
+})
+
+
+test('two agent operations on A keep their own inputs when C rejoins', async ({ page }) => {
+  await fleet.stop(fleet.c); await fleet.stop(fleet.b)
+  await write(0, PRESETS, presets(['fixture-worker', 'merge-a']))
+  await syncNow(page)
+  await write(1, PRESETS, presets(['fixture-worker', 'merge-b']))
+  await fleet.start(fleet.b)
+  await expect.poll(async () => { await syncNow(page); return page.getByTestId('sync-conflict').count() }, { timeout: 60_000, intervals: [2_000] }).toBe(1)
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
+  await expect(page.getByTestId('sync-conflict').getByRole('status')).toContainText('An agent is merging')
+  const ab = await latestResolution(0)
+  await write(2, PRESETS, presets(['fixture-worker', 'offline-c']))
+  await fleet.start(fleet.c)
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.c.label}` })).toBeVisible({ timeout: 30_000 })
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
+  await expect.poll(async () => (await latestResolution(0)).id).not.toBe(ab.id)
+  const abc = await latestResolution(0)
+  await completeResolution(0, ab, presets(['fixture-worker', 'merge-a', 'merge-b']))
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  expect(await read(2, PRESETS)).toContain('offline-c')
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Compare' }).click()
+  await expect(page.getByTestId('sync-conflict-version')).toHaveCount(2)
+  await completeResolution(0, abc, presets(['fixture-worker', 'stale-abc-result']))
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  expect(await read(2, PRESETS)).toContain('offline-c')
+  assertions.overlappingResolutionOperations = { ab: ab.id, abc: abc.id, staleResultRefused: true }
+  await shot(page, '09-late-c-preserved')
+  await page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.a.label}` }).click()
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  assertions.lateThirdHeadPreserved = true
+})
+
+test('a tombstone reaches an environment that never had the file', async ({ page }) => {
+  const rel = 'skills/deleted-before-join/SKILL.md'
+  await fleet.stop(fleet.c)
+  await write(0, rel, '# A file before deletion')
+  await syncNow(page)
+  await expect.poll(() => read(1, rel), { timeout: 30_000 }).toBe('# A file before deletion')
+  await rm(join(dataDir(0), rel))
+  await syncNow(page)
+  await expect.poll(() => read(1, rel), { timeout: 30_000 }).toBeNull()
+  await fleet.start(fleet.c)
+  await syncNow(page)
+  await expect(page.getByTestId('sync-status')).toContainText('Last synced', { timeout: 30_000 })
+  expect(await read(2, rel)).toBeNull()
+  const state = JSON.parse((await read(2, 'shared/state/sync/state.json'))!)
+  expect(state.entries['global/skills/deleted-before-join/SKILL.md'].current).not.toBeNull()
+  assertions.tombstoneReachedNewJoiner = true
+})
+
+test('session-only clients cannot read sync manifests, files or history through HTTP', async () => {
+  const environment = manifest.environments[0]!
+  const admin = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
+  const grant = await fixtureRpcOnce(environment.baseUrl, admin, 'access.grant.create', { kind: 'code', label: 'Sync scope regression', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl })
+  const paired = await exchangePairing({ baseUrl: environment.baseUrl, environmentId: admin.environmentId, credential: { kind: 'code', code: grant.code }, deviceName: 'Sync restricted fixture', deviceKind: 'cli', scopes: ['session:read'] })
+  const headers = { Authorization: `Bearer ${paired.bearerToken}` }
+  for (const path of ['manifest', 'file?key=global%2Fskills%2Fbig-skill%2FSKILL.md', 'history', 'resolutions']) {
+    expect((await fetch(`${environment.baseUrl}/api/settings/sync/${path}`, { headers })).status).toBe(403)
+  }
+  assertions.readScopeEnforced = true
+})

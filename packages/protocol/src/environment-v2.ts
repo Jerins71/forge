@@ -90,6 +90,8 @@ export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItem
 export const EnvironmentCapabilitiesSchema = O({
   /** Playwright tabs and live view are available on this environment. */
   browserEngine: Type.Optional(Type.Boolean()),
+  /** Causal configuration sync; absent capabilities never receive sync requests. */
+  configSync: Type.Optional(Type.Integer({ minimum: 1 })),
   shellResume: Type.Boolean(),
   sessionDetail: Type.Boolean(),
   durableCommands: Type.Boolean(),
@@ -124,6 +126,8 @@ export type ProjectRef = Static<typeof ProjectRefSchema>
 export type SessionRef = Static<typeof SessionRefSchema>
 
 export const RepositoryIdentitySchema = O({
+  /** Backend verified host/full-path identity suitable for explicit configuration sync. */
+  verifiedForSync: Type.Optional(Type.Boolean()),
   // A grouping hint, never an access grant or a claim of matching content.
   canonicalRemote: Type.String({ minLength: 1, maxLength: 512 }),
   subpath: Type.String({ maxLength: 256 }), // slash-separated, '' at repository root
@@ -516,6 +520,7 @@ export const rpcSchemas = {
   'browser.screencast.ack': defineRpc(B.ack, V2Empty),
   'browser.cookies.preview': defineRpc(B.preview, BrowserCookiePreviewSchema),
   'browser.cookies.apply': defineRpc(B.apply, BrowserCookieAuditSchema),
+  'browser.cookies.cancel': defineRpc(B.cancel, V2Empty),
   'browser.cookies.prepareSend': defineRpc(B.prepareSend, BrowserCookieTransferSchema),
   'browser.cookies.receive': defineRpc(B.receive, BrowserCookieAuditSchema),
   'browser.cookies.audit': defineRpc(B.session, BrowserCookieAuditSchema),
@@ -556,7 +561,7 @@ export const rpcScopes = {
   'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.input': 'session:operate',
   'browser.tabs.recording.start': 'session:operate', 'browser.tabs.recording.stop': 'session:operate',
   'browser.screencast.subscribe': 'session:read', 'browser.screencast.ack': 'session:read',
-  'browser.cookies.preview': 'session:operate', 'browser.cookies.apply': 'session:operate', 'browser.cookies.prepareSend': 'session:operate', 'browser.cookies.receive': 'session:operate', 'browser.cookies.audit': 'session:read', 'browser.cookies.forget': 'session:operate',
+  'browser.cookies.preview': 'settings:admin', 'browser.cookies.apply': 'settings:admin', 'browser.cookies.cancel': 'settings:admin', 'browser.cookies.prepareSend': 'settings:admin', 'browser.cookies.receive': 'settings:admin', 'browser.cookies.audit': 'session:read', 'browser.cookies.forget': 'session:operate',
   'projectAgent.get': 'session:read', 'projectAgent.references.list': 'session:read', 'projectAgent.reference.read': 'session:read',
   'projectAgent.sharing.get': 'session:read', 'projectAgent.directory': 'workspace:read',
   'projectAgent.set': 'session:operate', 'projectAgent.sharing.set': 'session:operate', 'projectAgent.recommend': 'session:operate', 'projectAgent.operation.get': 'session:operate',

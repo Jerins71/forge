@@ -60,3 +60,13 @@ describe("controlled workspaces with real Git", () => {
     expect(normalizeRepositoryRemote("file:///tmp/repo")).toBeNull();
   });
 });
+
+// Relative SSH/scp paths depend on the login user's home and are never cross-machine authority.
+it('rejects ambiguous SSH homes and preserves full repository namespaces', () => {
+  expect(normalizeRepositoryRemote('alice@build.example:repo.git')).toBeNull();
+  expect(normalizeRepositoryRemote('bob@build.example:repo.git')).toBeNull();
+  expect(normalizeRepositoryRemote('ssh://alice@build.example/~/repo.git')).toBeNull();
+  expect(normalizeRepositoryRemote('ssh://alice@build.example/srv/repos/team/repo.git')).toBe('build.example/srv/repos/team/repo');
+  expect(normalizeRepositoryRemote('git@github.com:owner/repo.git')).toBe('github.com/owner/repo');
+  expect(normalizeRepositoryRemote('https://github.com/fork/repo.git')).toBe('github.com/fork/repo');
+});

@@ -697,3 +697,7 @@ function canonicalInstallationPath(value: string): string {
 export function getBrowserRuntimeDir(dataDir: string): string { return join(getManagedRuntimesDir(dataDir), "browser"); }
 export function getBrowserProfileDir(dataDir: string, profileId: string): string { return join(getProfileDir(dataDir, profileId), "browser", "profile"); }
 export function getBrowserCookieAuditPath(dataDir: string, profileId: string): string { return join(getProfileDir(dataDir, profileId), "browser", "imported-sites.json"); }
+/** Configuration sync state: agreed base hashes, open conflicts and replaced versions. */
+export function getConfigSyncDir(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "sync");
+}

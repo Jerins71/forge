@@ -2,8 +2,9 @@ import { restrictChromeCookieImportsToFixtures } from '../../../apps/backend/src
 import { installEnvironmentParentBootstrap } from '../../../apps/backend/src/environment/parent-bootstrap.js';
 import { readFile, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 import { createConfig } from '../../../apps/backend/src/config.js';
-import { saveWorkerPresetSettings } from '../../../apps/backend/src/swarm/specialists/worker-presets.js';
+import { getWorkerPresetsPath, saveWorkerPresetSettings } from '../../../apps/backend/src/swarm/specialists/worker-presets.js';
 import { startServer, type StartedServer } from '../../../apps/backend/src/server.js';
 import { getNativeCodexHome, getSharedAuthFilePath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import { installHardeningHooks } from './hardening-hooks.js';
@@ -57,7 +58,8 @@ try { await symlink(fixtureHome, nativeHome, process.platform === 'win32' ? 'jun
 catch (error) {
   if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || await realpath(nativeHome) !== await realpath(fixtureHome)) throw error;
 }
-await saveWorkerPresetSettings(config.paths.dataDir, { version: 2, presets: [
+// Seeded once; a restart keeps the presets the environment has since (sync relies on that).
+if (!existsSync(getWorkerPresetsPath(config.paths.dataDir))) await saveWorkerPresetSettings(config.paths.dataDir, { version: 2, presets: [
   { name: 'fixture-worker', provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high', note: 'Synthetic E2E worker.' },
 ] }, () => true);
 // FORGE_E2E_DEFAULT_LABEL names the one environment that keeps its default (hostname) label.

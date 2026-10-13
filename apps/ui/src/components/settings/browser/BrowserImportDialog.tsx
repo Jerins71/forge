@@ -55,7 +55,11 @@ export function BrowserImportDialog({ open, onOpenChange, engine, environmentId,
     setStep('source'); setPreview(null); setPreviewError(null); setSelected(new Set())
     setSendTo(null); setError(null); setOutcome(null); setBusy(false)
   }
-  const close = () => { reset(); onOpenChange(false) }
+  const close = () => {
+    // An unused preview still holds the cookies read from Chrome on that machine; let it go now.
+    if (preview && step !== 'result') void engine.cancel(project.sessionId, preview.importId).catch(() => undefined)
+    reset(); onOpenChange(false)
+  }
 
   const readSites = async () => {
     setBusy(true); setError(null); setPreviewError(null)
@@ -79,6 +83,7 @@ export function BrowserImportDialog({ open, onOpenChange, engine, environmentId,
       // receives too; otherwise the selection is applied directly.
       const target = sendTo ? targetProjects.find((candidate) => candidate.projectId === sendTo.projectId)?.sessionId : undefined
       if (sendTo && (!targetEngine || !target)) throw new Error('That project has no thread on the other machine yet. Start one there first.')
+      if (sendTo && !targetEngine?.canImport) throw new Error(`This app's pairing with ${targetMachine} doesn't include Change settings, which receiving sign-ins needs. Re-pair ${targetMachine} with Change settings to send sites there.`)
       // The transfer lives only in this call: never stored, logged, or shown.
       const transfer = sendTo ? await engine.prepareSend(project.sessionId, preview.importId, domains) : null
       const local = transfer ? await engine.receive(project.sessionId, transfer) : await engine.apply(project.sessionId, preview.importId, domains)

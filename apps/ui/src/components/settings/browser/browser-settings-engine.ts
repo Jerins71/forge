@@ -36,6 +36,10 @@ export interface BrowserSettingsEngine {
   apply(sessionId: string, importId: string, domains: string[]): Promise<BrowserImportResult>
   prepareSend(sessionId: string, importId: string, domains: string[]): Promise<BrowserCookieTransfer>
   receive(sessionId: string, transfer: BrowserCookieTransfer): Promise<BrowserImportResult>
+  /** Drops an unused preview, so the machine stops holding the cookies it read from Chrome. */
+  cancel(sessionId: string, importId: string): Promise<void>
+  /** Reading, importing and receiving Chrome sign-ins need this app's Change settings permission. */
+  readonly canImport: boolean
   openTab(sessionId: string, url: string): Promise<void>
 }
 
@@ -63,6 +67,8 @@ export function createBrowserSettingsEngine(client: EnvironmentClient): BrowserS
     apply: async (sessionId, importId, domains) => result(await engine.request('browser.cookies.apply', { sessionId, importId, domains }), domains),
     prepareSend: (sessionId, importId, domains) => engine.request('browser.cookies.prepareSend', { sessionId, importId, domains }),
     receive: async (sessionId, transfer) => result(await engine.request('browser.cookies.receive', { sessionId, transfer }), transfer.domains),
+    async cancel(sessionId, importId) { await engine.request('browser.cookies.cancel', { sessionId, importId }) },
+    canImport: client.deviceSession()?.scopes.includes('settings:admin') ?? false,
     async openTab(sessionId, url) { await engine.request('browser.tabs.open', { sessionId, url: normalizeBrowserAddress(url), activate: true }) },
   }
 }
