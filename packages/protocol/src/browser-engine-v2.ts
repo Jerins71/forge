@@ -15,12 +15,19 @@ export const BrowserEngineTabSchema = O({
   url: Type.String({ maxLength: 8192 }), title: Type.String({ maxLength: 4096 }),
   loading: Type.Boolean(), canGoBack: Type.Boolean(), canGoForward: Type.Boolean(),
   viewport: BrowserEngineViewportSchema, controller: E('human', 'agent', 'none'),
+  agentAction: Type.Optional(Type.String({ maxLength: 256 })),
+  agentCursor: Type.Optional(O({ x: Type.Number({ minimum: 0 }), y: Type.Number({ minimum: 0 }), phase: E('move', 'click'), sequence })),
+  faviconUrl: Type.Optional(Type.String({ maxLength: 8192 })),
+  errorCode: Type.Optional(E('crashed', 'navigation_failed', 'unreachable', 'execution_failed')),
   recordingId: Type.Optional(id), error: Type.Optional(Type.String({ maxLength: 1024 })),
 })
 export type BrowserEngineTab = Static<typeof BrowserEngineTabSchema>
 export const BrowserEngineSnapshotSchema = O({ sessionId: id, projectId: id,
   tabs: Type.Array(BrowserEngineTabSchema, { maxItems: 100 }),
-  activeTabId: Type.Union([id, Type.Null()]), revision: sequence })
+  activeTabId: Type.Union([id, Type.Null()]), revision: sequence,
+  browserEngineState: Type.Optional(E('ready', 'missing', 'installing', 'failed')),
+  browserEngineMessage: Type.Optional(Type.String({ maxLength: 1024 })) })
+export const BrowserEngineSetupSchema = O({ browserEngineState: E('ready', 'missing', 'installing', 'failed'), browserEngineMessage: Type.Optional(Type.String({ maxLength: 1024 })) })
 export type BrowserEngineSnapshot = Static<typeof BrowserEngineSnapshotSchema>
 export const BrowserEngineStreamSchema = O({ kind: Type.Literal('snapshot'), snapshot: BrowserEngineSnapshotSchema })
 export const BrowserEngineInputSchema = Type.Union([

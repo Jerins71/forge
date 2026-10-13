@@ -15,6 +15,11 @@ The new environment-v2 contract is `browserEngine: true` in capabilities,
 also carry `tabId`. `navigate` takes either `url` or `direction` (`back`, `forward`,
 `reload`). Tabs report `host: desktop | headless`, viewport and navigation state.
 The tabs stream starts with a snapshot and publishes replacement snapshots.
+Optional `agentAction` and `agentCursor` describe the current action and CSS-pixel
+cursor; both clear when it ends. Tabs also expose optional `faviconUrl` and
+`errorCode`. Snapshots expose `browserEngineState` (`missing`, `installing`,
+`ready`, `failed`) and an actionable `browserEngineMessage`. First use installs
+a missing shell automatically; `browser.engine.setup({})` starts/retries setup.
 Actions return current state directly and require `session:operate`; reads require
 `session:read`. The old singular `browser.tab.*` path is removed after acceptance.
 
