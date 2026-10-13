@@ -29,7 +29,7 @@ A project groups settings, memory, and resources for a manager.
 Project settings include:
 
 - **System prompt** — base instructions for the manager. You can customize this or use the default.
-- **Skills** — browse and configure optional skill-backed capabilities such as Brave search (exact, navigational, freshness, or URL-oriented lookup), Exa search (semantic, conceptual, or multi-source discovery), image generation, and the separate `agent-browser` CLI workflow. These search skills are available when a task needs them; they are not used on every turn. The Automatic Browser is local to Forge Desktop, not a Skill; optional Chrome setup lives under **Use Chrome with Forge**.
+- **Skills** — browse and configure optional skill-backed capabilities such as Brave search (exact, navigational, freshness, or URL-oriented lookup), Exa search (semantic, conceptual, or multi-source discovery), image generation, and the separate `agent-browser` CLI workflow. These search skills are available when a task needs them; they are not used on every turn. The browser is built in, not a Skill; each project's sign-ins live under **Settings → Browser**.
 - **Worker presets** — the saved name, model, reasoning level, and note the manager can pick for a worker.
 - **Memory** — project and session `memory.md` files for durable facts and decisions.
 

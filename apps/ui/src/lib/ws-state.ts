@@ -1,8 +1,6 @@
 import type {
   AgentContextUsage,
   AgentDescriptor,
-  BrowserHostConnectionSnapshot,
-  BrowserSessionSnapshot,
   AgentStatus,
   ConversationEntry,
   ConversationHistoryPageMetadata,
@@ -64,14 +62,6 @@ export interface ConversationBootstrapState {
   startedAt: number | null
   errorCode?: string
   errorMessage?: string
-}
-
-export interface BrowserPanelRevealRequest {
-  sessionAgentId: string
-  profileId: string
-  tabId: string
-  hostGeneration: number
-  sequence: number
 }
 
 export interface ManagerWsState {
@@ -162,18 +152,8 @@ export interface ManagerWsState {
   modelCacheVisualizationEnabled: boolean
   /** Local Builder projection for the currently subscribed project only. */
   remoteUpdateAwarenessSnapshot: RemoteUpdateAwarenessProjectSnapshot | null
-  /** Backend host metadata for the current transport epoch. */
-  browserHost: BrowserHostConnectionSnapshot
-  /** Canonical browser snapshots keyed by Forge manager session id. */
-  browserSessions: Record<string, BrowserSessionSnapshot>
-  /** True after the current host generation received its all-session hydration. */
-  browserHostHydrated: boolean
-  /** Durable unacknowledged intent projected onto the current authoritative host generation. */
-  browserPanelRevealRequest: BrowserPanelRevealRequest | null
   /** Latest authenticated local Stream Deck request for the desktop shell. */
   streamDeckNavigationRequest: StreamDeckNavigationRequestedEvent | null
-  /** Metadata is retained during reconnect but marked stale until bootstrap. */
-  browserMetadataStale: boolean
 }
 
 export function createInitialManagerWsState(targetAgentId: string | null): ManagerWsState {
@@ -239,18 +219,6 @@ export function createInitialManagerWsState(targetAgentId: string | null): Manag
     modelConfigChangeKey: 0,
     modelCacheVisualizationEnabled: false,
     remoteUpdateAwarenessSnapshot: null,
-    browserHost: {
-      connected: false,
-      hostId: null,
-      hostGeneration: null,
-      focused: false,
-      capabilities: null,
-      connectedAt: null,
-    },
-    browserSessions: {},
-    browserHostHydrated: false,
-    browserPanelRevealRequest: null,
     streamDeckNavigationRequest: null,
-    browserMetadataStale: false,
   }
 }
