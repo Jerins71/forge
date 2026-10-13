@@ -76,12 +76,11 @@ async function pairB(page: Page) {
   await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
   await page.getByRole('button', { name: 'Done' }).click()
 }
-/** The streamed page has painted and matches the panel's size (the engine re-lays it out after a resize). */
+/** The streamed desktop page has painted at its 1280×800 aspect ratio. */
 async function expectLiveFrame(page: Page) {
   await expect(canvas(page)).toHaveCSS('opacity', '1', { timeout: 30_000 })
   await expect.poll(() => canvas(page).evaluate((element: HTMLCanvasElement) => {
-    const box = element.getBoundingClientRect()
-    return Math.abs(element.width / box.width - element.height / box.height)
+    return Math.abs(element.width / element.height - 1280 / 800)
   }), { timeout: 15_000 }).toBeLessThan(0.05)
 }
 

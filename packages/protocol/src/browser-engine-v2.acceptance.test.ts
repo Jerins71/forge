@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { Value } from '@sinclair/typebox/value'
-import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema, DeviceSessionSchema } from './environment-v2.js'
+import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema, DeviceSessionSchema, EnvironmentCapabilitiesSchema } from './environment-v2.js'
 
 describe('environment browser engine wire contract', () => {
+  it('separates panel measurements, explicit sizes and resettable layout policy', () => {
+    expect(Value.Check(EnvironmentCapabilitiesSchema, { browserEngine: true, browserViewportModes: true, shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true })).toBe(true)
+    const input = { sessionId: 's', tabId: 't', viewport: { width: 560, height: 600 } }
+    for (const source of ['view', 'explicit']) expect(Value.Check(rpcSchemas['browser.tabs.resize'].input, { ...input, source })).toBe(true)
+    expect(Value.Check(rpcSchemas['browser.tabs.resize'].input, input)).toBe(true)
+    const mode = rpcSchemas['browser.tabs.setViewportMode']
+    expect(mode).toBeDefined()
+    expect(Value.Check(mode.input, { sessionId: 's', tabId: 't', mode: 'panel' })).toBe(true)
+    expect(Value.Check(mode.input, { sessionId: 's', tabId: 't', mode: 'custom' })).toBe(false)
+    expect(rpcScopes['browser.tabs.setViewportMode']).toBe('session:operate')
+    const tab = { tabId: 't', sessionId: 's', projectId: 'p', host: 'headless', url: '', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: { width: 1280, height: 800 }, controller: 'none' }
+    for (const viewportMode of ['desktop', 'panel', 'custom']) expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [{ ...tab, viewportMode }], activeTabId: 't', revision: 1 })).toBe(true)
+    expect(Value.Check(BrowserScreencastItemSchema, { kind: 'frame', tabId: 't', frameId: 1, data: 'jpeg', mimeType: 'image/jpeg', width: 560, height: 350, viewport: { width: 1280, height: 800 }, timestamp: 1 })).toBe(true)
+  })
+
   it('preserves a popup opener in the session tab inventory', () => {
     const tab = { tabId: 'popup', openerTabId: 'opener', sessionId: 's', projectId: 'p', host: 'headless', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: { width: 1280, height: 800 }, controller: 'none' }
     expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [tab], activeTabId: 'popup', revision: 1 })).toBe(true)

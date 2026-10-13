@@ -7,7 +7,7 @@ const allowedPermissions = new Set(['clipboard-read', 'clipboard-sanitized-write
 /** Physical pages only. Agent policy, tab state and all Playwright live in the
  * environment backend. The one child IPC channel is the only CDP authority. */
 export class DesktopBrowserHost {
-  private readonly tabs = new Map<string, { view: WebContentsView; inputDepth: number; relay: ReturnType<typeof createCdpRelayConnection> }>()
+  private readonly tabs = new Map<string, { view: WebContentsView; inputDepth: number; relay: ReturnType<typeof createCdpRelayConnection>; metrics?: Record<string, unknown> }>()
   private child?: ChildProcess
   private presented?: { tabId: string; window: BrowserWindow }
   attach(child: ChildProcess): () => void {
@@ -49,11 +49,17 @@ export class DesktopBrowserHost {
     else wc.debugger.attach('1.3')
     let target: { targetId: string; browserContextId?: string } | undefined
     const targetInfo = async () => { target ??= ((await wc.debugger.sendCommand('Target.getTargetInfo')) as { targetInfo: NonNullable<typeof target> }).targetInfo; return target }
-    const tab = { view, inputDepth: 0, relay: createCdpRelayConnection({
+    const tab: NonNullable<ReturnType<typeof this.tabs.get>> = { view, inputDepth: 0, relay: createCdpRelayConnection({
       send: async (method, params, sessionId) => {
         // Storage commands on a page debugger address Electron's default session.
         // Its Network cookie commands are scoped to this WebContentsView's partition.
         method = ({ 'Storage.getCookies': 'Network.getAllCookies', 'Storage.setCookies': 'Network.setCookies', 'Storage.clearCookies': 'Network.clearBrowserCookies' } as Record<string, string>)[method] ?? method
+        if (method === 'Emulation.setDeviceMetricsOverride' && !sessionId) { tab.metrics = { ...params }; params = this.scaledMetrics(command.tabId, tab) }
+        const scale = Number(this.scaledMetrics(command.tabId, tab).scale)
+        // Chromium's view-image scale affects dispatched input, while DOM quads
+        // and layout metrics remain in page CSS pixels.
+        // Keep the private relay in page CSS pixels, as Playwright expects.
+        if (method === 'Input.dispatchMouseEvent' && scale !== 1) params = { ...params, x: Number(params.x) * scale, y: Number(params.y) * scale }
         const input = method.startsWith('Input.'); if (input) tab.inputDepth++
         try { return await wc.debugger.sendCommand(method, params, sessionId) } finally { if (input) tab.inputDepth-- }
       },
@@ -89,8 +95,18 @@ export class DesktopBrowserHost {
     if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.x < 0 || bounds.y < 0 || bounds.width <= 0 || bounds.height <= 0 || bounds.x + bounds.width > width + 1 || bounds.y + bounds.height > height + 1) throw new Error('Browser panel bounds are outside the window.')
     if (this.presented?.tabId !== input.tabId || this.presented.window !== window) { this.hide(); window.contentView.addChildView(tab.view); this.presented = { tabId: input.tabId, window } }
     tab.view.setBounds({ x: Math.round(bounds.x), y: Math.round(bounds.y), width: Math.round(bounds.width), height: Math.round(bounds.height) })
+    this.applyScale(input.tabId, tab)
   }
-  hide() { if (!this.presented) return; const tab = this.tabs.get(this.presented.tabId); if (tab && !this.presented.window.isDestroyed()) this.presented.window.contentView.removeChildView(tab.view); this.presented = undefined }
+  hide() { if (!this.presented) return; const tab = this.tabs.get(this.presented.tabId); if (tab && !this.presented.window.isDestroyed()) this.presented.window.contentView.removeChildView(tab.view); const tabId = this.presented.tabId; this.presented = undefined; if (tab) this.applyScale(tabId, tab) }
+  private scaledMetrics(tabId: string, tab: NonNullable<ReturnType<typeof this.tabs.get>>) {
+    const metrics = tab.metrics ?? {}; const width = Number(metrics.width), height = Number(metrics.height)
+    const bounds = tab.view.getBounds()
+    const scale = this.presented?.tabId === tabId && width > 0 && height > 0 ? Math.min(1, bounds.width / width, bounds.height / height) : 1
+    return { ...metrics, scale }
+  }
+  private applyScale(tabId: string, tab: NonNullable<ReturnType<typeof this.tabs.get>>) {
+    if (tab.metrics && !tab.view.webContents.isDestroyed()) void tab.view.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', this.scaledMetrics(tabId, tab)).catch(() => {})
+  }
   private close(tabId: string) { if (this.presented?.tabId === tabId) this.hide(); const tab = this.tabs.get(tabId); this.tabs.delete(tabId); if (tab && !tab.view.webContents.isDestroyed()) tab.view.webContents.close() }
 }
 function validViewport(viewport: { width: number; height: number }) { return viewport && Number.isInteger(viewport.width) && Number.isInteger(viewport.height) && viewport.width >= 240 && viewport.height >= 240 && viewport.width <= 3840 && viewport.height <= 3840 }

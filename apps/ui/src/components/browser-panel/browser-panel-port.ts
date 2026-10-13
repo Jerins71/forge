@@ -59,7 +59,7 @@ export interface BrowserPanelBounds {
 }
 
 export interface BrowserScreencastViewport {
-  /** CSS pixels of the area the page should lay out into. */
+  /** CSS pixels of the viewer box; the page has its own independent viewport. */
   width: number
   height: number
   deviceScaleFactor: number
@@ -112,7 +112,7 @@ export interface BrowserPanelPort {
   /** Native surface: where the active tab's view goes in window coordinates, or null to hide it. */
   setNativeBounds?(tabId: string, bounds: BrowserPanelBounds | null): void
 
-  /** Screencast surface: frames for one tab, laid out at `viewport`. */
+  /** Screencast surface: frames for one tab, scaled to fit the viewer `viewport`. */
   subscribeFrames?(
     tabId: string,
     viewport: BrowserScreencastViewport,

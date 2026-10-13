@@ -31,7 +31,8 @@ export function createBrowserEngineRpc(engine: BrowserEngine, cookies?: import("
       case 'browser.tabs.activate': { const input = raw as RpcInput<'browser.tabs.activate'>; output = await engine.activate(input.sessionId, input.tabId); break }
       case 'browser.tabs.close': { const input = raw as RpcInput<'browser.tabs.close'>; output = await engine.close(input.sessionId, input.tabId); break }
       case 'browser.tabs.navigate': { const input = raw as RpcInput<'browser.tabs.navigate'>; output = await engine.navigate(input.sessionId, input.tabId, input); break }
-      case 'browser.tabs.resize': { const input = raw as RpcInput<'browser.tabs.resize'>; output = await engine.resize(input.sessionId, input.tabId, input.viewport); break }
+      case 'browser.tabs.setViewportMode': { const input = raw as RpcInput<'browser.tabs.setViewportMode'>; output = await engine.setViewportMode(input.sessionId, input.tabId, input.mode); break }
+      case 'browser.tabs.resize': { const input = raw as RpcInput<'browser.tabs.resize'>; output = await engine.resize(input.sessionId, input.tabId, input.viewport, input.source); break }
       case 'browser.tabs.input': { const input = raw as RpcInput<'browser.tabs.input'>; await engine.input(input.sessionId, input.tabId, input.input); output = {}; break }
       case 'browser.tabs.recording.start': { const input = raw as RpcInput<'browser.tabs.recording.start'>; output = await engine.recordingStart(input.sessionId, input.tabId); break }
       case 'browser.tabs.recording.stop': { const input = raw as RpcInput<'browser.tabs.recording.stop'>; output = await engine.recordingStop(input.sessionId, input.tabId); break }

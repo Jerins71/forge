@@ -18,11 +18,14 @@ import { DesktopBrowserChannel } from './desktop-browser-channel.js'
 interface LiveTab {
   state: BrowserEngineTab; page: Page; cdp: CDPSession; dispose(): Promise<void>
   closing?: boolean; actionEpoch: number; action?: AbortController; actionTail: Promise<unknown>; cursorSequence: number
+  viewSize?: BrowserEngineTab['viewport']; viewportTail?: Promise<unknown>
   recording?: { recordingId: string; startedAt: string; encoder: BrowserRecording; cast: { release(): Promise<void> }; work: Promise<void>; error?: Error }
   console: BrowserConsoleEntry[]; network: BrowserNetworkEntry[]; stream?: ScreencastHub
 }
 interface Session { closed?: boolean; snapshot: BrowserEngineSnapshot; tabs: Map<string, LiveTab>; popups: Set<Promise<void>>; write: Promise<void> }
-interface Viewer { send(item: BrowserScreencastItem): void; pending?: number; last: number }
+interface CastFrame { data: string; metadata: { timestamp?: number; deviceWidth?: number; deviceHeight?: number }; sessionId: number }
+interface CastOptions { maxWidth?: number; maxHeight?: number; quality?: number }
+interface Viewer { send(item: BrowserScreencastItem): void; options: CastOptions; pending?: number; last: number; encoding?: boolean }
 class ScreencastHub {
   private readonly viewers = new Set<Viewer>()
   private latest?: Extract<BrowserScreencastItem, { kind: 'frame' }>
@@ -32,7 +35,7 @@ class ScreencastHub {
   readonly ready: Promise<void>
   private markReady!: () => void
   private markFailed!: (error: unknown) => void
-  private readonly onFrame: (frame: { data: string; metadata: { timestamp?: number }; sessionId: number }) => void
+  private readonly onFrame: (frame: CastFrame) => void
   constructor(private readonly tab: LiveTab) {
     this.ready = new Promise<void>((resolve, reject) => { this.markReady = resolve; this.markFailed = reject }); this.ready.catch(() => {})
     this.onFrame = frame => {
@@ -43,33 +46,58 @@ class ScreencastHub {
     }
     tab.cdp.on('Page.screencastFrame', this.onFrame)
   }
-  async start(options: { maxWidth?: number; maxHeight?: number; quality?: number }) {
+  async start() {
     try {
       const deadline = Date.now() + 15000
       while (true) {
         await this.tab.page.waitForLoadState('domcontentloaded', { timeout: Math.max(1, deadline - Date.now()) })
-        try { await this.tab.cdp.send('Page.startScreencast', { format: 'jpeg', quality: options.quality ?? 75, maxWidth: options.maxWidth ?? 1280, maxHeight: options.maxHeight ?? 1280, everyNthFrame: 1 }); break }
+        try { await this.tab.cdp.send('Page.startScreencast', { format: 'jpeg', quality: 85, maxWidth: 3840, maxHeight: 3840, everyNthFrame: 1 }); break }
         catch (error) { if (this.tab.page.isClosed() || Date.now() >= deadline) throw error; await new Promise(resolve => setTimeout(resolve, 50)) }
       }
       this.markReady()
     } catch (error) { this.markFailed(error); throw error }
   }
-  private async frame(frame: { data: string; metadata: { timestamp?: number } }) {
-    if (this.stopped || frame.data.length > 800000) return
+  private async frame(frame: CastFrame) {
+    if (this.stopped) return
+    const viewport = { ...this.tab.state.viewport }, frameId = ++this.sequence
     const metadata = await sharp(Buffer.from(frame.data, 'base64')).metadata()
     if (this.stopped) return
     if (!metadata.width || !metadata.height || metadata.width > 3840 || metadata.height > 3840) {
       if (!this.invalidFrame) for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'error', message: 'Live view received an invalid frame. Retry the view.' })
       this.invalidFrame = true; return
     }
+    let data = frame.data, width = metadata.width, height = metadata.height
+    const { deviceWidth, deviceHeight } = frame.metadata
+    if (this.tab.state.host === 'desktop' && deviceWidth && deviceHeight) {
+      // A presented native view includes space outside its scaled desktop page.
+      // Crop that padding before a remote viewer maps the image back to page CSS.
+      const scale = Math.min(1, deviceWidth / viewport.width, deviceHeight / viewport.height)
+      const contentWidth = Math.max(1, Math.min(width, Math.round(viewport.width * scale * width / deviceWidth)))
+      const contentHeight = Math.max(1, Math.min(height, Math.round(viewport.height * scale * height / deviceHeight)))
+      if (contentWidth !== width || contentHeight !== height) {
+        data = (await sharp(Buffer.from(data, 'base64')).extract({ left: 0, top: 0, width: contentWidth, height: contentHeight }).jpeg({ quality: 85 }).toBuffer()).toString('base64')
+        width = contentWidth; height = contentHeight
+      }
+    }
+    if (this.stopped || frameId < (this.latest?.frameId ?? 0)) return
     this.invalidFrame = false
-    this.latest = { kind: 'frame', tabId: this.tab.state.tabId, frameId: ++this.sequence, data: frame.data, mimeType: 'image/jpeg', width: metadata.width, height: metadata.height, timestamp: frame.metadata.timestamp ?? Date.now() / 1000 }
+    this.latest = { kind: 'frame', tabId: this.tab.state.tabId, frameId, data, mimeType: 'image/jpeg', width, height, viewport, timestamp: frame.metadata.timestamp ?? Date.now() / 1000 }
     for (const viewer of this.viewers) this.deliver(viewer)
   }
-  private deliver(viewer: Viewer) { if (!this.latest || viewer.pending !== undefined || this.latest.frameId <= viewer.last) return; viewer.pending = this.latest.frameId; viewer.last = this.latest.frameId; viewer.send(this.latest) }
-  attach(send: Viewer['send']) {
-    const viewer: Viewer = { send, last: 0 }; this.viewers.add(viewer)
-    send({ kind: 'state', tabId: this.tab.state.tabId, state: this.invalidFrame ? 'error' : 'ready', ...(this.invalidFrame ? { message: 'Browser viewport is too small for live view. Resize it to at least 240 × 240.' } : {}) }); this.deliver(viewer)
+  private deliver(viewer: Viewer) {
+    if (!this.latest || viewer.pending !== undefined || viewer.encoding || this.latest.frameId <= viewer.last) return
+    const frame = this.latest; viewer.encoding = true
+    void sharp(Buffer.from(frame.data, 'base64')).resize({ width: viewer.options.maxWidth ?? 1280, height: viewer.options.maxHeight ?? 1280, fit: 'inside', withoutEnlargement: true }).jpeg({ quality: viewer.options.quality ?? 75 }).toBuffer({ resolveWithObject: true }).then(image => {
+      if (this.stopped || !this.viewers.has(viewer)) return
+      const data = image.data.toString('base64')
+      if (data.length > 800000) { viewer.last = frame.frameId; viewer.send({ kind: 'state', tabId: frame.tabId, state: 'error', message: 'Live view frame exceeds its size budget. Use a smaller view.' }); return }
+      viewer.pending = frame.frameId; viewer.last = frame.frameId
+      viewer.send({ ...frame, data, width: image.info.width, height: image.info.height })
+    }).catch(() => { viewer.last = frame.frameId; if (this.viewers.has(viewer)) viewer.send({ kind: 'state', tabId: frame.tabId, state: 'error', message: 'Live view frame could not be decoded. Retry the view.' }) }).finally(() => { viewer.encoding = false; if (this.viewers.has(viewer)) this.deliver(viewer) })
+  }
+  attach(send: Viewer['send'], options: CastOptions) {
+    const viewer: Viewer = { send, options, last: 0 }; this.viewers.add(viewer)
+    send({ kind: 'state', tabId: this.tab.state.tabId, state: this.invalidFrame ? 'error' : 'ready', ...(this.invalidFrame ? { message: 'Live view received an invalid frame. Retry the view.' } : {}) }); this.deliver(viewer)
     return { ack: async (frameId: number) => { if (viewer.pending !== frameId) return; viewer.pending = undefined; this.deliver(viewer) }, release: async () => { this.viewers.delete(viewer); if (!this.viewers.size) { if (this.tab.stream === this) this.tab.stream = undefined; await this.stop() } } }
   }
   async stop() { if (this.stopped) return; this.stopped = true; this.tab.cdp.off('Page.screencastFrame', this.onFrame); for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'closed' }); this.viewers.clear(); await this.tab.cdp.send('Page.stopScreencast').catch(() => {}) }
@@ -114,7 +142,7 @@ export class BrowserEngine {
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error }
     const session: Session = { snapshot: { sessionId, projectId, tabs: [], activeTabId: restored?.activeTabId ?? null, revision: restored?.revision ?? 0 }, tabs: new Map(), popups: new Set(), write: Promise.resolve() }
     for (const previous of restored?.tabs ?? []) {
-      const tab = await this.create(session, previous.tabId, previous.viewport); session.tabs.set(previous.tabId, tab)
+      const tab = await this.create(session, previous.tabId, previous.viewportMode === 'custom' || previous.viewportMode === 'panel' ? previous.viewport : { width: 1280, height: 800 }); tab.state.viewportMode = previous.viewportMode ?? 'desktop'; if (previous.viewportMode === 'panel') tab.viewSize = { ...previous.viewport }; session.tabs.set(previous.tabId, tab)
       try { if (previous.url && previous.url !== 'about:blank') await tab.page.goto(normalizeUrl(previous.url), { waitUntil: 'domcontentloaded', timeout: 15000 }) }
       catch { tab.state.error = 'Saved browser page could not be restored.'; tab.state.errorCode = 'navigation_failed' }
       await this.refresh(tab)
@@ -133,7 +161,7 @@ export class BrowserEngine {
       const native = await physical()
       try {
         if (session.closed || this.shuttingDown || opener.page.isClosed() || session.tabs.size >= 100) return
-        const tab = await this.attachPage(session, tabId, opener.state.viewport, native.page, native.dispose)
+        const tab = await this.attachPage(session, tabId, { width: 1280, height: 800 }, native.page, native.dispose)
         if (session.closed || this.shuttingDown || native.page.isClosed() || opener.page.isClosed() || session.tabs.size >= 100) return
         tab.state.openerTabId = opener.state.tabId; session.tabs.set(tabId, tab); session.snapshot.activeTabId = tabId
         this.publish(session); await this.refresh(tab); await this.persist(session)
@@ -144,7 +172,7 @@ export class BrowserEngine {
   private async attachPage(session: Session, tabId: string, viewport: BrowserEngineTab['viewport'], page: Page, dispose: () => Promise<void>): Promise<LiveTab> {
     await page.setViewportSize(viewport); page.setDefaultTimeout(15000)
     const cdp = await page.context().newCDPSession(page)
-    const state: BrowserEngineTab = { tabId, sessionId: session.snapshot.sessionId, projectId: session.snapshot.projectId, host: this.desktop.available ? 'desktop' : 'headless', url: page.url(), title: '', loading: false, canGoBack: false, canGoForward: false, viewport, controller: 'none' }
+    const state: BrowserEngineTab = { tabId, sessionId: session.snapshot.sessionId, projectId: session.snapshot.projectId, host: this.desktop.available ? 'desktop' : 'headless', url: page.url(), title: '', loading: false, canGoBack: false, canGoForward: false, viewport, viewportMode: 'desktop', controller: 'none' }
     const tab: LiveTab = { state, page, cdp, dispose, actionEpoch: 0, actionTail: Promise.resolve(), cursorSequence: 0, console: [], network: [] }
     page.on('popup', popup => { if (!this.desktop.available) this.adoptPopup(session, tab, randomUUID(), async () => ({ page: popup, dispose: async () => { await popup.close(); await this.headless.retireIdle(session.snapshot.projectId) } })) })
     page.on('console', message => { tab.console.push({ level: message.type(), text: message.text().slice(0, 4096), timestamp: new Date().toISOString() }); if (tab.console.length > 200) tab.console.shift() })
@@ -203,7 +231,28 @@ export class BrowserEngine {
     finally { tab.state.loading = false; this.publish(session); await this.persist(session) }
     return this.snapshot(session)
   }
-  async resize(sessionId: string, tabId: string, viewport: BrowserEngineTab['viewport']) { if (viewport.width * viewport.height > 3840 * 2160) throw new Error('Browser viewport exceeds its area budget.'); const { session, tab } = await this.tab(sessionId, tabId); await tab.page.setViewportSize(viewport); tab.state.viewport = viewport; this.publish(session); await this.persist(session); return this.snapshot(session) }
+  async resize(sessionId: string, tabId: string, viewport: BrowserEngineTab['viewport'], source: 'view' | 'explicit' = 'explicit') {
+    if (viewport.width * viewport.height > 3840 * 2160) throw new Error('Browser viewport exceeds its area budget.')
+    const { session, tab } = await this.tab(sessionId, tabId)
+    return this.changeViewport(tab, async () => {
+      if (source === 'view') { tab.viewSize = { ...viewport }; if (tab.state.viewportMode !== 'panel') return this.snapshot(session) }
+      await tab.page.setViewportSize(viewport); tab.state.viewport = { ...viewport }
+      if (source === 'explicit') tab.state.viewportMode = 'custom'
+      this.publish(session); await this.persist(session); return this.snapshot(session)
+    })
+  }
+  async setViewportMode(sessionId: string, tabId: string, mode: 'desktop' | 'panel') {
+    const { session, tab } = await this.tab(sessionId, tabId)
+    return this.changeViewport(tab, async () => {
+      const viewport = mode === 'panel' ? tab.viewSize ?? { width: 1280, height: 800 } : { width: 1280, height: 800 }
+      await tab.page.setViewportSize(viewport); tab.state.viewport = { ...viewport }; tab.state.viewportMode = mode
+      this.publish(session); await this.persist(session); return this.snapshot(session)
+    })
+  }
+  private changeViewport<T>(tab: LiveTab, work: () => Promise<T>): Promise<T> {
+    // Concurrent measurements and agent resizes must commit in arrival order.
+    const result = (tab.viewportTail ?? Promise.resolve()).catch(() => {}).then(work); tab.viewportTail = result; return result
+  }
   private humanInput(session: Session, tab: LiveTab) { tab.actionEpoch++; tab.action?.abort(new Error('User input interrupted this browser action.')); tab.state.controller = 'human'; delete tab.state.agentAction; delete tab.state.agentCursor; this.publish(session) }
   async input(sessionId: string, tabId: string, input: BrowserEngineInput) {
     const { session, tab } = await this.tab(sessionId, tabId); this.humanInput(session, tab)
@@ -214,11 +263,11 @@ export class BrowserEngine {
   }
   async screencast(sessionId: string, tabId: string, options: { maxWidth?: number; maxHeight?: number; quality?: number }, send: (item: BrowserScreencastItem) => void): Promise<{ ack(frameId: number): Promise<void>; release(): Promise<void> }> {
     const { tab } = await this.tab(sessionId, tabId)
-    if (!tab.stream) { const stream = new ScreencastHub(tab); tab.stream = stream; void stream.start(options).catch(async () => { if (tab.stream === stream) tab.stream = undefined; await stream.stop() }) }
+    if (!tab.stream) { const stream = new ScreencastHub(tab); tab.stream = stream; void stream.start().catch(async () => { if (tab.stream === stream) tab.stream = undefined; await stream.stop() }) }
     const stream = tab.stream
     await stream.ready
     if (tab.stream !== stream) return this.screencast(sessionId, tabId, options, send)
-    return stream.attach(send)
+    return stream.attach(send, options)
   }
   async recordingStart(sessionId: string, tabId: string) {
     const { session, tab } = await this.tab(sessionId, tabId)
@@ -280,7 +329,7 @@ export class BrowserEngine {
     const tabId = tab.state.tabId; const page = tab.page
     switch (operation) {
       case 'navigate': { const input = raw as BrowserAutomationInputByOperation['navigate']; const url = input.url ?? `${input.environmentProtocol ?? 'http'}://127.0.0.1:${input.environmentPort}${input.path ?? '/'}`; await this.navigate(session.snapshot.sessionId, tabId, { url }, signal, input.readiness === 'none' ? 'commit' : input.readiness === 'domContentLoaded' ? 'domcontentloaded' : 'load'); return { tab: structuredClone(tab.state), readiness: input.readiness } }
-      case 'resize': { const input = raw as BrowserAutomationInputByOperation['resize']; const viewport = input.mode === 'freeform' ? { width: input.width, height: input.height } : input.mode === 'preset' ? { ...BROWSER_VIEWPORT_PRESETS[input.presetId] } : { width: 1280, height: 800 }; if (input.mode === 'preset' && input.orientation === 'landscape') [viewport.width, viewport.height] = [viewport.height, viewport.width]; await this.resize(session.snapshot.sessionId, tabId, viewport); return { tabId, setting: { mode: 'freeform', ...viewport }, viewport: { ...viewport, deviceScaleFactor: 1 } } }
+      case 'resize': { const input = raw as BrowserAutomationInputByOperation['resize']; const viewport = input.mode === 'freeform' ? { width: input.width, height: input.height } : input.mode === 'preset' ? { ...BROWSER_VIEWPORT_PRESETS[input.presetId] } : { width: 1280, height: 800 }; if (input.mode === 'preset' && input.orientation === 'landscape') [viewport.width, viewport.height] = [viewport.height, viewport.width]; if (input.mode === 'fill') await this.setViewportMode(session.snapshot.sessionId, tabId, 'desktop'); else await this.resize(session.snapshot.sessionId, tabId, viewport); return { tabId, setting: { mode: 'freeform', ...viewport }, viewport: { ...viewport, deviceScaleFactor: 1 } } }
       case 'recordingStart': return this.recordingStart(session.snapshot.sessionId, tabId)
       case 'recordingStop': return this.recordingStop(session.snapshot.sessionId, tabId)
       case 'snapshot': return this.capture(tab, signal)

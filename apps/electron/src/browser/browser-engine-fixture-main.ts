@@ -33,7 +33,7 @@ void app.whenReady().then(async () => {
     backendPid: child.pid,
     call: async (method: string, params: unknown) => { await initialized; const requestId = randomUUID(); const result = new Promise((resolve, reject) => pending.set(requestId, { resolve, reject })); child.send({ type: 'fixture:browser:call', requestId, method, params }); return result },
     hide: () => host.hide(),
-    present: (tabId: string) => host.present(window, { tabId, bounds: { x: 10, y: 70, width: 1280, height: 800 } }),
+    present: (tabId: string, bounds = { x: 10, y: 70, width: 1280, height: 800 }) => host.present(window, { tabId, bounds }),
   }
   app.on('before-quit', () => { host.hide(); child.kill() })
 })

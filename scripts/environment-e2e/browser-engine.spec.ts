@@ -17,7 +17,72 @@ import { once } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createBrowserEngineRpc } from '../../apps/backend/src/ws/rpc/browser-engine-rpc.js'
 import { BrowserEngine } from '../../apps/backend/src/swarm/browser-automation/browser-engine.js'
+
+/** Failures: a narrow viewer hides controls, physical scaled input misses, panel
+ * measurements undo explicit agent sizes, or restart loses the chosen policy. */
+for (const host of ['headless', 'desktop'] as const) test(`${host} scales a desktop layout into a narrow panel with correct input`, async ({}, info) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-layout-proof-'))
+  const server = createServer((_request, response) => response.end(`<!doctype html><title>Desktop layout proof</title><style>body{margin:0;background:#cef;height:2000px}#target{position:absolute;left:960px;top:480px;width:160px;height:80px}#searchInput{position:absolute;left:950px;top:100px}@media(max-width:899px){#searchInput{display:none}}</style><input id="searchInput"><button id="target" onclick="document.querySelector('output').textContent='clicked'">Scaled target</button><output>waiting</output>`))
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  let application: Awaited<ReturnType<typeof electron.launch>> | undefined
+  let engine = host === 'headless' ? new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') }) : undefined
+  let cast: Awaited<ReturnType<BrowserEngine['screencast']>> | undefined
+  try {
+    if (host === 'desktop') {
+      application = await electron.launch({ args: [join(process.cwd(), 'apps/electron/dist/browser-engine-fixture-main.js')], cwd: join(process.cwd(), 'apps/electron'), env: { ...process.env, FORGE_BROWSER_FIXTURE_REPO: process.cwd(), FORGE_DATA_DIR: join(root, 'data'), FORGE_ELECTRON_USER_DATA_DIR: join(root, 'electron') } })
+      await expect.poll(() => application!.evaluate(() => typeof (globalThis as any).forgeBrowserFixture)).toBe('object')
+    }
+    const principal = { deviceSessionId: 'fixture', scopes: new Set(['session:operate', 'session:read']) } as Parameters<ReturnType<typeof createBrowserEngineRpc>['execute']>[0]
+    const rpc = async (method: any, params: any): Promise<BrowserEngineSnapshot> => application ? application.evaluate(async (_electron, args) => (globalThis as any).forgeBrowserFixture.call(args.method, args.params), { method, params }) : createBrowserEngineRpc(engine!).execute(principal, method, params) as Promise<BrowserEngineSnapshot>
+    const tool = async (operation: string, input: any = {}): Promise<any> => application ? application.evaluate(async (_electron, args) => (globalThis as any).forgeBrowserFixture.call('tool', args), { operation, input }) : engine!.invoke('session', 'project', operation as any, input)
+    const opened = await rpc('browser.tabs.open', { sessionId: 'session', url }), tabId = opened.activeTabId!
+    const evaluate = async (expression: string) => { const result = await tool('evaluate', { tabId, expression, awaitPromise: true, returnByValue: true }); expect(result.ok).toBe(true); return result.result.value }
+    const measure = (width: number, height: number) => rpc('browser.tabs.resize', { sessionId: 'session', tabId, source: 'view', viewport: { width, height } })
+    await measure(560, 600); expect(await evaluate('innerWidth')).toBe(1280)
+    if (application) {
+      await application.evaluate(({ BrowserWindow }, id) => { BrowserWindow.getAllWindows()[0]!.showInactive(); (globalThis as any).forgeBrowserFixture.present(id, { x: 30, y: 90, width: 560, height: 600 }) }, tabId)
+      await expect.poll(() => evaluate('innerWidth')).toBe(1280)
+      await application.evaluate(({ BrowserWindow }) => { const view = BrowserWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView; for (const type of ['mouseDown', 'mouseUp'] as const) view.webContents.sendInputEvent({ type, x: 455, y: 228, button: 'left', clickCount: 1 }) })
+      await expect.poll(() => evaluate('document.querySelector("output").textContent')).toBe('clicked')
+      const nativeFrame = await application.evaluate(async (_electron, id) => (globalThis as any).forgeBrowserFixture.call('cast-proof', { tabId: id }), tabId)
+      expect(nativeFrame.width / nativeFrame.height).toBeCloseTo(1280 / 800, 2)
+      const png = await application.evaluate(async ({ BrowserWindow }) => { const view = BrowserWindow.getAllWindows()[0]!.contentView.children[0] as Electron.WebContentsView; return (await view.webContents.capturePage()).toPNG().toString('base64') })
+      await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'native-560-desktop-layout.png'), Buffer.from(png, 'base64'))
+      await info.attach('native-560-desktop-layout', { body: Buffer.from(png, 'base64'), contentType: 'image/png' })
+      expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.contentView.children[0]!.getBounds())).toEqual({ x: 30, y: 90, width: 560, height: 600 })
+    } else {
+      const frames: Extract<BrowserScreencastItem, { kind: 'frame' }>[] = []
+      cast = await engine!.screencast('session', tabId, { maxWidth: 560, maxHeight: 600 }, item => { if (item.kind === 'frame') frames.push(item) })
+      await expect.poll(() => frames.length).toBe(1)
+      const frame = frames[0]!; expect(frame).toMatchObject({ width: 560, height: 350, viewport: { width: 1280, height: 800 } })
+      const x = 455 / frame.width * frame.viewport!.width, y = 227.5 / frame.height * frame.viewport!.height
+      for (const type of ['mousePressed', 'mouseReleased'] as const) await engine!.input('session', tabId, { kind: 'mouse', type, x, y, button: 'left', clickCount: 1 })
+      expect(await evaluate('document.querySelector("output").textContent')).toBe('clicked')
+      await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'remote-560-desktop-layout.jpg'), Buffer.from(frame.data, 'base64')); await info.attach('remote-560-desktop-layout', { body: Buffer.from(frame.data, 'base64'), contentType: 'image/jpeg' })
+    }
+    expect((await tool('type', { tabId, selector: '#searchInput', text: 'desktop search', clear: true, timeoutMs: 2000 })).ok).toBe(true)
+    expect(await evaluate('document.querySelector("#searchInput").value')).toBe('desktop search')
+    await evaluate('document.querySelector("output").textContent="waiting"')
+    const clicked = await tool('click', { tabId, selector: '#target', timeoutMs: 2000 }); expect(clicked.ok, JSON.stringify(clicked)).toBe(true)
+    expect(await evaluate('document.querySelector("output").textContent')).toBe('clicked')
+    expect((await tool('scroll', { tabId, deltaY: 160 })).ok).toBe(true)
+    await expect.poll(() => evaluate('scrollY')).toBe(160)
+    await rpc('browser.tabs.setViewportMode', { sessionId: 'session', tabId, mode: 'panel' }); expect(await evaluate('innerWidth')).toBe(560)
+    await measure(600, 500); expect(await evaluate('innerWidth')).toBe(600)
+    await tool('resize', { tabId, mode: 'freeform', width: 1000, height: 700 }); await measure(560, 600); expect(await evaluate('innerWidth')).toBe(1000)
+    expect((await rpc('browser.tabs.get', { sessionId: 'session' })).tabs[0]!.viewportMode).toBe('custom')
+    if (engine) {
+      await cast!.release(); cast = undefined; await engine.shutdown()
+      engine = new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') })
+      expect((await rpc('browser.tabs.get', { sessionId: 'session' })).tabs[0]).toMatchObject({ viewportMode: 'custom', viewport: { width: 1000, height: 700 } })
+      await measure(560, 600); expect(await evaluate('innerWidth')).toBe(1000)
+    }
+    await rpc('browser.tabs.setViewportMode', { sessionId: 'session', tabId, mode: 'desktop' }); expect(await evaluate('innerWidth')).toBe(1280)
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'desktop-layout-proof.json'), JSON.stringify({ passed: true, host, view: { width: 560, height: 600 }, page: { width: 1280, height: 800 }, physicalInput: true, agentClickAndType: true, panelMode: true, explicitSizeWins: true, persisted: host === 'headless' }, null, 2))
+  } finally { await cast?.release(); await engine?.shutdown(); await application?.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
+})
 
 test('Stop fences agent open during context creation, page creation and publication', async ({}, info) => {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-stop-open-'))
@@ -143,15 +208,16 @@ test('downsampled screencast frames have independent bounds and viewer budgets',
     const frames = (items: BrowserScreencastItem[]) => items.filter(item => item.kind === 'frame')
     await expect.poll(() => frames(fast).length).toBe(1)
     const first = frames(fast)[0]!
-    expect(first.width).toBe(360); expect(first.height).toBe(225)
+    expect(first.width).toBe(1280); expect(first.height).toBe(800)
+    expect(frames(slow)[0]).toMatchObject({ width: 360, height: 225 })
     expect(decodeEnvironmentValue(BrowserScreencastItemSchema, first)).toEqual(first)
     await viewers[1]!.ack(first.frameId)
     expect((await engine.invoke('session', 'project', 'evaluate', { tabId, expression: 'document.body.style.background="red"', awaitPromise: true, returnByValue: true })).ok).toBe(true)
     await expect.poll(() => frames(fast).length).toBeGreaterThan(1)
     expect(frames(slow)).toHaveLength(1)
     expect([...slow, ...fast].some(item => item.kind === 'state' && item.state === 'error')).toBe(false)
-    await info.attach('360x225-frame', { body: Buffer.from(first.data, 'base64'), contentType: 'image/jpeg' })
-    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'small-frame-proof.json'), JSON.stringify({ passed: true, pageViewport: opened.tabs[0]!.viewport, encodedFrame: { width: first.width, height: first.height }, independentAckBudgets: true }, null, 2))
+    await info.attach('360x225-frame', { body: Buffer.from(frames(slow)[0]!.data, 'base64'), contentType: 'image/jpeg' })
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'small-frame-proof.json'), JSON.stringify({ passed: true, pageViewport: opened.tabs[0]!.viewport, encodedFrames: { slow: { width: frames(slow)[0]!.width, height: frames(slow)[0]!.height }, fast: { width: first.width, height: first.height } }, independentAckBudgets: true }, null, 2))
   } finally { for (const viewer of viewers) await viewer.release(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
 })
 
@@ -311,7 +377,8 @@ test('Electron WebContentsView is driven through private CDP without a TCP brows
 
 test('fleet local and env-b share real tools and independently acknowledged viewers', async ({}, info) => {
   const fleet = await launchFleet({ environments: 2, out: join(process.cwd(), '.internal/browser-engine/fleet.json'), backendEnv: { FORGE_BROWSER_CACHE_DIR: join(process.cwd(), '.internal/browser-engine/runtime') } })
-  const server = createServer((_request, response) => response.end(`<!doctype html><title>Fleet browser proof</title><input aria-label="Email"><button id="sign-in" onclick="document.querySelector('output').textContent='clicked'">Sign in</button><output>waiting</output><iframe title="foreign-extension-like" srcdoc="<input value='autofill'>"></iframe><style>body{height:2000px}</style>`))
+  const typed: string[] = []
+  const server = createServer((request, response) => { if (request.url?.startsWith('/typed?')) { typed.push(new URL(request.url, 'http://fixture').searchParams.get('value')!); response.end('ok'); return }; response.end(`<!doctype html><title>Fleet browser proof</title><input aria-label="Email"><input id="searchInput" oninput="fetch('/typed?value='+encodeURIComponent(this.value))"><style>@media(max-width:899px){#searchInput{display:none}}</style><button id="sign-in" onclick="document.querySelector('output').textContent='clicked'">Sign in</button><output>waiting</output><iframe title="foreign-extension-like" srcdoc="<input value='autofill'>"></iframe><style>body{height:2000px}</style>`) })
   server.listen(0, '127.0.0.1'); await once(server, 'listening')
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   const report: Record<string, unknown> = { passed: false, platform: process.platform }
@@ -326,13 +393,18 @@ test('fleet local and env-b share real tools and independently acknowledged view
       await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: `[fixture:browser-open ${url}] [fixture:browser-click #sign-in]`, artifactIds: [] } })
       const initial = await until(() => rpc.call('browser.tabs.get', { sessionId }), value => value.tabs.length === 1 && value.tabs[0].url.startsWith(url) && !value.tabs[0].agentAction)
       const tabId = initial.activeTabId; expect(initial.tabs[0].host).toBe('headless')
+      await rpc.call('browser.tabs.resize', { sessionId, tabId, source: 'view', viewport: { width: 560, height: 600 } })
+      const typedBefore = typed.length
+      await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: '[fixture:browser-type #searchInput real-desktop-search]', artifactIds: [] } })
+      await until(() => rpc.call('session.history', { sessionId, turns: 20 }), value => JSON.stringify(value).includes('real browser typed'))
+      expect((await rpc.call('browser.tabs.get', { sessionId })).tabs[0].viewport).toEqual({ width: 1280, height: 800 }); expect(typed.slice(typedBefore)).toContain('real-desktop-search')
       const second = await openFixtureRpc(environment.baseUrl, bootstrap); sockets.push(second)
       const listA = await rpc.call('browser.tabs.subscribe', { sessionId }); const listB = await second.call('browser.tabs.subscribe', { sessionId })
       const slow = await rpc.call('browser.screencast.subscribe', { sessionId, tabId, maxWidth: 360, maxHeight: 240 }); const fast = await second.call('browser.screencast.subscribe', { sessionId, tabId })
       const frames = (connection: typeof rpc, subscriptionId: string) => connection.frames.filter(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'frame')
       await until(() => frames(rpc, slow.subscriptionId), values => values.length === 1)
       const firstFast = await until(() => frames(second, fast.subscriptionId)[0], Boolean)
-      expect(firstFast.item).toMatchObject({ width: 360, height: 225 })
+      expect(firstFast.item).toMatchObject({ width: 1280, height: 800 })
       await second.call('browser.screencast.ack', { subscriptionId: fast.subscriptionId, frameId: firstFast.item.frameId })
       await second.call('browser.tabs.input', { sessionId, tabId, input: { kind: 'wheel', x: 30, y: 100, deltaX: 0, deltaY: 300 } })
       const nextFast = await until(() => frames(second, fast.subscriptionId)[1], Boolean)
@@ -343,7 +415,7 @@ test('fleet local and env-b share real tools and independently acknowledged view
       const latestA = await until<BrowserEngineSnapshot | undefined>(() => rpc.frames.filter(frame => frame.subscriptionId === listA.subscriptionId && frame.item?.snapshot?.tabs.length === 2).at(-1)?.item.snapshot, Boolean)
       const latestB = await until<BrowserEngineSnapshot | undefined>(() => second.frames.filter(frame => frame.subscriptionId === listB.subscriptionId && frame.item?.snapshot?.tabs.length === 2).at(-1)?.item.snapshot, Boolean)
       expect(latestA!.tabs.map((tab: { tabId: string }) => tab.tabId)).toEqual(latestB!.tabs.map((tab: { tabId: string }) => tab.tabId))
-      report[environment.name] = { tools: true, independentAck: true, subscriberIsolation: true, consistentTabs: true }
+      report[environment.name] = { tools: true, realBrowserType: true, desktopViewport: { width: 1280, height: 800 }, measuredPanel: { width: 560, height: 600 }, independentAck: true, subscriberIsolation: true, consistentTabs: true }
     }
     report.passed = true
   } finally { for (const socket of sockets) socket.close(); server.closeAllConnections(); server.close(); await fleet.stop(!report.passed); await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'fleet-browser-proof.json'), JSON.stringify(report, null, 2)) }

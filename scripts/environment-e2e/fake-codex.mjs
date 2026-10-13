@@ -132,6 +132,8 @@ async function runTurn(turn, text) {
     if (browserOpen) { await dynamicTool(turn, 'browser_open', { url: browserOpen[1], reuseExistingTab: false }); reply = `fixture:${fixture.instanceId}:real browser opened`; }
     const browserClick = /\[fixture:browser-click ([^\]]+)\]/.exec(text);
     if (browserClick) { await dynamicTool(turn, 'browser_click', { selector: browserClick[1], timeoutMs: 15000 }); reply = `fixture:${fixture.instanceId}:real browser clicked`; }
+    const browserType = /\[fixture:browser-type (\S+) ([^\]]+)\]/.exec(text);
+    if (browserType) { const result = await dynamicTool(turn, 'browser_type', { selector: browserType[1], text: browserType[2], clear: true, timeoutMs: 15000 }); if (result.success !== true) throw new Error('Real browser typing failed'); reply = `fixture:${fixture.instanceId}:real browser typed`; }
     if (text.includes('[fixture:detail]')) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
       await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });

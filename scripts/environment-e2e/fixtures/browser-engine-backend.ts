@@ -1,6 +1,9 @@
 import { restrictChromeCookieImportsToFixtures } from '../../../apps/backend/src/swarm/browser-automation/chrome-cookies.js'
 import { BrowserEngine } from '../../../apps/backend/src/swarm/browser-automation/browser-engine.js'
 import { DesktopBrowserChannel } from '../../../apps/backend/src/swarm/browser-automation/desktop-browser-channel.js'
+import { createBrowserEngineRpc } from '../../../apps/backend/src/ws/rpc/browser-engine-rpc.js'
+import type { BrowserEngineMethod } from '../../../apps/backend/src/ws/rpc/browser-engine-rpc.js'
+import type { RpcInput } from '@forge/protocol/environment-v2'
 import type { BrowserAutomationOperation, BrowserAutomationInputByOperation } from '@forge/protocol'
 restrictChromeCookieImportsToFixtures()
 const engine = new BrowserEngine({ dataDir: process.env.FORGE_DATA_DIR!, resolveSession: id => id === 'session' ? 'project' : id === 'other' ? 'other-project' : undefined, desktop: new DesktopBrowserChannel(true) })
@@ -14,7 +17,7 @@ process.on('message', raw => {
     const cast = await engine.screencast('session', input.params.tabId!, {}, item => { if (item.kind === 'frame') done({ width: item.width, height: item.height }) })
     try { return await frame } finally { clearTimeout(timer); await cast.release() }
   }
-  const work = input.method === 'archive' ? engine.archiveSession('project', 'session') : input.method === 'cookie-isolation-proof' ? engine.withCookieContext('other', async context => (await context.cookies()).map(cookie => cookie.name)) : input.method === 'cast-proof' ? castProof() : input.method === 'cookie-proof' ? engine.withCookieContext('session', async context => { await context.addCookies([{ name: 'native-fixture', value: 'synthetic-native-cookie', domain: 'native.example.test', path: '/', expires: Date.now() / 1000 + 3600 }]); return (await context.cookies()).map(cookie => cookie.name) }) : input.method === 'open' ? engine.open('session', input.params) : input.method === 'snapshot' ? engine.getSnapshot('session') : input.method === 'shutdown' ? engine.shutdown() : engine.invoke('session', 'project', input.params.operation, input.params.input)
+  const work = input.method.startsWith('browser.tabs.') ? createBrowserEngineRpc(engine).execute({ deviceSessionId: 'fixture', scopes: new Set(['session:operate', 'session:read']) } as Parameters<ReturnType<typeof createBrowserEngineRpc>['execute']>[0], input.method as BrowserEngineMethod, input.params as unknown as RpcInput<BrowserEngineMethod>) : input.method === 'archive' ? engine.archiveSession('project', 'session') : input.method === 'cookie-isolation-proof' ? engine.withCookieContext('other', async context => (await context.cookies()).map(cookie => cookie.name)) : input.method === 'cast-proof' ? castProof() : input.method === 'cookie-proof' ? engine.withCookieContext('session', async context => { await context.addCookies([{ name: 'native-fixture', value: 'synthetic-native-cookie', domain: 'native.example.test', path: '/', expires: Date.now() / 1000 + 3600 }]); return (await context.cookies()).map(cookie => cookie.name) }) : input.method === 'open' ? engine.open('session', input.params) : input.method === 'snapshot' ? engine.getSnapshot('session') : input.method === 'shutdown' ? engine.shutdown() : engine.invoke('session', 'project', input.params.operation, input.params.input)
   void work.then(value => process.send?.({ type: 'fixture:browser:result', requestId: input.requestId, value }), error => process.send?.({ type: 'fixture:browser:result', requestId: input.requestId, error: error.message }))
 })
 process.send?.({ type: 'fixture:browser:ready' })

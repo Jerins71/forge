@@ -90,6 +90,8 @@ export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItem
 export const EnvironmentCapabilitiesSchema = O({
   /** Playwright tabs and live view are available on this environment. */
   browserEngine: Type.Optional(Type.Boolean()),
+  /** Desktop layout, panel measurements and per-tab viewport policy RPCs. */
+  browserViewportModes: Type.Optional(Type.Boolean()),
   /** Causal configuration sync; absent capabilities never receive sync requests. */
   configSync: Type.Optional(Type.Integer({ minimum: 1 })),
   shellResume: Type.Boolean(),
@@ -512,6 +514,7 @@ export const rpcSchemas = {
   'browser.tabs.activate': defineRpc(B.tab, BrowserEngineSnapshotSchema),
   'browser.tabs.close': defineRpc(B.tab, BrowserEngineSnapshotSchema),
   'browser.tabs.navigate': defineRpc(B.navigate, BrowserEngineSnapshotSchema),
+  'browser.tabs.setViewportMode': defineRpc(B.setViewportMode, BrowserEngineSnapshotSchema),
   'browser.tabs.resize': defineRpc(B.resize, BrowserEngineSnapshotSchema),
   'browser.tabs.input': defineRpc(B.input, V2Empty),
   'browser.tabs.recording.start': defineRpc(B.tab, BrowserRecordingV2Schema),
@@ -558,7 +561,7 @@ export const rpcScopes = {
   'browser.engine.status': 'session:read',
   'browser.engine.setup': 'session:operate',
   'browser.tabs.get': 'session:read', 'browser.tabs.subscribe': 'session:read',
-  'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.input': 'session:operate',
+  'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.setViewportMode': 'session:operate', 'browser.tabs.input': 'session:operate',
   'browser.tabs.recording.start': 'session:operate', 'browser.tabs.recording.stop': 'session:operate',
   'browser.screencast.subscribe': 'session:read', 'browser.screencast.ack': 'session:read',
   'browser.cookies.preview': 'settings:admin', 'browser.cookies.apply': 'settings:admin', 'browser.cookies.cancel': 'settings:admin', 'browser.cookies.prepareSend': 'settings:admin', 'browser.cookies.receive': 'settings:admin', 'browser.cookies.audit': 'session:read', 'browser.cookies.forget': 'session:operate',

@@ -75,11 +75,15 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
     },
   })
 
-  /** Only a headless page lays out to the panel; a desktop tab keeps its own window's size. */
-  const resizeHeadless = (tabId: string, viewport: { width: number; height: number }) => {
-    if (tabOf(tabId)?.host !== 'headless') return
-    void engine.request('browser.tabs.resize', { sessionId, tabId, viewport: { width: clampDimension(viewport.width), height: clampDimension(viewport.height) } })
-      .then(apply, () => undefined)
+  const viewSizes = new Map<string, { width: number; height: number }>()
+  const resizeStreams = new Map<string, Set<(viewport: { width: number; height: number; deviceScaleFactor: number }) => void>>()
+  const measureView = (tabId: string, viewport: { width: number; height: number }) => {
+    if (client.descriptor()?.capabilities.browserViewportModes !== true) return
+    const size = { width: clampDimension(viewport.width), height: clampDimension(viewport.height) }
+    const previous = viewSizes.get(tabId)
+    if (previous?.width === size.width && previous.height === size.height) return
+    viewSizes.set(tabId, size)
+    void engine.request('browser.tabs.resize', { sessionId, tabId, viewport: size, source: 'view' }).then(apply, () => { viewSizes.delete(tabId) })
   }
 
   const act = async (promise: Promise<BrowserEngineSnapshot>) => { apply(await promise) }
@@ -112,6 +116,7 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
       if (!nativeBridge) return
       if (bounds) {
         presentedTabId = tabId
+        measureView(tabId, bounds)
         void nativeBridge.present({ tabId, bounds }).catch(() => undefined)
       } else if (presentedTabId === tabId) {
         presentedTabId = null
@@ -124,7 +129,7 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
       let stream: ReturnType<typeof engine.screencast> | null = null
       let retry: ReturnType<typeof setTimeout> | null = null
       let gotFrame = false
-      resizeHeadless(tabId, viewport)
+      measureView(tabId, viewport)
       // A tab whose page is still starting can refuse or end a stream, and a stream can attach as the
       // previous one stops; reconnect until the first frame arrives, then whenever the stream ends.
       const reconnect = (message?: string) => {
@@ -154,7 +159,7 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
               if (closed || stream !== current) return
               const image = await decodeJpeg(item.data)
               if (closed) { image.close(); return }
-              const page = tabOf(tabId)?.viewport ?? { width: item.width, height: item.height }
+              const page = item.viewport ?? tabOf(tabId)?.viewport ?? { width: item.width, height: item.height }
               onFrame({ sequence: item.frameId, image, viewport: page, close: () => image.close() })
               // One unacknowledged frame per viewer: acknowledging asks for the next.
               void current.ack(item.frameId).catch(() => undefined)
@@ -165,21 +170,33 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
         stream = current
         setTimeout(() => { if (stream === current && !gotFrame) reconnect() }, SCREENCAST_FIRST_FRAME_MS)
       }
+      const resize = (next: typeof viewport) => {
+        if (next.width === viewport.width && next.height === viewport.height && next.deviceScaleFactor === viewport.deviceScaleFactor) return
+        viewport = next
+        if (retry) { clearTimeout(retry); retry = null }
+        stream?.release(); stream = null; connect()
+      }
+      const resizes = resizeStreams.get(tabId) ?? new Set(); resizes.add(resize); resizeStreams.set(tabId, resizes)
       connect()
       return () => {
+        resizes.delete(resize); if (!resizes.size) resizeStreams.delete(tabId)
         closed = true
         if (retry) clearTimeout(retry)
         stream?.release()
         stream = null
       }
     },
-    resizeScreencast: resizeHeadless,
+    resizeScreencast(tabId, viewport) {
+      measureView(tabId, viewport)
+      for (const resize of resizeStreams.get(tabId) ?? []) resize(viewport)
+    },
     sendInput(tabId, input) {
       void engine.request('browser.tabs.input', { sessionId, tabId, input: toEngineInput(input) }).catch(() => undefined)
     },
     dispose() {
       stopTabs()
       listeners.clear()
+      viewSizes.clear(); resizeStreams.clear()
       if (presentedTabId) void nativeBridge?.hide().catch(() => undefined)
     },
   }

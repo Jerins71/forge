@@ -12,12 +12,15 @@ const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 const domain = Type.String({ minLength: 1, maxLength: 253 })
 const domains = Type.Array(domain, { minItems: 1, maxItems: 1000, uniqueItems: true })
 export const BrowserEngineViewportSchema = O({ width: dimension, height: dimension })
+/** Desktop defaults to 1280×800; panel follows measurements; custom is an agent's explicit size. */
+export const BrowserEngineViewportModeSchema = E('desktop', 'panel', 'custom')
+export type BrowserEngineViewportMode = Static<typeof BrowserEngineViewportModeSchema>
 export const BrowserEngineTabSchema = O({
   tabId: id, sessionId: id, projectId: id, host: E('desktop', 'headless'),
   openerTabId: Type.Optional(id),
   url: Type.String({ maxLength: 8192 }), title: Type.String({ maxLength: 4096 }),
   loading: Type.Boolean(), canGoBack: Type.Boolean(), canGoForward: Type.Boolean(),
-  viewport: BrowserEngineViewportSchema, controller: E('human', 'agent', 'none'),
+  viewport: BrowserEngineViewportSchema, viewportMode: Type.Optional(BrowserEngineViewportModeSchema), controller: E('human', 'agent', 'none'),
   agentAction: Type.Optional(Type.String({ maxLength: 256 })),
   agentCursor: Type.Optional(O({ x: Type.Number({ minimum: 0 }), y: Type.Number({ minimum: 0 }), phase: E('move', 'click'), sequence })),
   faviconUrl: Type.Optional(Type.String({ maxLength: 8192 })),
@@ -53,7 +56,8 @@ export type BrowserEngineInput = Static<typeof BrowserEngineInputSchema>
 export const BrowserScreencastItemSchema = Type.Union([
   O({ kind: Type.Literal('frame'), tabId: id, frameId: sequence,
     data: Type.String({ maxLength: 800000 }), mimeType: Type.Literal('image/jpeg'),
-    width: frameDimension, height: frameDimension, timestamp: Type.Number({ minimum: 0 }) }),
+    /** Encoded image dimensions differ from its page CSS viewport. */
+    width: frameDimension, height: frameDimension, viewport: Type.Optional(BrowserEngineViewportSchema), timestamp: Type.Number({ minimum: 0 }) }),
   O({ kind: Type.Literal('state'), tabId: id, state: E('starting', 'ready', 'closed', 'error'), message: Type.Optional(Type.String({ maxLength: 1024 })) }),
 ])
 export type BrowserScreencastItem = Static<typeof BrowserScreencastItemSchema>
@@ -81,7 +85,8 @@ export const browserEngineSchemas = {
   session: O({ sessionId: id }), tab: O({ sessionId: id, tabId: id }),
   open: O({ sessionId: id, url: Type.Optional(url), activate: Type.Optional(Type.Boolean()) }),
   navigate: Type.Union([O({ sessionId: id, tabId: id, url }), O({ sessionId: id, tabId: id, direction: E('back', 'forward', 'reload') })]),
-  resize: O({ sessionId: id, tabId: id, viewport: BrowserEngineViewportSchema }),
+  resize: O({ sessionId: id, tabId: id, viewport: BrowserEngineViewportSchema, source: Type.Optional(E('view', 'explicit')) }),
+  setViewportMode: O({ sessionId: id, tabId: id, mode: E('desktop', 'panel') }),
   input: O({ sessionId: id, tabId: id, input: BrowserEngineInputSchema }),
   screencast: O({ sessionId: id, tabId: id, maxWidth: Type.Optional(dimension), maxHeight: Type.Optional(dimension), quality: Type.Optional(Type.Integer({ minimum: 20, maximum: 85 })) }),
   ack: O({ subscriptionId: id, frameId: sequence }),
