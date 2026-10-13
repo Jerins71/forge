@@ -1,4 +1,4 @@
-import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, Server, ShieldCheck } from 'lucide-react'
+import { Activity, ArrowLeft, ChevronLeft, Search, Bell, Settings, KeyRound, Wrench, FileText, Terminal, TerminalSquare, Puzzle, UserCog, Info, Cpu, Palette, GitBranch, Grid3X3, MonitorCog, Server, ShieldCheck, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { HelpTrigger } from '@/components/help/HelpTrigger'
@@ -29,6 +29,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'general', label: 'General', icon: <Settings {...ICON_PROPS} />, description: 'Core behavior for this Forge installation.' },
       { id: 'environments', label: 'Environments', icon: <Server {...ICON_PROPS} />, description: 'Machines this app can run projects on.' },
+      { id: 'sync', label: 'Sync', icon: <RefreshCw {...ICON_PROPS} />, description: 'Keep presets, skills, prompts and memory the same across environments.' },
       { id: 'appearance', label: 'Appearance', icon: <Palette {...ICON_PROPS} />, description: 'Theme, accent and fonts. Saved to this device.' },
       { id: 'notifications', label: 'Notifications', icon: <Bell {...ICON_PROPS} />, description: 'Choose when Forge should get your attention.' },
     ],

@@ -119,6 +119,7 @@ import { createSettingsRoutes, type SettingsRouteBundle } from "./http/routes/se
 import { createSkillRoutes } from "./http/routes/skill-routes.js";
 import { createSlashCommandRoutes } from "./http/routes/slash-command-routes.js";
 import { createWorkerPresetRoutes } from "./http/routes/worker-preset-routes.js";
+import { createConfigSyncRoutes } from "./http/routes/config-sync-routes.js";
 import { createModelCacheVisualizationRoutes } from "./http/routes/model-cache-visualization-routes.js";
 import { createRepositorySettingsRoutes } from "./http/routes/repository-settings-routes.js";
 import { createStatsRoutes } from "./http/routes/stats-routes.js";
@@ -570,6 +571,7 @@ export class SwarmWebSocketServer {
       ...(this.telemetryService ? createTelemetryRoutes({ telemetryService: this.telemetryService }) : []),
       ...createSchedulerRoutes({ swarmManager: this.swarmManager }),
       ...createSlashCommandRoutes({ swarmManager: this.swarmManager }),
+      ...createConfigSyncRoutes({ dataDir: this.swarmManager.getConfig().paths.dataDir }),
       ...createMobileRoutes({ mobilePushService: this.mobilePushService }),
       ...createManagerSelectionCatalogRoutes({ swarmManager: this.swarmManager }),
       ...createAgentHttpRoutes({ swarmManager: this.swarmManager, control: this.environment?.control }),

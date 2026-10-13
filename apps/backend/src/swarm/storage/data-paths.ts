@@ -683,3 +683,8 @@ function canonicalInstallationPath(value: string): string {
     return resolve(value);
   }
 }
+
+/** Configuration sync state: agreed base hashes, open conflicts and replaced versions. */
+export function getConfigSyncDir(dataDir: string): string {
+  return join(getSharedStateDir(dataDir), "sync");
+}

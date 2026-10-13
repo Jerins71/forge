@@ -1,0 +1,38 @@
+import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
+import type { ConfigSyncApplyRequest } from "@forge/protocol";
+import { createConfigSyncStore, isConfigSyncKeyError } from "../../../environment/sync/config-sync.js";
+import { isEnoentError } from "../../../utils/fs-errors.js";
+import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
+import type { HttpRoute } from "../shared/http-route.js";
+
+const PREFIX = "/api/settings/sync/";
+
+/** Configuration sync: a manifest of allowlisted files, single-file reads, and guarded writes. */
+export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[] {
+  const store = createConfigSyncStore(options.dataDir);
+  const route = (name: string, methods: string, handle: HttpRoute["handle"]): HttpRoute => ({
+    methods: `${methods}, OPTIONS`,
+    matches: (pathname) => pathname === `${PREFIX}${name}`,
+    handle: async (request, response, requestUrl) => {
+      applyCorsHeaders(request, response, `${methods}, OPTIONS`);
+      if (request.method === "OPTIONS") { response.statusCode = 204; response.end(); return; }
+      if (request.method !== methods) { response.setHeader("Allow", methods); sendJson(response, 405, { error: "Method Not Allowed" }); return; }
+      try {
+        await handle(request, response, requestUrl);
+      } catch (error) {
+        const status = isConfigSyncKeyError(error) ? 400 : isEnoentError(error) ? 404 : 500;
+        sendJson(response, status, { error: error instanceof Error ? error.message : String(error) });
+      }
+    },
+  });
+  return withEnvironmentRouteAccess([
+    route("manifest", "GET", async (_request, response) => { sendJson(response, 200, { ...await store.manifest() }); }),
+    route("file", "GET", async (_request, response, requestUrl) => {
+      sendJson(response, 200, { ...await store.readFile(requestUrl.searchParams.get("key") ?? "") });
+    }),
+    route("apply", "POST", async (request, response) => {
+      sendJson(response, 200, { ...await store.apply(await readJsonBody(request, 32 * 1024 * 1024) as ConfigSyncApplyRequest) });
+    }),
+  // The same access as editing presets, skills and prompts directly, so existing pairings can sync.
+  ], { GET: { scopes: ["session:read"] }, POST: { scopes: ["workspace:write"] } });
+}

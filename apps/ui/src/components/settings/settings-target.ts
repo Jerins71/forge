@@ -10,6 +10,7 @@ export type SettingsTab =
   | 'project-settings'
   | 'general'
   | 'environments'
+  | 'sync'
   | 'git-monitoring'
   | 'history'
   | 'appearance'
@@ -37,6 +38,7 @@ export type SettingsTab =
 export const SETTINGS_TABS: SettingsTab[] = [
   'general',
   'environments',
+  'sync',
   'git-monitoring',
   'history',
   'appearance',

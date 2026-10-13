@@ -435,6 +435,8 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   ├── state/
 │   │   ├── mobile-devices.json
 │   │   ├── project-agent-shares.json
+│   │   ├── sync/state.json                # Configuration sync: agreed versions and open conflicts
+│   │   ├── sync/history/<time>/<key>      # Every file sync replaced or deleted, for undo
 │   │   └── .*-done                        # One-time migration/reconciliation sentinels
 │   ├── knowledge/
 │   │   ├── common.md                      # Global memory (user-editable)
@@ -529,6 +531,34 @@ The native relay's packaged manifest records target/architecture and signature v
 | Windows | `%LOCALAPPDATA%\forge` |
 
 Override with `FORGE_DATA_DIR` in your environment or `.env` file.
+
+### Configuration sync
+
+**Settings → Sync** keeps user-authored configuration the same on the environments you choose. The
+app is the hub: it already reaches every paired environment, so it compares their files every ten
+seconds (and on **Sync now** or window focus) while it is open. Environments never contact each other
+and no new credentials are involved.
+
+What syncs is an allowlist (`apps/backend/src/environment/sync/config-sync.ts`):
+
+| Synced | Path in the data directory |
+|---|---|
+| Worker presets | `shared/config/worker-presets.json` |
+| Global slash commands | `shared/config/slash-commands.json` |
+| Global skills | `skills/**` |
+| Project memory, manager memory | `profiles/<p>/memory.md`, `profiles/<p>/sessions/<p>/memory.md` |
+| Project skills, prompts, slash commands | `profiles/<p>/pi/skills/**`, `profiles/<p>/prompts/{archetypes,operational}/*.md`, `profiles/<p>/slash-commands.json` |
+
+Secrets, sign-ins, credential pools, environment identity and pairing, databases, transcripts,
+sessions, caches and machine paths are not addressable and never leave their machine. Project files
+sync only for a project whose Git repository groups it with a project on another synced environment
+(the same grouping the sidebar uses); other projects are listed as local only.
+
+Each environment records the version it last agreed on for every file. One change is pushed
+everywhere; a file changed differently on two environments, including one edited while its machine
+was offline, becomes a conflict that leaves both copies untouched. Settle it with **Keep …**, by
+editing either copy, or with **Ask an agent to resolve**, which starts a session on this machine to
+merge them. Every file sync overwrites or deletes is first copied to `shared/state/sync/history/`.
 
 ### Machine-local skills
 
