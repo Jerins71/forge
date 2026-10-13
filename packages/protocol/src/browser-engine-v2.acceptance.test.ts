@@ -29,6 +29,9 @@ describe('environment browser engine wire contract', () => {
     expect(Value.Check(BrowserCookiePreviewSchema, { ok: false, error: { code: 'files-folders-denied', message: 'Allow Forge to read Chrome cookies in Files & Folders.', settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders' } })).toBe(true)
   })
   it('adds optional activity, setup and diagnostics without breaking earlier snapshots', () => {
+    expect(Value.Check(rpcSchemas['browser.engine.status'].input, {})).toBe(true)
+    expect(Value.Check(rpcSchemas['browser.engine.status'].output, { state: 'ready', version: '154.0.8037.92' })).toBe(true)
+    expect(rpcScopes['browser.engine.status']).toBe('session:read')
     expect(Value.Check(rpcSchemas['browser.engine.setup'].input, {})).toBe(true)
     expect(rpcScopes['browser.engine.setup']).toBe('session:operate')
     expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [], activeTabId: null, revision: 0, browserEngineState: 'failed', browserEngineMessage: 'Install libnss3 and libgbm1.' })).toBe(true)

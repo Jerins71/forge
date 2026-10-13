@@ -28,6 +28,7 @@ import { readSettings } from './electron-settings.js'
 import { resolveDevBetterSqlite3Binding } from './dev-native-binding.js'
 import { PackagedRemoteUiServer, resolvePackagedRemoteUiHost, startOptionalPackagedRemoteUi } from './packaged-remote-ui-server.js'
 import type { BrowserAutomationRequest, BrowserTabSnapshot } from '@forge/protocol'
+import { DesktopBrowserHost } from './browser/desktop-browser-host.js'
 import { BrowserAutomationManager } from './browser/browser-automation-manager.js'
 import { installBrowserIpc } from './browser/browser-ipc.js'
 import { BrowserSessionRegistry } from './browser/browser-session.js'
@@ -112,6 +113,7 @@ type BackendBootstrap = {
   dataDir?: string
 }
 
+const desktopBrowserHost = new DesktopBrowserHost()
 let mainWindow: BrowserWindow | null = null
 let mainRendererRecovery: MainRendererRecoveryController | null = null
 let browserPopoutWindow: BrowserWindow | null = null
@@ -357,6 +359,7 @@ class BackendSupervisor {
       const child = fork(backendEntry, [], forkOptions)
 
       this.child = child
+      desktopBrowserHost.attach(child)
       const secureControlPipe = child.stdio[4]
       if (!secureControlPipe || !('end' in secureControlPipe)) {
         child.kill()
@@ -750,6 +753,16 @@ if (!hasSingleInstanceLock) {
     mainRendererRecovery?.markReady(event.sender)
   })
 
+  const browserRenderer = (event: Electron.IpcMainInvokeEvent): BrowserWindow => {
+    if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('Browser presentation requires the Forge main renderer.')
+    return mainWindow
+  }
+  ipcMain.handle('forge:browser-engine:present', (event, input: Parameters<import('@forge/protocol').BrowserEngineDesktopBridge['present']>[0]) => {
+    const window = browserRenderer(event)
+    if (!input || typeof input.tabId !== 'string' || !input.bounds) throw new Error('Invalid browser presentation.')
+    desktopBrowserHost.present(window, input)
+  })
+  ipcMain.handle('forge:browser-engine:hide', event => { browserRenderer(event); desktopBrowserHost.hide() })
   ipcMain.handle('bridge:showOpenDialog', async (_event, options: Electron.OpenDialogOptions) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       return dialog.showOpenDialog(mainWindow, options)

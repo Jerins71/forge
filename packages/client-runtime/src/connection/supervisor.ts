@@ -366,7 +366,7 @@ export class EnvironmentSupervisor {
         reject(
           new EnvironmentRuntimeError('UNAVAILABLE', 'Request timed out', true),
         )
-      }, 10000)
+      }, method === 'browser.cookies.preview' ? 180000 : 10000)
       options.signal?.addEventListener('abort', cancel, { once: true })
       this.pending.set(requestId, {
         method,

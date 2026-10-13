@@ -7,11 +7,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
-import type { DesktopBrowserCommand, DesktopBrowserEvent } from '@forge/protocol'
+import type { BrowserCookieTransfer, DesktopBrowserCommand, DesktopBrowserEvent } from '@forge/protocol'
 export class DesktopBrowserChannel {
   readonly available: boolean
   private readonly entries = new Map<string, { socket?: WebSocket; close(): Promise<void> }>()
   private readonly requests = new Map<string, { resolve(): void; reject(error: Error): void }>()
+  private readonly imports = new Map<string, { resolve(cookies: Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>): void; reject(error: Error): void }>()
   private readonly onMessage: (value: unknown) => void
   onInput: (tabId: string) => void = () => {}
   onClosed: (tabId: string) => void = () => {}
@@ -20,6 +21,7 @@ export class DesktopBrowserChannel {
     this.onMessage = raw => {
       if (!raw || typeof raw !== 'object') return
       const event = raw as DesktopBrowserEvent
+      if (event.type === 'forge:browser:cookies.result') { const pending = this.imports.get(event.requestId); if (event.cookies) pending?.resolve(event.cookies); else if (event.error) void import('./chrome-cookies.js').then(module => pending?.reject(new module.ChromeCookieReadError(event.error!))); return }
       if (event.type === 'forge:browser:created') this.requests.get(event.requestId)?.resolve()
       if (event.type === 'forge:browser:error') this.requests.get(event.requestId)?.reject(new Error(event.message))
       if (event.type === 'forge:browser:cdp' && typeof event.message === 'string' && event.message.length <= 16 * 1024 * 1024) this.entries.get(event.tabId)?.socket?.send(event.message)
@@ -27,6 +29,11 @@ export class DesktopBrowserChannel {
       if (event.type === 'forge:browser:closed') { this.entries.get(event.tabId)?.socket?.terminate(); this.onClosed(event.tabId) }
     }
     if (this.available) process.on('message', this.onMessage)
+  }
+  async readCookies(): Promise<Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>> {
+    const requestId = randomUUID()
+    const work = new Promise<Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>>((resolve, reject) => this.imports.set(requestId, { resolve, reject }))
+    try { this.send({ type: 'forge:browser:cookies.read', requestId }); return await work } finally { this.imports.delete(requestId) }
   }
   private send(message: DesktopBrowserCommand) { if (!this.available || !process.connected || !process.send) throw new Error('Desktop browser parent disconnected.'); process.send(message) }
   async create(tabId: string, projectId: string, viewport: { width: number; height: number }): Promise<{ page: Page; browser: Browser; close(): Promise<void> }> {
@@ -56,5 +63,5 @@ export class DesktopBrowserChannel {
     } catch (error) { await entry.close(); throw error }
   }
   resize(tabId: string, viewport: { width: number; height: number }) { this.send({ type: 'forge:browser:resize', tabId, viewport }) }
-  async shutdown() { process.off('message', this.onMessage); await Promise.allSettled([...this.entries.values()].map(entry => entry.close())) }
+  async shutdown() { process.off('message', this.onMessage); for (const pending of this.imports.values()) pending.reject(new Error('Desktop browser disconnected.')); this.imports.clear(); await Promise.allSettled([...this.entries.values()].map(entry => entry.close())) }
 }

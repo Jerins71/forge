@@ -575,7 +575,7 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
         observability: this.observabilityCoordinator,
       },
       toolHost: this,
-      browserAutomation: this.browserAutomationService,
+      browserAutomation: this.browserEngine ?? this.browserAutomationService,
       secureSessions: createSecureSessionLifecyclePort(this.secureSessionsService),
       descriptors: {
         upsertDescriptor: (descriptor) =>

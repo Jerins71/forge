@@ -31,7 +31,7 @@ export class SessionFeaturePublisher {
         listTerminalsForSession?: (id: string) => TerminalDescriptor[];
     }) {
         this.swarmManager = options.swarmManager;
-        this.browserEngine = options.browserEngine && createBrowserEngineRpc(options.browserEngine);
+        this.browserEngine = options.browserEngine && createBrowserEngineRpc(options.browserEngine, options.browserEngine.cookies);
         this.browserAutomationService = options.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
         this.listTerminalsForSession = options.listTerminalsForSession ?? (id => options.terminalService?.listTerminals(id) ?? []);
         this.browserHost = createBrowserHostRpc({ service: this.browserAutomationService, hydrateSessions: () => this.hydrateBrowserHostSessions(), resolveSession: id => this.resolveBrowserProfile(id) });

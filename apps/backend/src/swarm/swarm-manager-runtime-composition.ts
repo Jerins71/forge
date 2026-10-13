@@ -5,7 +5,7 @@ import { ProfileBootReconciler } from "./agents/descriptor-store/profile-boot-re
 import { WorkerBootRecovery } from "./agents/descriptor-store/worker-boot-recovery.js";
 import { ProjectAgentMirrorReconciler } from "./agents/descriptor-store/project-agent-mirror-reconciler.js";
 import { AssistantOutputRouter } from "./assistant-output-router.js";
-import type { BrowserAutomationService } from "./browser-automation/browser-automation-service.js";
+import type { BrowserLifecycle } from "./browser-automation/browser-lifecycle.js";
 import type {
   CodexPluginDelegationTurnContext,
   CodexPluginRetryAuthorizationContext,
@@ -198,7 +198,7 @@ export interface SwarmManagerRuntimeCompositionOptions {
     observability: SwarmObservabilityCoordinator;
   };
   toolHost: SwarmToolHost;
-  browserAutomation: BrowserAutomationService;
+  browserAutomation: BrowserLifecycle;
   attention: RuntimeCompositionAttentionHooks;
   secureSessions: SecureSessionCoordinatorPort;
   descriptors: RuntimeCompositionDescriptorMutations;

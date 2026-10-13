@@ -15,6 +15,7 @@ export class DesktopBrowserHost {
     const receive = (raw: unknown) => {
       if (!raw || typeof raw !== 'object') return
       const command = raw as DesktopBrowserCommand
+      if (command.type === 'forge:browser:cookies.read') { if (typeof command.requestId !== 'string' || command.requestId.length > 128) return; void import('../../../backend/src/swarm/browser-automation/chrome-cookies.js').then(module => module.readChromeDatabase().then(cookies => send({ type: 'forge:browser:cookies.result', requestId: command.requestId, cookies }), error => send({ type: 'forge:browser:cookies.result', requestId: command.requestId, error: error instanceof module.ChromeCookieReadError ? error.detail : { code: 'source-unavailable', message: 'Chrome cookies could not be read.' } }))); return }
       if (typeof command.tabId !== 'string' || !/^[0-9a-f-]{36}$/.test(command.tabId)) return
       if (command.type === 'forge:browser:create') {
         if (typeof command.projectId !== 'string' || typeof command.requestId !== 'string' || !validViewport(command.viewport)) return
