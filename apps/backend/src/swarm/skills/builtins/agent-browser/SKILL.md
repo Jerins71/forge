@@ -1,11 +1,11 @@
 ---
 name: agent-browser
-description: Interactive web browsing and extraction with the Vercel Labs agent-browser CLI.
+description: Headless agent-browser CLI for agents without Forge browser_* tools (such as workers). If browser_open is available, use it instead; the user sees those tabs in the Browser panel.
 ---
 
 # Agent Browser
 
-Use this skill for interactive browser tasks such as navigating pages, filling forms, extracting content, and taking screenshots.
+Use this skill for browser tasks only when the Forge `browser_*` tools are not available to you. When they are, use them: the user watches those tabs live in the Browser panel, and logins persist per project.
 
 Run the `agent-browser` CLI directly. This skill is documentation-only and does not provide wrapper scripts.
 
