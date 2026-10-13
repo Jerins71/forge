@@ -9,6 +9,18 @@ restrictChromeCookieImportsToFixtures()
 // Fixture failures must reach the test runner instead of opening Electron's
 // synchronous native exception dialog and blocking its teardown.
 process.on('uncaughtException', error => { process.stderr.write(`${error.stack ?? error.message}\n`); app.exit(1) })
+// Test Electron never takes over the user's screen: no Dock icon or focus, and its windows are real
+// (so native views composite) but transparent and click-through. FORGE_E2E_SHOW_WINDOWS=1 shows them.
+if (process.env.FORGE_E2E_SHOW_WINDOWS !== '1') {
+  if (process.platform === 'darwin') app.setActivationPolicy('accessory')
+  app.on('browser-window-created', (_event, window) => {
+    window.setOpacity(0)
+    window.setIgnoreMouseEvents(true)
+    window.setSkipTaskbar(true)
+    window.show = window.showInactive.bind(window)
+    window.focus = () => {}
+  })
+}
 app.commandLine.appendSwitch('use-mock-keychain')
 app.commandLine.appendSwitch('password-store', 'basic')
 app.setPath('userData', process.env.FORGE_ELECTRON_USER_DATA_DIR!)

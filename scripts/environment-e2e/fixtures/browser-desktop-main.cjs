@@ -11,6 +11,18 @@ assertDesktopSmokeIsolation({ root: process.env.FORGE_E2E_DESKTOP_ROOT, env: pro
 mkdirSync(process.env.FORGE_E2E_DESKTOP_HOME, { recursive: true })
 app.setPath('home', process.env.FORGE_E2E_DESKTOP_HOME)
 if (process.platform === 'win32') process.env.LOCALAPPDATA = join(process.env.FORGE_E2E_DESKTOP_HOME, 'AppData', 'Local')
+// Test Electron never takes over the user's screen: no Dock icon or focus, and its windows are real
+// (so native views composite) but transparent and click-through. FORGE_E2E_SHOW_WINDOWS=1 shows them.
+if (process.env.FORGE_E2E_SHOW_WINDOWS !== '1') {
+  if (process.platform === 'darwin') app.setActivationPolicy('accessory')
+  app.on('browser-window-created', (_event, window) => {
+    window.setOpacity(0)
+    window.setIgnoreMouseEvents(true)
+    window.setSkipTaskbar(true)
+    window.show = window.showInactive.bind(window)
+    window.focus = () => {}
+  })
+}
 app.commandLine.appendSwitch('use-mock-keychain')
 app.commandLine.appendSwitch('password-store', 'basic')
 // A smoke that restarts the app passes one ephemeral key to every launch, so stored credentials still decrypt.
