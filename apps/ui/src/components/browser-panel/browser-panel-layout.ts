@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { sidebarWidthAtViewport } from '@/components/chat/agent-sidebar/sidebar-width'
 
 const WIDTH_KEY = 'forge-browser-panel-width'
 const OPEN_KEY = 'forge-browser-panel-open'
@@ -69,16 +70,38 @@ export function browserPanelSessionKey(environmentId: string | null, sessionId: 
   return `${environmentId ?? 'local'}:${sessionId}`
 }
 
+/**
+ * An explicit open or close (the toggle, the panel's close button, an agent's page) asks Forge Desktop
+ * to make room for the panel; Desktop owns the window's size. Showing a session whose panel was left
+ * open or closed never resizes the window.
+ */
+function openExplicitly(sessionKey: string, open: boolean): void {
+  writeOpen(sessionKey, open)
+  const bridge = window.electronBridge?.setBrowserPanelWindow
+  if (bridge) void bridge({ open, growth: windowGrowthForPanel() }).catch(() => {})
+}
+
+/** How much wider the window must be for the panel to dock beside a chat that keeps its width:
+ * the panel, plus whatever the default sidebar (a share of the window) grows by. */
+function windowGrowthForPanel(): number {
+  const panel = readBrowserPanelWidth() ?? BROWSER_PANEL_DEFAULT_WIDTH
+  const width = window.innerWidth
+  let growth = panel
+  // The sidebar grows by at most a fifth of the added width, so this settles in a few steps.
+  for (let step = 0; step < 4; step += 1) growth = panel + sidebarWidthAtViewport(width + growth) - sidebarWidthAtViewport(width)
+  return Math.round(growth)
+}
+
 /** Opens the panel for a session the next time it is shown. */
 export function rememberBrowserPanelOpen(sessionKey: string): void {
-  writeOpen(sessionKey, true)
+  openExplicitly(sessionKey, true)
 }
 
 /** Whether the browser panel is open for one session; remembered per session across reloads. */
 export function useBrowserPanelOpen(sessionKey: string | null): [boolean, (open: boolean) => void] {
   const open = useSyncExternalStore(subscribeOpen, () => readOpen(sessionKey), () => false)
   const setOpen = useCallback((next: boolean) => {
-    if (sessionKey) writeOpen(sessionKey, next)
+    if (sessionKey) openExplicitly(sessionKey, next)
   }, [sessionKey])
   return [open, setOpen]
 }

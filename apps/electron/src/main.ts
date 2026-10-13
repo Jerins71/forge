@@ -19,7 +19,7 @@ import {
   MAIN_RENDERER_READY_CHANNEL,
   type MainRendererRecoveryController,
 } from './main-renderer-recovery.js'
-import { loadWindowState, trackWindowState } from './window-state.js'
+import { loadWindowState, setBrowserPanelWindowOpen, trackWindowState } from './window-state.js'
 import { consumePostUpdateInfo } from './whats-new.js'
 import { createEnvironmentCredentialService, installEnvironmentCredentialsIpc, readPrimaryEnvironmentActivity, ENVIRONMENT_ARTIFACT_SCHEME } from './environment-credentials-ipc.js'
 import { ensurePrimaryEnvironmentSession, writeEnvironmentInstallationManifest } from './environment-bootstrap-ipc.js'
@@ -693,6 +693,11 @@ if (!hasSingleInstanceLock) {
     if (!mainWindow || mainWindow.isDestroyed() || !isTrustedMainRenderer(event) || event.senderFrame !== event.sender.mainFrame) throw new Error('Browser presentation requires the Forge main renderer.')
     return mainWindow
   }
+  ipcMain.handle('forge:browser-panel:window', (event, input: { open?: unknown; growth?: unknown }) => {
+    const window = browserRenderer(event)
+    const growth = typeof input?.growth === 'number' && Number.isFinite(input.growth) ? Math.min(Math.max(input.growth, 0), 4096) : 0
+    setBrowserPanelWindowOpen(window, input?.open === true, growth)
+  })
   ipcMain.handle('forge:browser-engine:present', (event, input: Parameters<import('@forge/protocol').BrowserEngineDesktopBridge['present']>[0]) => {
     const window = browserRenderer(event)
     if (!input || typeof input.tabId !== 'string' || !input.bounds) throw new Error('Invalid browser presentation.')
@@ -979,7 +984,7 @@ function createMainWindow(): BrowserWindow {
 
   desktopBrowserHost.trackWindow(window)
 
-  trackWindowState(window)
+  trackWindowState(window, { browserPanel: savedState.browserPanel })
 
   window.once('ready-to-show', () => {
     if (savedState.isFullScreen) {

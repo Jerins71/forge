@@ -50,6 +50,8 @@ export interface ElectronBridge {
   platform: string
   /** Places the primary environment's native browser tab under the browser panel. */
   browserEngine?: import('@forge/protocol').BrowserEngineDesktopBridge
+  /** Widens the window for the docked browser panel when it opens, and narrows it back when it closes. */
+  setBrowserPanelWindow?(input: { open: boolean; growth: number }): Promise<void>
   showOpenDialog?(options: { title?: string; defaultPath?: string; properties?: Array<'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles'> }): Promise<{ canceled: boolean; filePaths: string[] }>
   onTerminalShortcut?(listener: (event: { action: 'toggle' | 'new' | 'next' | 'prev' }) => void): () => void
   updateTitleBarOverlay?(colors: { color: string; symbolColor: string }): void

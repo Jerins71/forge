@@ -1,5 +1,5 @@
 /** Runs the real desktop entry with owned data and synthetic OS credential storage.
- * The key exists only for this process. No real keychain or user credentials are read. */
+ * The key exists only for this process, or this smoke run when the smoke supplies it. No real keychain or user credentials are read. */
 const { app, safeStorage } = require('electron')
 const { createCipheriv, createDecipheriv, randomBytes } = require('node:crypto')
 const { isAbsolute, join } = require('node:path')
@@ -13,7 +13,8 @@ app.setPath('home', process.env.FORGE_E2E_DESKTOP_HOME)
 if (process.platform === 'win32') process.env.LOCALAPPDATA = join(process.env.FORGE_E2E_DESKTOP_HOME, 'AppData', 'Local')
 app.commandLine.appendSwitch('use-mock-keychain')
 app.commandLine.appendSwitch('password-store', 'basic')
-const key = randomBytes(32)
+// A smoke that restarts the app passes one ephemeral key to every launch, so stored credentials still decrypt.
+const key = /^[0-9a-f]{64}$/.test(process.env.FORGE_E2E_DESKTOP_FIXTURE_KEY ?? '') ? Buffer.from(process.env.FORGE_E2E_DESKTOP_FIXTURE_KEY, 'hex') : randomBytes(32)
 const encrypt = text => {
   const nonce = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', key, nonce)
