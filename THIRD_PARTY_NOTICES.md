@@ -19,6 +19,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | Forge file | T3 Code reference |
 | --- | --- |
 | `packages/protocol/src/browser-automation.ts` | Browser operation semantics, bounds, and viewport presets at `9a0a07167f0623c3a7db0ffeff2e3939760309df` |
+| `apps/electron/src/browser/desktop-browser-host.ts` | Profile partition identity and permission policy from `BrowserSession.ts` at `9a0a07167f0623c3a7db0ffeff2e3939760309df` |
 | `apps/electron/src/browser/cdp-relay.ts` | `apps/desktop/src/preview/CdpRelay.ts` at `df26ef99` |
 | `apps/backend/src/swarm/browser-automation/headless-browser.ts` | Chrome for Testing version, archive sizes and hashes in `PreviewBrowser.ts` at `df26ef99` |
 

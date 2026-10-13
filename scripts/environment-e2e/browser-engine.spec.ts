@@ -10,7 +10,7 @@ import { launchFleet, controlEnvironment, sanitizedEnvironment, type BootstrapSe
 import { seedUiEnvironment } from './fixtures/ui-fleet.js'
 import { openFixtureRpc, until } from './fixtures/rpc-client.js'
 import type { BrowserEngineSnapshot } from '@forge/protocol'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -105,6 +105,8 @@ test('Electron WebContentsView is driven through private CDP without a TCP brows
   try {
     await expect.poll(() => application.evaluate(() => typeof (globalThis as any).forgeBrowserFixture)).toBe('object')
     const call = (method: string, params: unknown): Promise<any> => application.evaluate(async (_electron, args) => (globalThis as any).forgeBrowserFixture.call(args.method, args.params), { method, params })
+    const existingPartition = `persist:forge-browser-${createHash('sha256').update('project').digest('hex').slice(0, 20)}`
+    await application.evaluate(async ({ session }, partition) => { await session.fromPartition(partition).cookies.set({ url: 'https://native.example.test', name: 'legacy-fixture', value: 'synthetic-project-login', expirationDate: Date.now() / 1000 + 3600 }) }, existingPartition)
     const opened = await call('open', { url: `http://127.0.0.1:${(server.address() as { port: number }).port}` }); const tabId = opened.activeTabId
     expect(opened.tabs[0].host).toBe('desktop'); expect(await call('cast-proof', { tabId })).toMatchObject({ width: 1280, height: 800 }); await application.evaluate((_electron, id) => (globalThis as any).forgeBrowserFixture.present(id), tabId)
     expect((await call('tool', { operation: 'type', input: { tabId, locator: 'label=Email', text: 'native@example.test', clear: true, timeoutMs: 15000 } })).ok).toBe(true)
@@ -121,14 +123,15 @@ test('Electron WebContentsView is driven through private CDP without a TCP brows
     expect((await bounds()).length).toBe(beforeResize.length - 1)
     const hiddenFrame = await call('cast-proof', { tabId }); expect(hiddenFrame.width / hiddenFrame.height).toBeCloseTo(800 / 600)
     const viewportProof = await call('tool', { operation: 'evaluate', input: { tabId, expression: '({width:innerWidth,height:innerHeight})', awaitPromise: true, returnByValue: true } }); expect(viewportProof.result.value).toEqual({ width: 800, height: 600 })
-    expect(await call('cookie-proof', {})).toContain('native-fixture')
+    const nativeCookies = await call('cookie-proof', {}); expect(nativeCookies).toContain('native-fixture'); expect(nativeCookies).toContain('legacy-fixture'); expect(await call('cookie-isolation-proof', {})).not.toContain('native-fixture')
+    const mediaPermission = await call('tool', { operation: 'evaluate', input: { tabId, expression: 'navigator.permissions.query({name:"camera"}).then(permission => permission.state)', awaitPromise: true, returnByValue: true } }); expect(mediaPermission.result.value).toBe('denied')
     if (process.platform === 'darwin') {
       const pid = await application.evaluate(() => (globalThis as any).forgeBrowserFixture.backendPid)
       const listeners = await promisify(execFile)('lsof', ['-a', '-p', String(pid), '-iTCP', '-sTCP:LISTEN']).then(value => value.stdout, error => { if (error.code === 1) return ''; throw error })
       expect(listeners).toBe('')
     }
     await call('shutdown', {})
-    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'native-browser-proof.json'), JSON.stringify({ passed: true, platform: process.platform, host: 'WebContentsView', privateTransport: 'fork IPC and ws+unix', foreignIframe: true, operations: ['open', 'snapshot', 'click', 'type', 'evaluate'] }, null, 2))
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'native-browser-proof.json'), JSON.stringify({ passed: true, platform: process.platform, host: 'WebContentsView', existingProjectLoginPreserved: true, mediaPermissionDenied: true, keychain: 'mocked in isolated fixture', privateTransport: 'fork IPC and ws+unix', foreignIframe: true, operations: ['open', 'snapshot', 'click', 'type', 'evaluate'] }, null, 2))
   } finally { await application.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
 })
 

@@ -4,6 +4,8 @@ import { fork } from 'node:child_process'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DesktopBrowserHost } from './desktop-browser-host.js'
+app.commandLine.appendSwitch('use-mock-keychain')
+app.commandLine.appendSwitch('password-store', 'basic')
 app.setPath('userData', process.env.FORGE_ELECTRON_USER_DATA_DIR!)
 void app.whenReady().then(async () => {
   const window = new BrowserWindow({ width: 1400, height: 1000, show: false, webPreferences: { sandbox: true, nodeIntegration: false, contextIsolation: true } })

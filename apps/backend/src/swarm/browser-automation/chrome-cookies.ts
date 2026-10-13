@@ -5,6 +5,7 @@ import { homedir } from 'node:os'
 import { join, resolve, relative, isAbsolute } from 'node:path'
 import { createDecipheriv, pbkdf2Sync, createHash } from 'node:crypto'
 import { DatabaseSync } from 'node:sqlite'
+import { WebSocket } from 'ws'
 import type { BrowserCookieError, BrowserCookieTransfer } from '@forge/protocol'
 export type ImportCookie = BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }
 export class ChromeCookieReadError extends Error {
@@ -34,17 +35,32 @@ export async function readRunningChrome(userDataDir?: string): Promise<ImportCoo
     if (!/^\d+$/.test(port ?? '') || Number(port) < 1 || Number(port) > 65535 || !/^\/devtools\/browser\/[\w-]+$/.test(path ?? '')) return fail('chrome-not-running', 'Enable remote debugging in Chrome 144+ at chrome://inspect/#remote-debugging, then retry Import from Chrome.')
     endpoint = `ws://127.0.0.1:${port}${path}`
   } catch { return fail('chrome-not-running', 'Chrome is not sharing its browser connection. In Chrome 144+, enable remote debugging at chrome://inspect/#remote-debugging and retry.') }
-  const { chromium } = await import('playwright-core')
-  let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>>
-  try { browser = await chromium.connectOverCDP(endpoint, { timeout: 15000 }) }
-  catch { return fail('chrome-consent-required', 'Allow Forge in Chrome’s remote-debugging consent dialog, then retry. If Chrome is closed, reopen it and enable the inspect toggle.') }
+  // Cookie import is a read-only browser-level command. Playwright's CDP
+  // connection also attaches to every page, which import does not need.
+  const socket = new WebSocket(endpoint, { maxPayload: 8 * 1024 * 1024 })
+  let connected = false
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const cdp = await browser.newBrowserCDPSession(); const response = await cdp.send('Storage.getCookies')
-    if (response.cookies.some(cookie => cookie.partitionKeyOpaque)) return fail('source-unavailable', 'Chrome contains opaque cookie partitions that cannot be imported safely.')
-    return response.cookies.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite ?? 'Lax', ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey.topLevelSite, partitionHasCrossSiteAncestor: cookie.partitionKey.hasCrossSiteAncestor } : {}) }))
-  } catch (error) { if (error instanceof ChromeCookieReadError) throw error; return fail('chrome-disconnected', 'Chrome disconnected while reading cookies. Keep Chrome open and retry.') }
-  finally { await browser.close() }
+    type SourceCookie = Omit<ImportCookie, 'partitionKey'> & { partitionKey?: { topLevelSite: string; hasCrossSiteAncestor: boolean }; partitionKeyOpaque?: boolean }
+    const cookies = await new Promise<SourceCookie[]>((resolve, reject) => {
+      const disconnected = () => reject(new ChromeCookieReadError({ code: connected ? 'chrome-disconnected' : 'chrome-consent-required', message: connected ? 'Chrome disconnected while reading cookies. Keep Chrome open and retry.' : 'Allow Forge in Chrome’s remote-debugging consent dialog, then retry. Keep Chrome open with the inspect toggle enabled.' }))
+      timer = setTimeout(disconnected, 150000)
+      socket.once('open', () => { connected = true; socket.send(JSON.stringify({ id: 1, method: 'Storage.getCookies', params: {} })) })
+      socket.once('error', disconnected); socket.once('close', disconnected)
+      socket.on('message', raw => {
+        try {
+          const response = JSON.parse(raw.toString()) as { id?: number; result?: { cookies?: SourceCookie[] }; error?: unknown }
+          if (response.id !== 1) return
+          if (response.error || !Array.isArray(response.result?.cookies)) { disconnected(); return }
+          resolve(response.result.cookies)
+        } catch { disconnected() }
+      })
+    })
+    if (cookies.some(cookie => cookie.partitionKeyOpaque)) return fail('source-unavailable', 'Chrome contains opaque cookie partitions that cannot be imported safely.')
+    return cookies.map(cookie => ({ name: cookie.name, value: cookie.value, domain: cookie.domain, path: cookie.path, expires: cookie.expires, httpOnly: cookie.httpOnly, secure: cookie.secure, sameSite: cookie.sameSite ?? 'Lax', ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey.topLevelSite, partitionHasCrossSiteAncestor: cookie.partitionKey.hasCrossSiteAncestor } : {}) }))
+  } finally { clearTimeout(timer); socket.removeAllListeners(); socket.on('error', () => {}); socket.close() }
 }
+
 async function macPassphrase(): Promise<string> {
   try { const { Entry } = await import('@napi-rs/keyring'); const value = new Entry('Chrome Safe Storage', 'Chrome').getPassword(); if (value) return value }
   catch { return fail('keychain-denied', 'Allow Forge to read Chrome Safe Storage in the macOS Keychain prompt, then retry.') }

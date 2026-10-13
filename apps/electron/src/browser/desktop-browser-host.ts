@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
 import type { BrowserEngineDesktopBridge, DesktopBrowserCommand, DesktopBrowserEvent } from '@forge/protocol'
 import { createCdpRelayConnection } from './cdp-relay.js'
+const allowedPermissions = new Set(['clipboard-read', 'clipboard-sanitized-write', 'notifications', 'geolocation'])
 /** Physical pages only. Agent policy, tab state and all Playwright live in the
  * environment backend. The one child IPC channel is the only CDP authority. */
 export class DesktopBrowserHost {
@@ -31,17 +32,24 @@ export class DesktopBrowserHost {
   }
   private async create(command: Extract<DesktopBrowserCommand, { type: 'forge:browser:create' }>, send: (event: DesktopBrowserEvent) => void) {
     if (this.tabs.has(command.tabId)) { send({ type: 'forge:browser:created', requestId: command.requestId, tabId: command.tabId }); return }
-    const partition = `persist:forge-browser-${createHash('sha256').update(command.projectId).digest('hex')}`
+    const partition = `persist:forge-browser-${createHash('sha256').update(command.projectId).digest('hex').slice(0, 20)}`
     const view = new WebContentsView({ webPreferences: { partition, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } })
+    // Keep the established partition name so existing Forge project logins survive.
+    view.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => callback(allowedPermissions.has(permission)))
+    view.webContents.session.setPermissionCheckHandler((_contents, permission) => allowedPermissions.has(permission))
     view.setBounds({ x: 0, y: 0, ...command.viewport })
     const wc = view.webContents; wc.debugger.attach('1.3')
-    let targetId: string | undefined
+    let target: { targetId: string; browserContextId?: string } | undefined
+    const targetInfo = async () => { target ??= ((await wc.debugger.sendCommand('Target.getTargetInfo')) as { targetInfo: NonNullable<typeof target> }).targetInfo; return target }
     const tab = { view, inputDepth: 0, relay: createCdpRelayConnection({
       send: async (method, params, sessionId) => {
+        // Storage commands on a page debugger address Electron's default session.
+        // Its Network cookie commands are scoped to this WebContentsView's partition.
+        method = ({ 'Storage.getCookies': 'Network.getAllCookies', 'Storage.setCookies': 'Network.setCookies', 'Storage.clearCookies': 'Network.clearBrowserCookies' } as Record<string, string>)[method] ?? method
         const input = method.startsWith('Input.'); if (input) tab.inputDepth++
         try { return await wc.debugger.sendCommand(method, params, sessionId) } finally { if (input) tab.inputDepth-- }
       },
-      targetId: async () => { if (!targetId) targetId = ((await wc.debugger.sendCommand('Target.getTargetInfo')) as { targetInfo: { targetId: string } }).targetInfo.targetId; return targetId },
+      targetId: async () => (await targetInfo()).targetId,
       url: () => wc.getURL(), title: () => wc.getTitle(), userAgent: () => wc.getUserAgent(), setDownloadDirectory: () => {},
     }, message => send({ type: 'forge:browser:cdp', tabId: command.tabId, message })) }
     this.tabs.set(command.tabId, tab)
