@@ -82,6 +82,7 @@ export class BrowserEngine {
   readonly desktop: DesktopBrowserChannel
   readonly headless: HeadlessBrowser
   private readonly sessions = new Map<string, Promise<Session>>()
+  private readonly cancellationGenerations = new Map<string, number>()
   private readonly watchers = new Map<string, Set<(snapshot: BrowserEngineSnapshot) => void>>()
   private readonly options: { dataDir: string; resolveSession(sessionId: string): string | undefined; browserCacheDir?: string; desktop?: DesktopBrowserChannel }
   constructor(options: BrowserEngine['options']) {
@@ -151,11 +152,17 @@ export class BrowserEngine {
   }
   async getSnapshot(sessionId: string) { return this.snapshot(await this.session(sessionId)) }
   watch(sessionId: string, send: (snapshot: BrowserEngineSnapshot) => void): () => void { this.project(sessionId); const watchers = this.watchers.get(sessionId) ?? new Set(); watchers.add(send); this.watchers.set(sessionId, watchers); return () => { watchers.delete(send); if (!watchers.size) this.watchers.delete(sessionId) } }
-  async open(sessionId: string, input: { url?: string; activate?: boolean }) {
+  private checkOpenGeneration(sessionId: string, generation: number) { if ((this.cancellationGenerations.get(sessionId) ?? 0) !== generation) throw new Error('Browser open aborted because the session was stopped.') }
+  async open(sessionId: string, input: { url?: string; activate?: boolean }, generation = this.cancellationGenerations.get(sessionId) ?? 0) {
     const session = await this.session(sessionId); if (session.tabs.size >= 100) throw new Error('This browser session already has 100 tabs.')
-    const tabId = randomUUID(); const tab = await this.create(session, tabId, { width: 1280, height: 800 }); if (session.closed || this.project(sessionId) !== session.snapshot.projectId) { await tab.dispose(); throw new Error('Browser session was closed during tab creation.') }; session.tabs.set(tabId, tab)
+    this.checkOpenGeneration(sessionId, generation)
+    const tabId = randomUUID(); const tab = await this.create(session, tabId, { width: 1280, height: 800 })
+    try { this.checkOpenGeneration(sessionId, generation); if (session.closed || this.project(sessionId) !== session.snapshot.projectId) throw new Error('Browser session was closed during tab creation.') }
+    catch (error) { tab.closing = true; await tab.dispose(); throw error }
+    session.tabs.set(tabId, tab)
     if (input.activate !== false || !session.snapshot.activeTabId) session.snapshot.activeTabId = tabId
     this.publish(session)
+    try { this.checkOpenGeneration(sessionId, generation) } catch (error) { await this.close(sessionId, tabId); throw error }
     if (input.url) await this.navigate(sessionId, tabId, { url: input.url }); else await this.persist(session)
     return this.snapshot(session)
   }
@@ -215,11 +222,25 @@ export class BrowserEngine {
     } catch (error) { return { ok: false, operation, error: { code: error instanceof Error && /interrupt|abort/i.test(error.message) ? 'request-cancelled' : 'execution-failed', message: error instanceof Error ? error.message.slice(0, 1024) : 'Browser operation failed.', retryable: false } } }
   }
   private async perform(sessionId: string, operation: BrowserAutomationOperation, input: BrowserAutomationInputByOperation[BrowserAutomationOperation]): Promise<unknown> {
+    const sessionGeneration = this.cancellationGenerations.get(sessionId) ?? 0
     if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: snapshot.browserEngineState !== 'failed' && snapshot.browserEngineState !== 'needs-host-setup', ...this.setupState(), selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ?? null, tabs: snapshot.tabs } }
-    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; if (value.tabId && !existing) throw new Error('The requested browser tab does not belong to this session.'); const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false } }
+    if (operation === 'open') {
+      const generation = this.cancellationGenerations.get(sessionId) ?? 0
+      const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId)
+      this.checkOpenGeneration(sessionId, generation)
+      const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined
+      if (value.tabId && !existing) throw new Error('The requested browser tab does not belong to this session.')
+      const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}, generation)
+      try {
+        this.checkOpenGeneration(sessionId, generation)
+        if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' })
+      } catch (error) { if (!existing && (this.cancellationGenerations.get(sessionId) ?? 0) !== generation) await this.close(sessionId, snapshot.activeTabId!).catch(() => {}); throw error }
+      return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false }
+    }
     const { session, tab } = await this.tab(sessionId, input.tabId)
     const actionEpoch = tab.actionEpoch
     const run = async () => {
+      this.checkOpenGeneration(sessionId, sessionGeneration)
       if (tab.actionEpoch !== actionEpoch) throw new Error('User input interrupted this browser action.')
       const action = new AbortController(); tab.action = action; tab.state.controller = 'agent'; tab.state.agentAction = actionLabel(operation, input); this.publish(session)
       try { const result = await this.action(session, tab, operation, input, action.signal); action.signal.throwIfAborted(); await this.refresh(tab); return result }
@@ -272,6 +293,7 @@ export class BrowserEngine {
     return { tabId: tab.state.tabId, url: tab.page.url(), title: await tab.page.title(), loading: tab.state.loading, viewportSetting: { mode: 'freeform', ...tab.state.viewport }, viewport: { ...tab.state.viewport, deviceScaleFactor: 1 }, visibleText: visibleText.slice(0, 20000), interactiveElements, accessibility: accessibility.slice(0, 64000), consoleEntries: tab.console.slice(), networkEntries: tab.network.slice(), actionTimeline: [], screenshot: { mimeType: 'image/png', data: image.data.toString('base64'), width: image.info.width, height: image.info.height } }
   }
   cancelSession(sessionId: string): number {
+    this.cancellationGenerations.set(sessionId, (this.cancellationGenerations.get(sessionId) ?? 0) + 1)
     const loaded = this.sessions.get(sessionId)
     if (loaded) void loaded.then(session => { for (const tab of session.tabs.values()) { tab.actionEpoch++; tab.action?.abort(new Error('Browser session was stopped.')) } }).catch(() => {})
     return loaded ? 1 : 0

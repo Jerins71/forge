@@ -18,6 +18,44 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserEngine } from '../../apps/backend/src/swarm/browser-automation/browser-engine.js'
 
+test('Stop fences agent open during context creation, page creation and publication', async ({}, info) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-stop-open-'))
+  let requests = 0
+  const server = createServer((_request, response) => { requests++; response.end('<title>Must not navigate</title>') })
+  server.listen(0, '127.0.0.1'); await once(server, 'listening')
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  const report: string[] = []
+  try {
+    for (const phase of ['context', 'page', 'published'] as const) {
+      const engine = new BrowserEngine({ dataDir: join(root, phase), browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime'), resolveSession: () => 'project' })
+      let release!: () => void, entered!: () => void
+      const pause = new Promise<void>(resolve => { release = resolve }), ready = new Promise<void>(resolve => { entered = resolve })
+      const original = engine.headless.context.bind(engine.headless)
+      engine.headless.context = async project => {
+        if (phase === 'context') { entered(); await pause }
+        const context = await original(project)
+        if (phase === 'page') {
+          const newPage = context.newPage.bind(context)
+          context.newPage = async () => { entered(); await pause; return newPage() }
+        }
+        return context
+      }
+      const unwatch = engine.watch('session', snapshot => { if (phase === 'published' && snapshot.tabs.length) engine.cancelSession('session') })
+      try {
+        const opening = engine.invoke('session', 'project', 'open', { url, show: false, reuseExistingTab: false })
+        if (phase !== 'published') { await ready; engine.cancelSession('session'); release() }
+        const result = await opening
+        expect(result.ok).toBe(false)
+        if (!result.ok) expect(result.error.code).toBe('request-cancelled')
+        expect((await engine.getSnapshot('session')).tabs).toHaveLength(0)
+        expect((await original('project')).pages()).toHaveLength(0)
+        expect(requests).toBe(0); report.push(phase)
+      } finally { unwatch(); release(); await engine.shutdown() }
+    }
+  } finally { server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
+  await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'stop-open-proof.json'), JSON.stringify({ passed: true, cancelled: report, abandonedPagesDisposed: true, navigationRequests: requests }, null, 2))
+})
+
 test('desktop smoke refuses real-home storage and escaping symlinks before launch', async ({}, info) => {
   const require = createRequire(import.meta.url)
   const { assertDesktopSmokeIsolation } = require('./fixtures/desktop-smoke-isolation.cjs') as { assertDesktopSmokeIsolation(input: { root: string; env: NodeJS.ProcessEnv; cacheRoot: string }, realHome?: string): void }
