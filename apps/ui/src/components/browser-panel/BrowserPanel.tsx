@@ -27,6 +27,11 @@ export function BrowserPanel({ port, snapshot, docked, onClose }: BrowserPanelPr
   const ready = usable(snapshot)
   const activeTab = snapshot.tabs.find((tab) => tab.tabId === snapshot.activeTabId) ?? null
 
+  // A failed action's message is stale once the browser's state changes, and while the state view
+  // itself explains what is wrong (setup needed, install failed) a generic banner only repeats it.
+  const availability = snapshot.availability.kind === 'setup' ? `setup:${snapshot.availability.state}` : snapshot.availability.kind
+  useEffect(() => { setError(null) }, [availability])
+
   const run = (action: () => Promise<unknown>) => {
     setError(null)
     action().catch((caught: unknown) => setError(caught instanceof Error ? caught.message : String(caught)))
@@ -88,7 +93,7 @@ export function BrowserPanel({ port, snapshot, docked, onClose }: BrowserPanelPr
         <div className="relative flex min-h-0 flex-1 flex-col">
           <BrowserContent port={port} snapshot={snapshot} activeTab={activeTab} onNewTab={newTab} onReload={withTab((tab) => port.reload(tab.tabId))} />
         </div>
-        {error ? (
+        {error && ready ? (
           <div role="alert" className="flex items-start gap-2 border-t border-destructive/20 bg-destructive/[0.06] px-3 py-2 text-[12px] text-destructive">
             <span className="min-w-0 flex-1">{error}</span>
             <button type="button" aria-label="Dismiss" onClick={() => setError(null)} className="rounded p-0.5 hover:bg-destructive/10"><X className="size-3" /></button>

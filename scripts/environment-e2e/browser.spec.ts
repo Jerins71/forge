@@ -330,9 +330,14 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await mock(`engine.setAvailability({ kind: 'setup', state: 'missing', machineLabel: 'env-b' })`)
     await expect(panel(mockPage).getByText('This machine has no browser yet')).toBeVisible()
     await shot(mockPage, 'setup')
+    // A refused open shows its error, but it never outlives the state it belonged to.
+    await mock(`(engine.failNextOpen = 'Unable to complete request.', true)`)
+    await panel(mockPage).getByRole('button', { name: /Open a page|New tab/ }).first().click()
+    await expect(panel(mockPage).getByRole('alert')).toContainText('Unable to complete request.')
     await panel(mockPage).getByRole('button', { name: 'Set up' }).click()
     await expect(panel(mockPage).getByText('Setting up the browser…')).toBeVisible()
     await expect(panel(mockPage).getByText('Setting up the browser…')).toHaveCount(0, { timeout: 5_000 })
+    await expect(panel(mockPage).getByRole('alert')).toHaveCount(0)
 
     // Below 1024px the panel floats over the chat instead of squeezing it.
     await mock(`engine.agentOpen('https://example.com/docs', 'Reading the docs')`)
