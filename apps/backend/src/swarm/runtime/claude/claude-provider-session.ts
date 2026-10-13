@@ -70,6 +70,14 @@ export class ClaudeProviderSession {
       if (pending) { clearTimeout(pending.timer); pending.resolve({ status: "unknown" }); }
     }
   }
+  /** The CLI can wake after a result without a Forge prompt. Report that native continuation before its output. */
+  continueTurn(nativeId: string): void {
+    if (!this.current || !this.terminalSeen || !this.current.accepted || this.interrupted || this.refused) return;
+    this.terminalSeen = false;
+    this.current.turn = { ...this.current.turn, nativeId };
+    this.blocks.clear(); this.messages.clear();
+    this.publish({ type: "accepted", origin: this.origin(), turn: this.current.turn });
+  }
   turnActive(turn: ProviderTurnRef, attemptId?: string): boolean {
     return !!this.current && !this.terminalSeen && turn.nativeId === this.current.turn.nativeId
       && (attemptId === undefined || attemptId === this.current.attemptId);

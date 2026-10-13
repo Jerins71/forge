@@ -19,6 +19,7 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
   let allowClose = true;
   const consumed = vi.fn();
   const errors = vi.fn();
+  const statuses = vi.fn();
   const native = { interrupt: vi.fn(async () => {}), backgroundTasks: vi.fn(async (_id: string) => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
     close: vi.fn(() => { if (!allowClose) return; ended = true; waiting?.({ done: true, value: undefined }); }),
     [Symbol.asyncIterator]() { return this; }, next(): Promise<IteratorResult<SDKMessage>> {
@@ -31,15 +32,32 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
     sessionFile: join(root, "session.jsonl"), model: { provider: "claude-native", modelId: "claude-opus-5-5", thinkingLevel: "medium" } } as AgentDescriptor,
     systemPrompt: options.prompt ?? "Current Forge prompt", executable: "unused", env: {}, projectTrusted: false, tools: [], host: { requestUserChoice: vi.fn() },
     creationOptions: { secureRuntimeBinding: options.binding },
-    callbacks: { onStatusChange: vi.fn(), onSessionEvent: (_id, event) => { events.push(event); }, onAgentEnd: options.onEnd ?? vi.fn(), onRuntimeError: errors },
+    callbacks: { onStatusChange: statuses, onSessionEvent: (_id, event) => { events.push(event); }, onAgentEnd: options.onEnd ?? vi.fn(), onRuntimeError: errors },
     createQuery: args => { input = (args.prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator](); setup = args.options!; return native as never; },
   });
-  return { runtime, setup, consumed, errors, events, input, native, allowClose: (value: boolean) => { allowClose = value; },
+  return { runtime, setup, consumed, errors, statuses, events, input, native, allowClose: (value: boolean) => { allowClose = value; },
     emit: async (frame: unknown) => { if (waiting) { const next = waiting; waiting = undefined; next({ done: false, value: frame as SDKMessage }); } else frames.push(frame as SDKMessage); await new Promise(resolve => setTimeout(resolve, 5)); },
   };
 }
 
 describe("Claude native lifecycle", () => {
+  // A native completion wake can start with streaming frames after the previous result. It has no new Forge input.
+  it("publishes running immediately for an unsolicited native wake turn, and permits steering it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-native-wake-")); const f = await fixture(root);
+    const result = { type: "result", subtype: "success", is_error: false, result: "Done", duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: {} };
+    try {
+      await f.runtime.sendMessage("Start background work"); const input = (await f.input.next()).value!;
+      await f.emit({ type: "user", user_message_uuid: input.uuid, message: { role: "user", content: "Start background work" } });
+      await f.emit(result); expect(f.runtime.getStatus()).toBe("idle");
+      const before = f.statuses.mock.calls.length;
+      await f.emit({ type: "stream_event", event: { type: "message_start", message: { id: "wake", usage: { input_tokens: 1 } } } });
+      expect(f.runtime.getStatus()).toBe("streaming");
+      expect(f.statuses.mock.calls.slice(before)).toContainEqual(["owner", "streaming", 0, expect.anything()]);
+      const receipt = await f.runtime.sendMessage("update?"); expect(receipt.acceptedMode).toBe("steer");
+      await f.input.next(); await f.emit(result);
+    } finally { await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("settles a scheduled wait as soon as its fired prompt arrives", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-wake-fire-")); const f = await fixture(root);
     try {

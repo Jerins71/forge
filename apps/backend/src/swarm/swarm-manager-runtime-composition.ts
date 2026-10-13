@@ -455,7 +455,12 @@ export class SwarmManagerRuntimeComposition {
       getRuntimeToken: (agentId) => this.runtimeController.getRuntimeToken(agentId),
       attention: {
         observePendingQueueChange: (agentId) => this.options.attention.reportPendingTurn(agentId),
-        observeRunOutcome: ({ agentId, outcome }) => this.options.attention.reportRunOutcome(agentId, outcome),
+        observeRunOutcome: ({ agentId, outcome, runId, error }) => {
+          // Every failure attention has an explanatory canonical row, even when admission failed
+          // before a provider observation existed. The timeline deduplicates an already reported failure.
+          if (outcome === "failed") services.conversation.settleProviderTurn(agentId, { runId, error: error ?? "The turn failed before it could finish." });
+          return this.options.attention.reportRunOutcome(agentId, outcome);
+        },
         releaseContinuationBarrier: (agentId) =>
           this.options.attention.reportContinuationAbandoned(agentId),
       },

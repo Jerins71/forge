@@ -40,6 +40,16 @@ describe("SessionAttentionCoordinator failure supersede", () => {
     expect(coordinator.getSnapshot().attentions).toEqual([]);
   });
 
+  // A queued follow-up can succeed without an idle->streaming edge between roots; its success supersedes the earlier failure in that same epoch.
+  it.each(["manager", "owned_worker"] as const)("a %s success in a continuing epoch only clears the manager's own earlier failure", async source => {
+    const coordinator = await failedSession();
+    const working = session({ manager: { ...manager, status: "streaming" }, pendingTurnContextCount: 1 });
+    await coordinator.observeStatus({ ...working, agentId: manager.agentId, source: "manager", previousStatus: "idle", nextStatus: "streaming", turnInitiator: "user", transitionedAt: new Date().toISOString() });
+    await coordinator.observeRunOutcome(working, "failed");
+    await coordinator.observeRunOutcome(session(), "completed", source);
+    expect(coordinator.getSnapshot().attentions.map(row => row.reason)).toEqual([source === "manager" ? "work_settled" : "work_failed"]);
+  });
+
   it("keeps failure attention while an owned worker is still errored", async () => {
     const coordinator = await failedSession();
     await coordinator.observeRunOutcome(session({ hasTerminallyErroredWorker: true }), "completed");
