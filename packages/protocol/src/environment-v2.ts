@@ -11,6 +11,8 @@ import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, Elicit
 export * from './detail-features-v2.js'
 import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2Schema, BrowserHostV2Schema, BrowserHostLeaseV2Schema, BrowserHostStreamV2Schema, BrowserStreamV2Schema, BrowserRecordingV2Schema } from './browser-v2.js'
 export * from './browser-v2.js'
+import { browserEngineSchemas as B, BrowserEngineSnapshotSchema, BrowserEngineStreamSchema, BrowserScreencastItemSchema, BrowserCookiePreviewSchema, BrowserCookieTransferSchema, BrowserCookieAuditSchema } from './browser-engine-v2.js'
+export * from './browser-engine-v2.js'
 import { ContextSourceSelectorSchema, ThreadLineageSchema, SessionLineageSnapshotSchema } from './lineage-v2.js'
 export * from './lineage-v2.js'
 import { SESSION_ATTENTION_REASONS } from './session-attention.js'
@@ -88,6 +90,8 @@ export type Scope = Static<typeof ScopeSchema>
 export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItems: 1, maxItems: 7 })
 
 export const EnvironmentCapabilitiesSchema = O({
+  /** Playwright tabs and live view are available on this environment. */
+  browserEngine: Type.Optional(Type.Boolean()),
   shellResume: Type.Boolean(),
   sessionDetail: Type.Boolean(),
   durableCommands: Type.Boolean(),
@@ -487,6 +491,24 @@ export const rpcSchemas = {
     data: Type.String({ maxLength: 16_384 }) }), V2Empty),
   'terminal.resize': defineRpc(O({ subscriptionId: V2Id,
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
+  'browser.tabs.get': defineRpc(B.session, BrowserEngineSnapshotSchema),
+  'browser.tabs.subscribe': defineRpc(B.session, SubscribeResult, { stream: BrowserEngineStreamSchema }),
+  'browser.tabs.open': defineRpc(B.open, BrowserEngineSnapshotSchema),
+  'browser.tabs.activate': defineRpc(B.tab, BrowserEngineSnapshotSchema),
+  'browser.tabs.close': defineRpc(B.tab, BrowserEngineSnapshotSchema),
+  'browser.tabs.navigate': defineRpc(B.navigate, BrowserEngineSnapshotSchema),
+  'browser.tabs.resize': defineRpc(B.resize, BrowserEngineSnapshotSchema),
+  'browser.tabs.input': defineRpc(B.input, V2Empty),
+  'browser.tabs.recording.start': defineRpc(B.tab, BrowserRecordingV2Schema),
+  'browser.tabs.recording.stop': defineRpc(B.tab, BrowserRecordingV2Schema),
+  'browser.screencast.subscribe': defineRpc(B.screencast, SubscribeResult, { stream: BrowserScreencastItemSchema }),
+  'browser.screencast.ack': defineRpc(B.ack, V2Empty),
+  'browser.cookies.preview': defineRpc(B.preview, BrowserCookiePreviewSchema),
+  'browser.cookies.apply': defineRpc(B.apply, BrowserCookieAuditSchema),
+  'browser.cookies.prepareSend': defineRpc(B.prepareSend, BrowserCookieTransferSchema),
+  'browser.cookies.receive': defineRpc(B.receive, BrowserCookieAuditSchema),
+  'browser.cookies.audit': defineRpc(B.session, BrowserCookieAuditSchema),
+  'browser.cookies.forget': defineRpc(B.forget, BrowserCookieAuditSchema),
   'browser.get': defineRpc(SessionInput, BrowserSnapshotV2Schema),
   'browser.subscribe': defineRpc(SessionInput, SubscribeResult, { stream: BrowserStreamV2Schema }),
   'browser.tab.open': defineRpc(O({ commandId: V2Uuid, sessionId: V2Id, url: Type.Optional(Type.String({ maxLength: 2048 })), activate: Type.Optional(Type.Boolean()) }), CommandReceiptSchema, { receipt: true }),
@@ -531,6 +553,11 @@ export const rpcScopes = {
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
+  'browser.tabs.get': 'session:read', 'browser.tabs.subscribe': 'session:read',
+  'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.input': 'session:operate',
+  'browser.tabs.recording.start': 'session:operate', 'browser.tabs.recording.stop': 'session:operate',
+  'browser.screencast.subscribe': 'session:read', 'browser.screencast.ack': 'session:read',
+  'browser.cookies.preview': 'session:operate', 'browser.cookies.apply': 'session:operate', 'browser.cookies.prepareSend': 'session:operate', 'browser.cookies.receive': 'session:operate', 'browser.cookies.audit': 'session:read', 'browser.cookies.forget': 'session:operate',
   'browser.get': 'session:read', 'browser.subscribe': 'session:read',
   'browser.tab.open': 'session:operate', 'browser.tab.activate': 'session:operate', 'browser.tab.close': 'session:operate', 'browser.tab.resize': 'session:operate',
   'browser.recording.start': 'session:operate', 'browser.recording.stop': 'session:operate',
