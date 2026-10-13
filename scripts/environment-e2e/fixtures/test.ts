@@ -5,10 +5,10 @@ import { launchFleet, readManifest, verifyFleetHealth, repositoryRoot } from '..
 
 /** Suites whose Claude sessions run the real Claude Code against a scripted model; Codex sessions are unchanged. */
 const BACKEND_ENTRIES: Record<string, string> = { 'lineage-ui': 'lineage-backend-process.ts', activity: 'claude-backend-process.ts' };
-/** The browser suite reuses one pinned headless Chrome download across runs (gitignored), and gives its
- * backends a throwaway HOME so Import from Chrome reads a seeded fixture Chrome, never the user's own. */
-export const BROWSER_E2E_HOME = join(repositoryRoot, '.internal/browser-e2e-home');
-const BACKEND_ENV: Record<string, NodeJS.ProcessEnv> = { browser: { FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), HOME: BROWSER_E2E_HOME } };
+/** The browser suite reuses one pinned headless Chrome download across runs (gitignored), and points
+ * Import from Chrome at a seeded throwaway Chrome profile; test fleets never read the user's own. */
+export const BROWSER_E2E_CHROME_PROFILE = join(repositoryRoot, '.internal/browser-e2e-chrome');
+const BACKEND_ENV: Record<string, NodeJS.ProcessEnv> = { browser: { FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), FORGE_BROWSER_TEST_CHROME_PROFILE: BROWSER_E2E_CHROME_PROFILE } };
 
 /** Suite options force separate workers: destructive slice scenarios cannot contaminate UI/load. */
 export const test = base.extend<{ environmentFailure: void }, { environmentSuite: string; environmentManifest: string }>({
