@@ -88,6 +88,7 @@ export function BrowserPanel({ port, snapshot, docked, onClose }: BrowserPanelPr
           onReload={withTab((tab) => port.reload(tab.tabId))}
           onNavigate={(url) => { if (activeTab) run(() => port.navigate(activeTab.tabId, url)) }}
           onOpenExternal={withTab((tab) => port.openExternal(tab.tabId))}
+          onViewportMode={(mode) => { if (activeTab) run(async () => port.setViewportMode?.(activeTab.tabId, mode)) }}
         />
         {ready && activeTab?.controller === 'agent' ? <AgentStrip tab={activeTab} /> : null}
         <div className="relative flex min-h-0 flex-1 flex-col">

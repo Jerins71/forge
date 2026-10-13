@@ -40,7 +40,8 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
   let presentedTabId: string | null = null
 
   function project(): BrowserPanelSnapshot {
-    const tabs = (engineSnapshot?.tabs ?? []).map(toPanelTab)
+    const viewportModes = client.descriptor()?.capabilities.browserViewportModes === true
+    const tabs = (engineSnapshot?.tabs ?? []).map((tab) => toPanelTab(tab, viewportModes))
     const activeTabId = engineSnapshot?.activeTabId ?? null
     const active = engineSnapshot?.tabs.find((tab) => tab.tabId === activeTabId)
     return {
@@ -105,6 +106,7 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
       const url = tabOf(tabId)?.url
       if (url && /^https?:/i.test(url)) window.open(url, '_blank', 'noopener,noreferrer')
     },
+    setViewportMode: (tabId, mode) => act(engine.request('browser.tabs.setViewportMode', { sessionId, tabId, mode })),
     async setup() {
       const result = await engine.request('browser.engine.setup', {})
       if (engineSnapshot) {
@@ -210,7 +212,7 @@ function availabilityOf(snapshot: BrowserEngineSnapshot | null, streamError: str
   return { kind: 'setup', state, machineLabel, ...(snapshot.browserEngineMessage ? { message: snapshot.browserEngineMessage } : {}), ...(snapshot.browserEngineSetupCommand ? { setupCommand: snapshot.browserEngineSetupCommand } : {}) }
 }
 
-function toPanelTab(tab: BrowserEngineTab): BrowserPanelTab {
+function toPanelTab(tab: BrowserEngineTab, viewportModes: boolean): BrowserPanelTab {
   return {
     tabId: tab.tabId,
     url: tab.url,
@@ -224,6 +226,7 @@ function toPanelTab(tab: BrowserEngineTab): BrowserPanelTab {
     agentCursor: tab.agentCursor ?? null,
     crashed: tab.errorCode === 'crashed',
     error: tab.error ?? null,
+    ...(viewportModes ? { viewportMode: tab.viewportMode ?? 'desktop' } : {}),
   }
 }
 
