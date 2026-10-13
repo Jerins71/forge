@@ -25,6 +25,8 @@ export interface MockBrowserPanelPort extends BrowserPanelPort {
   /** Every input the panel sent, oldest first. */
   inputs: Array<{ tabId: string; input: BrowserPanelInput }>
   nativeBounds: Array<{ tabId: string; bounds: { x: number; y: number; width: number; height: number } | null }>
+  /** Settings → Browser's mock engine state, created on first use. */
+  settings?: import('@/components/settings/browser/mock-browser-settings-engine').MockBrowserSettingsState
 }
 
 interface MockTabState extends BrowserPanelTab {
@@ -109,7 +111,7 @@ export function createMockBrowserPanelPort(options: { surface?: BrowserPanelSurf
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
-    async open(url = 'about:blank') { createTab(url, 'human', null) },
+    async open(url) { createTab(url ? normalizeBrowserAddress(url) : 'about:blank', 'human', null) },
     async activate(tabId) {
       if (!tabs.has(tabId)) return
       snapshot = { ...snapshot, activeTabId: tabId }

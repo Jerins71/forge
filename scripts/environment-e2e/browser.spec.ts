@@ -55,6 +55,16 @@ async function send(environment: UiEnvironment, text: string) {
   const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments.find(value => value.baseUrl === environment.baseUrl)!.name, 'bootstrap')
   await fixtureRpcOnce(environment.baseUrl, admin, 'session.send', { commandId: randomUUID(), sessionId: environment.sessionId, message: { text, artifactIds: [] } })
 }
+/** The browser reaches B once it is paired. */
+async function pairB(page: Page) {
+  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
+  const link = await fleet.mintGrant(fleet.b, 'link')
+  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
+  await page.getByRole('button', { name: 'Pair', exact: true }).click()
+  await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
+  await page.getByRole('button', { name: 'Done' }).click()
+}
 /** The streamed page has painted and matches the panel's size (the engine re-lays it out after a resize). */
 async function expectLiveFrame(page: Page) {
   await expect(canvas(page)).toHaveCSS('opacity', '1', { timeout: 30_000 })
@@ -156,14 +166,7 @@ test('an agent opening a page opens the panel, streams it, and marks the tab whi
 })
 
 test('a remote machine streams its tab into the panel and a click on the page reaches it', async ({ page }) => {
-  // The browser reaches B once it is paired.
-  await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
-  const link = await fleet.mintGrant(fleet.b, 'link')
-  await page.getByRole('button', { name: 'Add environment' }).click()
-  await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
-  await page.getByRole('button', { name: 'Pair', exact: true }).click()
-  await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
-  await page.getByRole('button', { name: 'Done' }).click()
+  await pairB(page)
   await open(page, fleet.b)
   await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', fleet.b.environmentId)
   if (await panel(page).count() === 0) await toggle(page).click()
@@ -222,5 +225,121 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await mockPage.screenshot({ path: join(evidenceRoot, 'floating-900.png') })
     await mockPage.setViewportSize({ width: 1440, height: 900 })
     await expect(panel(mockPage)).toHaveAttribute('data-browser-panel', 'docked')
+  })
+  test('Settings → Browser: setup state, sign-ins, Import from Chrome with a confirm step, and Forget', async () => {
+    const page = mockPage
+    const dialog = page.getByTestId('browser-import-dialog')
+    const settingsUrl = `${fleet.uiUrl}/?view=settings&settingsTab=browser`
+    const env = JSON.stringify(fleet.a.environmentId)
+    const reopenTab = async () => {
+      await page.getByRole('button', { name: 'General', exact: true }).click()
+      await page.getByRole('button', { name: 'Browser', exact: true }).click()
+      await expect(page.getByTestId('settings-browser')).toBeVisible()
+    }
+    await pairB(page)
+    await page.goto(settingsUrl)
+    await expect(page.getByTestId('settings-browser')).toBeVisible()
+    await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'ready')
+
+    // A machine without its browser yet offers Set up, then follows the install to Ready.
+    await mock(`(engine.settings.status[${env}] = { state: 'missing' }, true)`)
+    await reopenTab()
+    await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'missing')
+    await expect(page.getByTestId('browser-setup-state')).toContainText('Not set up yet')
+    await shot(page, 'settings-setup')
+    await page.getByTestId('browser-setup-state').getByRole('button', { name: 'Set up' }).click()
+    await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'installing')
+    await expect(page.getByTestId('browser-setup-state')).toHaveAttribute('data-state', 'ready', { timeout: 5_000 })
+    await mock(`(engine.settings.status[${env}] = { state: 'failed', message: 'Browser download failed (503). Retry setup.' }, true)`)
+    await reopenTab()
+    await expect(page.getByTestId('browser-setup-state').getByRole('button', { name: 'Try again' })).toBeVisible()
+    await expect(page.getByTestId('browser-setup-state')).toContainText('Browser download failed (503)')
+    await mock(`(engine.settings.status[${env}] = { state: 'ready' }, true)`)
+    await reopenTab()
+    await expect(page.getByText('No sites yet. Sign in once, or import sites from Chrome.')).toBeVisible()
+
+    // Import from Chrome: the cookie file is blocked by macOS Files & Folders, with a deep link.
+    await mock(`(engine.settings.previewErrors['chrome-database'] = { code: 'files-folders-denied', message: 'denied', settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders' }, true)`)
+    await page.getByRole('button', { name: 'Import from Chrome…' }).click()
+    await expect(dialog).toHaveAttribute('data-step', 'source')
+    await expect(dialog).toContainText('chrome://inspect/#remote-debugging')
+    await shot(page, 'import-source')
+    await dialog.getByRole('radio', { name: /cookie file/ }).check()
+    await expect(dialog).toContainText('Chrome Safe Storage')
+    await dialog.getByRole('button', { name: 'Show sites' }).click()
+    const denied = dialog.locator('[data-error-code="files-folders-denied"]')
+    await expect(denied).toContainText('macOS blocked access to Chrome’s files')
+    await expect(denied.getByRole('link', { name: /Open Files & Folders settings/ })).toHaveAttribute('href', /Privacy_FilesAndFolders/)
+    await shot(page, 'import-files-folders')
+
+    // Running Chrome lists the sites, most recently used first, with nothing selected.
+    await dialog.getByRole('radio', { name: /while it’s open/ }).check()
+    await dialog.getByRole('button', { name: 'Show sites' }).click()
+    await expect(dialog).toHaveAttribute('data-step', 'sites')
+    const checks = dialog.getByRole('checkbox')
+    await expect(checks).toHaveCount(9)
+    for (const check of await checks.all()) await expect(check).not.toBeChecked()
+    await expect(dialog.getByRole('button', { name: 'Choose sites to continue' })).toBeDisabled()
+    await expect(dialog.locator('[data-site]').first()).toContainText('used today')
+    await dialog.getByRole('textbox', { name: 'Search sites' }).fill('lin')
+    await expect(dialog.locator('[data-site]')).toHaveCount(1)
+    await dialog.getByRole('checkbox', { name: 'linear.app' }).check()
+    await dialog.getByRole('textbox', { name: 'Search sites' }).fill('')
+    await dialog.getByRole('checkbox', { name: 'github.com' }).check()
+    await dialog.getByRole('checkbox', { name: 'old-forum.example' }).check()
+    await shot(page, 'import-sites')
+    await mock(`(engine.settings.skip = ['old-forum.example'], true)`)
+    await dialog.getByRole('button', { name: 'Continue with 3 sites' }).click()
+
+    // Confirm: what goes where, and sending elsewhere is off until chosen.
+    await expect(dialog).toHaveAttribute('data-step', 'confirm')
+    await expect(dialog.getByRole('list', { name: 'Sites to import' })).toContainText('github.com')
+    const send = dialog.getByRole('checkbox', { name: 'Also send these sites to another machine' })
+    await expect(send).not.toBeChecked()
+    await shot(page, 'import-confirm')
+    await dialog.getByRole('button', { name: 'Import 3 sites' }).click()
+
+    // Result: what was imported and what was skipped, and why.
+    await expect(dialog).toHaveAttribute('data-step', 'result')
+    await expect(dialog.getByTestId('browser-import-skipped')).toContainText('old-forum.example')
+    await expect(dialog.getByTestId('browser-import-skipped')).toContainText('expired')
+    await shot(page, 'import-result')
+    const calls = await mock<Array<{ method: string; domains?: string[] }>>('engine.settings.calls')
+    expect(calls.find(call => call.method === 'apply')?.domains).toEqual(['github.com', 'linear.app', 'old-forum.example'])
+    expect(calls.some(call => call.method === 'prepareSend' || call.method === 'receive')).toBe(false)
+    await dialog.getByRole('button', { name: 'Done' }).click()
+    const sites = page.getByRole('list', { name: 'Signed-in sites' })
+    await expect(sites.locator('[data-site]')).toHaveCount(2)
+    await shot(page, 'settings-sites')
+
+    // Forget asks first, then signs the project out of that site only.
+    await sites.getByRole('button', { name: 'Forget github.com' }).click()
+    await expect(sites).toContainText('Agents will need to sign in again')
+    await sites.locator('[data-site="github.com"]').getByRole('button', { name: 'Forget', exact: true }).click()
+    await expect(sites.locator('[data-site]')).toHaveCount(1)
+    await expect(sites).not.toContainText('github.com')
+
+    // Sending to another machine is explicit: it goes only when chosen, to the chosen project.
+    await page.getByRole('button', { name: 'Import from Chrome…' }).click()
+    await dialog.getByRole('button', { name: 'Show sites' }).click()
+    await dialog.getByRole('checkbox', { name: 'vercel.com' }).check()
+    await dialog.getByRole('button', { name: 'Continue with 1 site' }).click()
+    await send.check()
+    await expect(dialog.getByRole('button', { name: 'Import 1 site' })).toBeDisabled()
+    await dialog.getByRole('combobox', { name: 'Project on that machine' }).click()
+    await page.getByRole('option', { disabled: false }).first().click()
+    await shot(page, 'import-send')
+    await dialog.getByRole('button', { name: 'Import 1 site' }).click()
+    await expect(dialog).toContainText(`Also sent to ${fleet.b.label}`)
+    const sent = await mock<Array<{ environmentId: string; method: string; domains?: string[] }>>('engine.settings.calls')
+    expect(sent.filter(call => call.method === 'receive')).toEqual([{ environmentId: fleet.b.environmentId, method: 'receive', domains: ['vercel.com'] }])
+    await dialog.getByRole('button', { name: 'Done' }).click()
+
+    // Sign in once opens the site in the session's Browser panel.
+    await page.getByRole('textbox', { name: 'Site to sign in to' }).fill('example.com')
+    await page.getByRole('button', { name: 'Sign in once…' }).click()
+    await expect(transcript(page)).toBeVisible()
+    await expect(panel(page)).toBeVisible()
+    await expect(panel(page).locator('#browser-panel-address')).toHaveValue('https://example.com')
   })
 })

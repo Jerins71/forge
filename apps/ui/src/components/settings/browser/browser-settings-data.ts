@@ -1,5 +1,8 @@
-import { useCallback, useRef } from 'react'
-import type { EnvironmentClient, ShellState } from '@forge/client-runtime'
+import { useCallback, useMemo, useRef } from 'react'
+import type { ShellState } from '@forge/client-runtime'
+import { mockBrowserPanelPort } from '@/components/browser-panel/use-browser-panel-port'
+import { createBrowserSettingsEngine, type BrowserSettingsEngine } from './browser-settings-engine'
+import { createMockBrowserSettingsEngine } from './mock-browser-settings-engine'
 import { useEnvironmentCatalog, useEnvironmentSelector } from '@/hooks/use-environment-selector'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 
@@ -36,13 +39,20 @@ export function useBrowserProjects(environmentId: string): BrowserProject[] {
   return useEnvironmentSelector(environmentId, 'shell', select)
 }
 
-/** The environment's client, when it is registered and offers the browser engine. */
-export function useBrowserEngineClient(environmentId: string): EnvironmentClient | null {
+/**
+ * The machine's browser engine for Settings, when it is registered and offers one. E2E platform builds
+ * that opt into the in-page mock engine get the mock instead.
+ */
+export function useBrowserSettingsEngine(environmentId: string): BrowserSettingsEngine | null {
   const registry = useEnvironmentRegistry()
   const catalog = useEnvironmentCatalog()
-  if (!catalog.has(environmentId)) return null
-  const client = registry.get(environmentId)
-  return client.descriptor()?.capabilities.browserEngine === true ? client : null
+  const client = catalog.has(environmentId) ? registry.get(environmentId) : null
+  const capable = client?.descriptor()?.capabilities.browserEngine === true
+  return useMemo(() => {
+    const mock = import.meta.env.VITE_FORGE_E2E_PLATFORM === '1' ? mockBrowserPanelPort() : null
+    if (mock && client) return createMockBrowserSettingsEngine(mock, environmentId)
+    return client && capable ? createBrowserSettingsEngine(client) : null
+  }, [capable, client, environmentId])
 }
 
 export function errorMessage(error: unknown): string {

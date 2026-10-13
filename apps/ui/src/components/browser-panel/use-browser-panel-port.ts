@@ -27,7 +27,7 @@ export function useBrowserPanelPort(options: {
 
   const port = useMemo(() => {
     if (!sessionId) return null
-    const mock = import.meta.env.VITE_FORGE_E2E_PLATFORM === '1' ? mockPort() : null
+    const mock = import.meta.env.VITE_FORGE_E2E_PLATFORM === '1' ? mockBrowserPanelPort() : null
     if (mock) return mock
     if (!environmentClient || !engineAvailable) return null
     return createEngineBrowserPanelPort({
@@ -46,7 +46,7 @@ export function useBrowserPanelPort(options: {
 }
 
 /** One mock engine per page, shared across sessions so a test can drive it from `window`. */
-function mockPort(): MockBrowserPanelPort | null {
+export function mockBrowserPanelPort(): MockBrowserPanelPort | null {
   const flag = window.__FORGE_BROWSER_PANEL_MOCK__
   if (!flag) return null
   if (flag === true) window.__FORGE_BROWSER_PANEL_MOCK__ = createMockBrowserPanelPort()
