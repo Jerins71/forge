@@ -1,5 +1,5 @@
 import { configSyncLogicalKey, runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup, type ConfigSyncOptions } from '@forge/client-runtime'
-import { CONFIG_SYNC_VERSION, type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse, type ConfigSyncManifest, type ConfigSyncResolutionOperation, type ConfigSyncResolutionCommitResponse } from '@forge/protocol'
+import { CONFIG_SYNC_VERSION, type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse, type ConfigSyncManifest, type ConfigSyncResolutionListResponse, type ConfigSyncResolutionCommitResponse } from '@forge/protocol'
 
 /**
  * Configuration sync hub. This app reaches every paired environment, so it compares their
@@ -7,7 +7,6 @@ import { CONFIG_SYNC_VERSION, type ConfigSyncHistoryEntry, type ConfigSyncHistor
  * part is a choice of this device, kept in local storage.
  */
 const STORAGE_KEY = 'forge.configSync.v1'
-const RESOLUTIONS_KEY = 'forge.configSync.resolutions.v2'
 const INTERVAL_MS = 10_000
 
 export interface ConfigSyncSettings {
@@ -73,13 +72,11 @@ export class ConfigSyncHub {
   private state: ConfigSyncState
   private readonly listeners = new Set<() => void>()
   private timer: ReturnType<typeof setInterval> | null = null
-  private resolutions: { environmentId: string; operation: ConfigSyncResolutionOperation }[] = []
   private inflight: Promise<void> | null = null
   /** This client's hub lease id. Another open client defers to whichever holds the lease. */
   private readonly holder = crypto.randomUUID()
 
   constructor(private readonly registry: EnvironmentRegistry) {
-    try { const saved: unknown = JSON.parse(localStorage.getItem(RESOLUTIONS_KEY) ?? '[]'); if (Array.isArray(saved)) this.resolutions = saved } catch { /* Ignore invalid device-local state. */ }
     this.state = { settings: loadSettings(), running: false, report: null, error: null, activity: [] }
   }
 
@@ -153,17 +150,16 @@ export class ConfigSyncHub {
       try {
         const participants = this.participants()
         let resolutionError: string | null = null
-        for (const pending of [...this.resolutions]) {
-          const participant = participants.find(p => p.environmentId === pending.environmentId && p.capability === CONFIG_SYNC_VERSION)
-          if (!participant) continue
+        for (const participant of participants.filter(p => p.capability === CONFIG_SYNC_VERSION)) {
           try {
-            const response = await participant.fetchJson<ConfigSyncResolutionCommitResponse>('/api/settings/sync/resolve-commit', {
-              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(pending.operation),
-            })
-            if (response.status !== 'waiting') {
-              this.resolutions = this.resolutions.filter(item => item !== pending)
-              localStorage.setItem(RESOLUTIONS_KEY, JSON.stringify(this.resolutions))
-              if (response.status === 'stale') resolutionError = 'The conflict changed before the agent result was committed. Its result is kept; compare the current versions.'
+            const { operations } = await participant.fetchJson<ConfigSyncResolutionListResponse>('/api/settings/sync/resolutions')
+            for (const operation of operations) {
+              try {
+                const response = await participant.fetchJson<ConfigSyncResolutionCommitResponse>('/api/settings/sync/resolve-commit', {
+                  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(operation),
+                })
+                if (response.status === 'stale') resolutionError = 'The conflict changed before the agent operation completed. Compare the current versions; any staged output is kept.'
+              } catch (error) { resolutionError = error instanceof Error ? error.message : String(error) }
             }
           } catch (error) { resolutionError = error instanceof Error ? error.message : String(error) }
         }
@@ -179,12 +175,6 @@ export class ConfigSyncHub {
     this.inflight = run
     void run.finally(() => { if (this.inflight === run) this.inflight = null })
     return run
-  }
-
-  /** Register only after session.launch succeeds. Each agent owns a separate staged result. */
-  trackResolution(environmentId: string, operation: ConfigSyncResolutionOperation) {
-    this.resolutions.push({ environmentId, operation })
-    localStorage.setItem(RESOLUTIONS_KEY, JSON.stringify(this.resolutions))
   }
 
   /** Recent replaced and deleted versions on every participant, newest first. */

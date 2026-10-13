@@ -41,6 +41,7 @@ export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[
     route("lease", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.lease(await readJsonBody(request) as ConfigSyncLeaseRequest) });
     }),
+    route("resolutions", "GET", async (_request, response) => { sendJson(response, 200, { ...await store.listResolutions() }); }),
     route("resolve-commit", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.commitResolution(await readJsonBody(request) as ConfigSyncResolutionCommitRequest) });
     }),

@@ -9,11 +9,12 @@
 //   - nothing outside the allowlist (secrets, auth) is ever copied.
 //   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 //   pnpm exec playwright test scripts/environment-e2e/sync.spec.ts --config scripts/environment-e2e/playwright.config.ts
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
-import type { SessionSummary } from '@forge/protocol/environment-v2'
+import type { CommandReceipt, SessionSummary } from '@forge/protocol/environment-v2'
+import type { ConfigSyncManifest, ConfigSyncResolvePromptResponse } from '@forge/protocol'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
@@ -53,6 +54,33 @@ async function completeResolution(index: number, operation: { id: string }, cont
   const dir = `shared/state/sync/resolutions/${operation.id}`
   await write(index, `${dir}/result`, content)
   await write(index, `${dir}/complete.json`, JSON.stringify({ hash: createHash('sha256').update(content).digest('hex') }))
+}
+async function launchWithoutClientRegistration(name: string) {
+  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const headers = { Authorization: `Bearer ${admin.bearer}`, 'content-type': 'application/json' }
+  const response = await fetch(`${fleet.a.baseUrl}/api/settings/sync/manifest`, { headers })
+  expect(response.ok).toBe(true)
+  const current = await response.json() as ConfigSyncManifest, key = `global/skills/discovery/${name}.md`, entry = current.entries[key]!
+  const prepared = await fetch(`${fleet.a.baseUrl}/api/settings/sync/resolve-prompt`, { method: 'POST', headers, body: JSON.stringify({ key, subject: name, expectedVersionId: entry.current, acknowledgedVersionIds: entry.heads.map(v => v.id), versions: entry.heads.map(version => ({ label: version.author, version })) }) })
+  expect(prepared.ok).toBe(true)
+  const prompt = await prepared.json() as ConfigSyncResolvePromptResponse
+  const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+  try {
+    await rpc.call('shell.subscribe', {})
+    const snapshot = await until<{ projects: { projectId: string }[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+    const commandId = randomUUID()
+    await rpc.call('session.launch', { commandId, projectId: snapshot!.projects[0]!.projectId, title: prompt.title, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: prompt.text, artifactIds: [] } })
+    const receipt = await until(() => rpc.call<CommandReceipt>('command.get', { commandId }), r => r.state !== 'accepted' && r.state !== 'running')
+    expect(receipt.state).toBe('succeeded')
+  } finally { rpc.close() }
+  return prompt
+}
+async function reopenSync() {
+  sharedPage = await context.newPage()
+  sharedPage.on('pageerror', error => renderErrors.push(error.message))
+  await sharedPage.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+  await syncNow(sharedPage)
+  return sharedPage
 }
 const syncNow = (page: Page) => page.getByRole('button', { name: 'Sync now' }).click()
 
@@ -174,6 +202,38 @@ test('"Ask an agent to resolve" starts a session here, and its merge resolves th
   expect(await read(1, 'shared/config/secrets.json')).toBeNull()
 })
 
+test('a reconnecting hub discovers a completed agent operation after the launch reply was lost before registration', async ({ page }) => {
+  const name = 'lost-registration', rel = `skills/discovery/${name}.md`
+  await write(0, rel, 'A input'); await write(1, rel, 'B input'); await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  const prompt = await launchWithoutClientRegistration(name)
+  // The initiating client disappears with no registration or browser operation list.
+  await page.close(); await fleet.stop(fleet.a); await fleet.start(fleet.a)
+  await completeResolution(0, prompt.operation, 'Recovered without registration')
+  const reconnected = await reopenSync()
+  await expect(reconnected.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  for (let env = 0; env < 3; env++) await expect.poll(() => read(env, rel)).toBe('Recovered without registration')
+  assertions.lostRegistrationRecovered = prompt.operation.id
+  await shot(reconnected, '05b-lost-registration-recovered')
+})
+
+test('a different tab discovers both completed operations after stale browser lists overwrite each other', async ({ page }) => {
+  for (const name of ['tab-x', 'tab-y']) { await write(0, `skills/discovery/${name}.md`, `A-${name}`); await write(1, `skills/discovery/${name}.md`, `B-${name}`) }
+  await syncNow(page); await expect(page.getByTestId('sync-conflict')).toHaveCount(2)
+  const second = await context.newPage(); await second.goto(`${fleet.uiUrl}/?view=settings&settingsTab=sync`)
+  const x = await launchWithoutClientRegistration('tab-x'), y = await launchWithoutClientRegistration('tab-y')
+  // Legacy tabs persist independently from their stale empty snapshots, then disappear.
+  await page.evaluate(operation => localStorage.setItem('forge.configSync.resolutions.v2', JSON.stringify([{ environmentId: operation.environmentId, operation: operation.value }])), { environmentId: fleet.a.environmentId, value: x.operation })
+  await second.evaluate(operation => localStorage.setItem('forge.configSync.resolutions.v2', JSON.stringify([{ environmentId: operation.environmentId, operation: operation.value }])), { environmentId: fleet.a.environmentId, value: y.operation })
+  await page.close(); await second.close()
+  await completeResolution(0, x.operation, 'Recovered X'); await completeResolution(0, y.operation, 'Recovered Y')
+  const different = await reopenSync()
+  await expect(different.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  for (let env = 0; env < 3; env++) for (const [name, text] of [['tab-x', 'Recovered X'], ['tab-y', 'Recovered Y']]) await expect.poll(() => read(env, `skills/discovery/${name}.md`)).toBe(text)
+  assertions.staleTabListsRecovered = [x.operation.id, y.operation.id]
+  await shot(different, '05c-stale-tab-lists-recovered')
+})
+
 test('a file over the size cap is listed as not synced instead of disappearing', async ({ page }) => {
   await write(0, 'skills/big-skill/SKILL.md', '# Big skill\n')
   await write(0, 'skills/big-skill/model.bin', 'small first')
@@ -283,7 +343,7 @@ test('session-only clients cannot read sync manifests, files or history through 
   const grant = await fixtureRpcOnce(environment.baseUrl, admin, 'access.grant.create', { kind: 'code', label: 'Sync scope regression', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl })
   const paired = await exchangePairing({ baseUrl: environment.baseUrl, environmentId: admin.environmentId, credential: { kind: 'code', code: grant.code }, deviceName: 'Sync restricted fixture', deviceKind: 'cli', scopes: ['session:read'] })
   const headers = { Authorization: `Bearer ${paired.bearerToken}` }
-  for (const path of ['manifest', 'file?key=global%2Fskills%2Fbig-skill%2FSKILL.md', 'history']) {
+  for (const path of ['manifest', 'file?key=global%2Fskills%2Fbig-skill%2FSKILL.md', 'history', 'resolutions']) {
     expect((await fetch(`${environment.baseUrl}/api/settings/sync/${path}`, { headers })).status).toBe(403)
   }
   assertions.readScopeEnforced = true

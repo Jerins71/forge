@@ -1,5 +1,5 @@
-/** Configuration sync v3: backends own causality and CAS; clients relay complete retained heads. */
-export const CONFIG_SYNC_VERSION = 3 as const
+/** Configuration sync v4: backends own causality and CAS; clients relay complete retained heads. */
+export const CONFIG_SYNC_VERSION = 4 as const
 export const CONFIG_SYNC_MAX_FILE_BYTES = 2 * 1024 * 1024
 export const CONFIG_SYNC_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 export type ConfigSyncHash = string | null
@@ -83,6 +83,8 @@ export interface ConfigSyncResolutionOperation {
   expectHash: ConfigSyncHash
   acknowledgedVersionIds: string[]
 }
+/** Unfinished durable operations; any compatible hub may resume their idempotent commits. */
+export interface ConfigSyncResolutionListResponse { operations: ConfigSyncResolutionOperation[] }
 export interface ConfigSyncResolvePromptResponse {
   title: string
   text: string

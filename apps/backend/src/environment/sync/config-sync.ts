@@ -7,7 +7,7 @@ import {
   type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse,
   type ConfigSyncLeaseRequest, type ConfigSyncLeaseResponse, type ConfigSyncManifest,
   type ConfigSyncManifestEntry, type ConfigSyncResolvePromptRequest, type ConfigSyncResolvePromptResponse,
-  type ConfigSyncResolutionOperation, type ConfigSyncResolutionCommitRequest, type ConfigSyncResolutionCommitResponse, type ConfigSyncRestoreRequest, type ConfigSyncSkipped, type ConfigSyncVersion,
+  type ConfigSyncResolutionListResponse, type ConfigSyncResolutionOperation, type ConfigSyncResolutionCommitRequest, type ConfigSyncResolutionCommitResponse, type ConfigSyncRestoreRequest, type ConfigSyncSkipped, type ConfigSyncVersion,
 } from '@forge/protocol';
 import { getConfigSyncDir, getEnvironmentIdentityPath, sanitizePathSegment } from '../../swarm/storage/data-paths.js';
 import { SyncAliasError, SyncBoundaryError, SyncFilesystem, syncFilenameIdentity } from './filesystem-boundary.js';
@@ -422,6 +422,26 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       ].join('\n') };
     });
   }
+  async function listResolutions(): Promise<ConfigSyncResolutionListResponse> {
+    return serialized(async fs => {
+      let ids: string[];
+      try { ids = fs.names(`${sync}/resolutions`); } catch (error) { if (missing(error)) return { operations: [] }; throw error; }
+      const operations: ConfigSyncResolutionOperation[] = [];
+      for (const id of ids) {
+        if (!validSegment(id)) continue;
+        const dir = `${sync}/resolutions/${id}`;
+        if (fs.json(`${dir}/committed.json`) || fs.json(`${dir}/stale.json`)) continue;
+        let value: ConfigSyncResolutionOperation | undefined;
+        try { value = fs.json<ConfigSyncResolutionOperation>(`${dir}/operation.json`); }
+        catch (error) { if (error instanceof SyntaxError) continue; throw error; } // Unpublished, interrupted preparation cannot block another operation.
+        if (!value) continue;
+        resolveConfigSyncKey(value.key);
+        // Return only the immutable wire precondition/inputs, never private storage metadata.
+        operations.push({ id: value.id, key: value.key, expectedVersionId: value.expectedVersionId, expectHash: value.expectHash, acknowledgedVersionIds: value.acknowledgedVersionIds });
+      }
+      return { operations };
+    });
+  }
   async function commitResolution(request: ConfigSyncResolutionCommitRequest): Promise<ConfigSyncResolutionCommitResponse> {
     exact(request, ['id', 'key', 'expectedVersionId', 'expectHash', 'acknowledgedVersionIds'], 'resolution commit');
     resolveConfigSyncKey(request.key);
@@ -431,14 +451,16 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       const operation = fs.json<ConfigSyncResolutionOperation & { mode: number }>(`${dir}/operation.json`);
       if (!operation || operation.key !== request.key || operation.expectedVersionId !== request.expectedVersionId || operation.expectHash !== request.expectHash || JSON.stringify(operation.acknowledgedVersionIds) !== JSON.stringify(request.acknowledgedVersionIds)) throw new Error('Resolution operation inputs or precondition changed');
       if (fs.json<{ versionId: string }>(`${dir}/committed.json`)) return { status: 'committed' };
+      const stale = (): ConfigSyncResolutionCommitResponse => { fs.saveJson(`${dir}/stale.json`, { status: 'stale' }); return { status: 'stale' }; };
+      if (fs.json(`${dir}/stale.json`)) return { status: 'stale' };
       const current = snapshot(fs, request.key), entry = observe(fs, state, request.key, current); save(fs, state);
       const intent = fs.json<{ versionId: string }>(`${dir}/commit.json`);
       // A restart after publication but before the receipt can acknowledge that exact commit.
       if (intent && entry?.current === intent.versionId) { fs.saveJson(`${dir}/committed.json`, intent); return { status: 'committed' }; }
-      if (!entry || entry.current !== request.expectedVersionId || (current?.hash ?? null) !== request.expectHash) return { status: 'stale' };
+      if (!entry || entry.current !== request.expectedVersionId || (current?.hash ?? null) !== request.expectHash) return stale();
       const parents = request.acknowledgedVersionIds.map(id => state.versions[id]);
       if (parents.some(v => !v) || request.acknowledgedVersionIds.some(id => !entry.retained.includes(id))) throw new Error('Missing exact resolution inputs');
-      if (!resolutionAllowed(state, entry, parents as ConfigSyncVersion[])) return { status: 'stale' };
+      if (!resolutionAllowed(state, entry, parents as ConfigSyncVersion[])) return stale();
       const complete = fs.json<{ hash: string }>(`${dir}/complete.json`);
       if (!complete) return { status: 'waiting' };
       exact(complete, ['hash'], 'resolution completion');
@@ -447,11 +469,11 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       const desired = localVersion(state, entry, parents as ConfigSyncVersion[], { ...result, mode: operation.mode, hash: complete.hash });
       retain(fs, state, desired, result.bytes); entry.retained.push(desired.id);
       fs.saveJson(`${dir}/commit.json`, { versionId: desired.id });
-      if (!await mutate(fs, state, request.key, current, desired, 'overwrite', true)) return { status: 'stale' };
+      if (!await mutate(fs, state, request.key, current, desired, 'overwrite', true)) return stale();
       fs.saveJson(`${dir}/committed.json`, { versionId: desired.id });
       return { status: 'committed' };
     });
   }
-  return { manifest, readFile: readSyncFile, apply, history, restore, lease, resolvePrompt, commitResolution };
+  return { manifest, readFile: readSyncFile, apply, history, restore, lease, resolvePrompt, listResolutions, commitResolution };
 }
 export type ConfigSyncStore = ReturnType<typeof createConfigSyncStore>;

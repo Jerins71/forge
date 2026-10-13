@@ -259,7 +259,6 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
         receipt = await client.request('command.get', { commandId: receipt.commandId })
       }
       if (receipt.state !== 'succeeded' || receipt.delivery === 'unknown') throw new Error(receipt.error?.message ?? 'The agent launch did not complete. Its staged operation is kept for recovery.')
-      getConfigSyncHub(registry).trackResolution(target.environmentId, prompt.operation)
       setMessage(`An agent is merging this on ${target.label}. Forge checks and commits its completed result.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))

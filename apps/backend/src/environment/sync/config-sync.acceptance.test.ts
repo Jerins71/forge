@@ -19,7 +19,7 @@ async function fixture(id: string, initial?: string) {
   if (initial !== undefined) await put(initial);
   let store = createConfigSyncStore(root, { environmentId: id });
   const participant: ConfigSyncParticipant = {
-    environmentId: id, label: id, projects: new Map(), capability: 3,
+    environmentId: id, label: id, projects: new Map(), capability: 4,
     async fetchJson<T>(path: string, init?: RequestInit) {
       const url = new URL(path, 'http://fixture');
       if (url.pathname.endsWith('/manifest')) return await store.manifest() as T;
@@ -35,7 +35,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)
 async function writeRequest(source: Awaited<ReturnType<typeof fixture>>, target: Awaited<ReturnType<typeof fixture>>, key = K, resolve = false): Promise<ConfigSyncApplyRequest> {
   const sm = await source.store.manifest(); const tm = await target.store.manifest();
   const state = tm.entries[key]; const file = tm.files.find(f => f.key === key);
-  return { version: 3, writes: [{ key, expectedVersionId: state?.current ?? null, expectHash: file?.hash ?? null,
+  return { version: 4, writes: [{ key, expectedVersionId: state?.current ?? null, expectHash: file?.hash ?? null,
     ...(resolve ? { resolution: { acknowledgedVersionIds: [...sm.entries[key]!.heads.map(v => v.id), ...tm.entries[key]!.heads.map(v => v.id)], chosenVersionId: sm.entries[key]!.heads[0]!.id } } : {}), heads: await Promise.all(sm.entries[key]!.heads.map(async version => ({ version, contentBase64: version.hash === null ? null : (await source.store.readFile(key, version.id)).contentBase64 }))) }] };
 }
 const frontier = (m: ConfigSyncManifest) => m.entries[K]!.heads.map(v => v.id).sort();
@@ -170,7 +170,7 @@ describe('mutation preservation, recovery and filesystem boundary', () => {
 
   it('rejects duplicate targets before mutation and preserves first-write history after a partial batch', async () => {
     const a = await fixture('a', 'incoming'), b = await fixture('b', 'before'); const request = await writeRequest(a, b);
-    await expect(b.store.apply({ version: 3, writes: [request.writes![0]!, request.writes![0]!] })).rejects.toThrow(/duplicate/i);
+    await expect(b.store.apply({ version: 4, writes: [request.writes![0]!, request.writes![0]!] })).rejects.toThrow(/duplicate/i);
     expect(await b.read()).toBe('before');
     // history is indexed before mutation, independently of any later batch failure (power-loss test).
   });
@@ -232,7 +232,7 @@ describe('persisted schedules and migration', () => {
     const first = await writeRequest(a, b), second = await writeRequest(a, b, key);
     let calls = 0;
     const failing = createConfigSyncStore(b.root, { environmentId: 'b', afterDisplace: async () => { if (++calls === 2) throw new Error('interrupted second'); } });
-    await expect(failing.apply({ version: 3, writes: [...first.writes, ...second.writes] })).rejects.toThrow('interrupted second');
+    await expect(failing.apply({ version: 4, writes: [...first.writes, ...second.writes] })).rejects.toThrow('interrupted second');
     b.restart(); const history = await b.store.history();
     expect(history.entries.map(e => e.key).sort()).toEqual([K, key].sort()); expect(await b.read()).toBe('first-new');
     expect(await readFile(join(b.root, rel), 'utf8')).toBe('second-base');
@@ -419,7 +419,7 @@ describe('independent re-review schedules', () => {
     expect(await c.read()).toBe(kind === 'edit' ? 'unacknowledged-C' : null);
     // Even a caller using a fresh CAS cannot authorize old displayed inputs to consume C's dot.
     const fresh = await c.store.manifest();
-    const request = { version: 3 as const, writes: [{ key: K, expectedVersionId: fresh.entries[K]!.current, expectHash: fresh.files.find(f => f.key === K)?.hash ?? null,
+    const request = { version: 4 as const, writes: [{ key: K, expectedVersionId: fresh.entries[K]!.current, expectHash: fresh.files.find(f => f.key === K)?.hash ?? null,
       heads: [], resolution: { chosenVersionId: selected.versionId, acknowledgedVersionIds: sides.map(s => s.versionId) } }] };
     expect((await c.store.apply(request)).stale).toEqual([K]);
     expect((await c.store.manifest()).entries[K]!.heads.some(v => v.id === late)).toBe(true);
@@ -456,7 +456,7 @@ describe('independent re-review schedules', () => {
     const report = await runConfigSync([a.participant, b.participant]);
     const m = await a.store.manifest(), side = report.conflicts[0]!.sides.find(v => v.version.author === 'a')!;
     const racing = createConfigSyncStore(a.root, { environmentId: 'a', beforeDisplace: async () => { await a.put('late edit while keeping A'); } });
-    const result = await racing.apply({ version: 3, writes: [{ key: K, expectedVersionId: m.entries[K]!.current, expectHash: m.files.find(f => f.key === K)!.hash,
+    const result = await racing.apply({ version: 4, writes: [{ key: K, expectedVersionId: m.entries[K]!.current, expectHash: m.files.find(f => f.key === K)!.hash,
       heads: [], resolution: { chosenVersionId: side.versionId, acknowledgedVersionIds: report.conflicts[0]!.sides.map(v => v.versionId) } }] });
     expect(result.stale).toEqual([K]); expect(result.applied).toEqual([]);
     expect(await a.read()).toBe('late edit while keeping A');

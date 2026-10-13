@@ -570,8 +570,10 @@ independent offline edit remains a conflict. An ordinary edit during a conflict 
 copy it was based on. Agent resolution requires complete, hash-verified inputs and gives the agent
 paths to immutable retained files, including large inputs, without truncation. Each agent operation
 owns its immutable input ids, displayed version precondition and separate output file. After a
-successful launch, the app explicitly commits the completed output verified against its completion
-hash. Saving the live file never implicitly resolves a conflict. A stale operation keeps its output
+launch, any compatible app hub discovers unfinished operations from the backend and explicitly
+commits completed output verified against its completion hash. Browser registration and local storage
+do not control recovery; reconnecting or different hubs resume the same idempotent operation.
+Saving the live file never implicitly resolves a conflict. A stale operation keeps its output
 for recovery and requires a new comparison; another agent operation cannot replace its inputs.
 Keep also carries the displayed precondition. The backend refuses any resolution whose next local
 counter would consume a head outside the acknowledged ancestry.
