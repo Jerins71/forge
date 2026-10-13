@@ -158,7 +158,6 @@ export interface RuntimeCompositionResolution {
   ): Promise<string>;
   resolveSpecialistRosterForProfile(profileId: string): Promise<ResolvedSpecialistDefinitionLike[]>;
   resolveSpecialistRosterForManager(manager: AgentDescriptor): Promise<ResolvedSpecialistDefinitionLike[]>;
-  resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor;
   resolveSpawnWorkerArchetypeId(
     input: SpawnAgentInput,
     normalizedAgentId: string,

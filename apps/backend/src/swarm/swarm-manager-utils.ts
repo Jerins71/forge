@@ -66,7 +66,6 @@ const VALID_PERSISTED_AGENT_STATUSES = new Set([
   "error",
   "stopped_on_restart"
 ]);
-const OPENAI_CODEX_CAPACITY_FALLBACK_CHAIN = ["gpt-6-sol", "gpt-6-luna", "gpt-5.5"];
 const SESSION_ID_SUFFIX_SEPARATOR = "--s";
 const ROOT_SESSION_NUMBER = 1;
 
@@ -678,25 +677,6 @@ export function buildModelCapacityBlockKey(provider: string, modelId: string): s
   }
 
   return `${normalizedProvider}/${normalizedModelId}`;
-}
-
-export function resolveNextCapacityFallbackModelId(provider: string, modelId: string): string | undefined {
-  const normalizedProvider = normalizeOptionalAgentId(provider)?.toLowerCase();
-  const normalizedModelId = normalizeOptionalModelId(modelId)?.toLowerCase();
-  if (!normalizedProvider || !normalizedModelId) {
-    return undefined;
-  }
-
-  if (normalizedProvider !== "openai-codex") {
-    return undefined;
-  }
-
-  const index = OPENAI_CODEX_CAPACITY_FALLBACK_CHAIN.indexOf(normalizedModelId);
-  if (index < 0 || index + 1 >= OPENAI_CODEX_CAPACITY_FALLBACK_CHAIN.length) {
-    return undefined;
-  }
-
-  return OPENAI_CODEX_CAPACITY_FALLBACK_CHAIN[index + 1];
 }
 
 export function clampModelCapacityBlockDurationMs(durationMs: number): number | undefined {

@@ -47,8 +47,7 @@ import {
   cloneDescriptor,
   normalizeAgentId,
   normalizeOptionalAgentId,
-  normalizeOptionalModelId,
-  resolveNextCapacityFallbackModelId
+  normalizeOptionalModelId
 } from "./swarm-manager-utils.js";
 import { resolveExactManagerModelSelection } from "./catalog/manager-model-selection.js";
 import { buildManagerSelectionCatalog } from "./catalog/manager-selection-catalog.js";
@@ -1586,7 +1585,7 @@ export class SwarmAgentLifecycleService {
         thinkingLevel: requestedReasoningLevel ?? fallback.thinkingLevel,
       };
       descriptor.thinkingLevel = normalizeThinkingLevelForModelDescriptor(descriptor);
-      return this.resolveSpawnModelWithCapacityFallback(descriptor);
+      return descriptor;
     }
 
     const availability = await this.options.getManagedModelProviderAvailability();
@@ -1669,57 +1668,6 @@ export class SwarmAgentLifecycleService {
       this.resolveSpecialistRoster(manager),
     ]);
     return mergeWorkerPresets(settings.presets, specialistsToWorkerPresets(roster, manager.model));
-  }
-
-  resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor {
-    const provider = normalizeOptionalAgentId(model.provider)?.toLowerCase();
-    const requestedModelId = normalizeOptionalModelId(model.modelId)?.toLowerCase();
-    if (!provider || !requestedModelId) {
-      return model;
-    }
-
-    const requestedBlock = this.getActiveModelCapacityBlock(provider, requestedModelId);
-    if (!requestedBlock) {
-      return model;
-    }
-
-    const attemptedModelIds: string[] = [requestedModelId];
-    let candidateModelId = requestedModelId;
-
-    while (true) {
-      const nextModelId = resolveNextCapacityFallbackModelId(provider, candidateModelId);
-      if (!nextModelId) {
-        this.options.logDebug("agent:spawn:model_blocked_no_fallback", {
-          provider,
-          requestedModelId,
-          blockedUntil: new Date(requestedBlock.blockedUntilMs).toISOString(),
-          attemptedModelIds
-        });
-        return model;
-      }
-
-      attemptedModelIds.push(nextModelId);
-
-      const nextBlock = this.getActiveModelCapacityBlock(provider, nextModelId);
-      if (!nextBlock) {
-        this.options.logDebug("agent:spawn:model_reroute", {
-          provider,
-          requestedModelId,
-          selectedModelId: nextModelId,
-          attemptedModelIds
-        });
-        const fallbackModel = {
-          ...model,
-          modelId: nextModelId
-        };
-        return {
-          ...fallbackModel,
-          thinkingLevel: normalizeThinkingLevelForModelDescriptor(fallbackModel)
-        };
-      }
-
-      candidateModelId = nextModelId;
-    }
   }
 
   async stopSessionInternal(
