@@ -23,6 +23,7 @@ void app.whenReady().then(async () => {
     if (message.error) item?.reject(new Error(message.error)); else item?.resolve(message.value)
   })
   ;(globalThis as unknown as { forgeBrowserFixture: unknown }).forgeBrowserFixture = {
+    backendPid: child.pid,
     call: async (method: string, params: unknown) => { await initialized; const requestId = randomUUID(); const result = new Promise((resolve, reject) => pending.set(requestId, { resolve, reject })); child.send({ type: 'fixture:browser:call', requestId, method, params }); return result },
     present: (tabId: string) => host.present(window, { tabId, bounds: { x: 10, y: 70, width: 1280, height: 800 } }),
   }

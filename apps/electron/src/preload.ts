@@ -55,6 +55,10 @@ const roleScopedBridge = bootstrap.windowRole === 'managed-browser-popout'
         platform: bootstrap.platform,
         secureControlToken: bootstrap.secureControlToken,
         markRendererReady: (): void => ipcRenderer.send(MAIN_RENDERER_READY_CHANNEL),
+        browserEngine: {
+          present: (input: Parameters<import('@forge/protocol').BrowserEngineDesktopBridge['present']>[0]): Promise<void> => ipcRenderer.invoke('forge:browser-engine:present', input),
+          hide: (): Promise<void> => ipcRenderer.invoke('forge:browser-engine:hide'),
+        },
         browserAutomation: createTrustedBrowserBridge(ipcRenderer),
         browserPreview: createTrustedBrowserPreviewBridge(ipcRenderer, bootstrap.windowRole),
         browserWorkspace: createTrustedBrowserWorkspaceBridge(

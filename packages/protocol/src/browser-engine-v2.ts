@@ -57,12 +57,13 @@ export const BrowserCookieErrorSchema = O({ code: E('chrome-not-running', 'chrom
 export type BrowserCookieError = Static<typeof BrowserCookieErrorSchema>
 export const BrowserCookiePreviewSchema = Type.Union([
   O({ ok: Type.Literal(true), importId: id, source: BrowserCookieSourceSchema,
-    domains: Type.Array(O({ domain, count: Type.Integer({ minimum: 1, maximum: 100000 }) }), { maxItems: 10000 }),
+    domains: Type.Array(O({ domain, count: Type.Integer({ minimum: 1, maximum: 100000 }), lastUsedAt: Type.Optional(Type.String({ maxLength: 32 })) }), { maxItems: 10000 }),
     expiresAt: Type.String({ maxLength: 32 }) }),
   O({ ok: Type.Literal(false), error: BrowserCookieErrorSchema }),
 ])
 export type BrowserCookiePreview = Static<typeof BrowserCookiePreviewSchema>
-export const BrowserCookieAuditSchema = O({ domains: Type.Array(O({ domain, importedAt: Type.String({ maxLength: 32 }), count: Type.Integer({ minimum: 0, maximum: 100000 }) }), { maxItems: 10000 }) })
+export const BrowserCookieAuditSchema = O({ domains: Type.Array(O({ domain, importedAt: Type.String({ maxLength: 32 }), count: Type.Integer({ minimum: 0, maximum: 100000 }) }), { maxItems: 10000 }), skipped: Type.Optional(Type.Array(O({ domain, reason: E('expired', 'unsupported', 'conflict', 'failed'), count: Type.Optional(Type.Integer({ minimum: 1, maximum: 100000 })) }), { maxItems: 1000 })) })
+export const BrowserEngineStatusSchema = O({ state: E('ready', 'missing', 'installing', 'failed'), message: Type.Optional(Type.String({ maxLength: 1024 })), version: Type.Optional(Type.String({ maxLength: 128 })) })
 /** Explicit one-time transfer only. Clients must keep this value in memory,
  * never in persisted caches, logs, artifacts or conversations. */
 export const BrowserCookieTransferSchema = O({ transferId: id, expiresAt: Type.String({ maxLength: 32 }), domains,
@@ -94,11 +95,13 @@ export interface BrowserEngineDesktopBridge {
 /** The Electron parent creates tabs and relays CDP on its existing private fork
  * channel. These messages never enter environment RPC or renderer state. */
 export type DesktopBrowserCommand =
+  | { type: 'forge:browser:cookies.read'; requestId: string }
   | { type: 'forge:browser:create'; requestId: string; tabId: string; projectId: string; viewport: { width: number; height: number } }
   | { type: 'forge:browser:close'; tabId: string }
   | { type: 'forge:browser:cdp'; tabId: string; message: string }
   | { type: 'forge:browser:resize'; tabId: string; viewport: { width: number; height: number } }
 export type DesktopBrowserEvent =
+  | { type: 'forge:browser:cookies.result'; requestId: string; cookies?: Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>; error?: BrowserCookieError }
   | { type: 'forge:browser:created'; requestId: string; tabId: string }
   | { type: 'forge:browser:closed'; tabId: string }
   | { type: 'forge:browser:cdp'; tabId: string; message: string }

@@ -2,7 +2,7 @@ import { build } from 'esbuild'
 
 const sharedOptions = {
   bundle: true,
-  external: ['electron', 'electron-updater', 'playwright-core', 'tsx'],
+  external: ['@napi-rs/keyring', 'koffi', 'electron', 'electron-updater', 'playwright-core', 'tsx'],
   format: 'cjs',
   platform: 'node',
   target: 'node22',

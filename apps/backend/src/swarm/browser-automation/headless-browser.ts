@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { createReadStream, createWriteStream } from 'node:fs'
+import { createReadStream, createWriteStream, accessSync, readFileSync, constants } from 'node:fs'
 import { access, chmod, mkdir, rename, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
@@ -30,12 +30,26 @@ export class HeadlessBrowser {
   private executable?: string
   private setup: BrowserSetupState = { browserEngineState: 'missing' }
   private readonly contexts = new Map<string, Promise<BrowserContext>>()
-  constructor(private readonly options: { dataDir: string; cacheDir?: string; onSetup?(state: BrowserSetupState): void }) {}
+  constructor(private readonly options: { dataDir: string; cacheDir?: string; onSetup?(state: BrowserSetupState): void }) {
+    const cached = this.cachedExecutable()
+    if (cached) { this.executable = cached; this.setup = { browserEngineState: 'ready' } }
+  }
+  private cachedExecutable(): string | undefined {
+    try {
+      const platform = platformKey(), folder = `chrome-headless-shell-${platform}`
+      const target = join(this.options.cacheDir ?? getBrowserRuntimeDir(this.options.dataDir), HEADLESS_CHROME_VERSION, platform)
+      const marker = JSON.parse(readFileSync(join(target, 'integrity.json'), 'utf8')) as { version?: string; sha256?: string }
+      if (marker.version !== HEADLESS_CHROME_VERSION || marker.sha256 !== releases[platform][1]) return undefined
+      const executable = join(target, folder, process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell')
+      accessSync(executable, process.platform === 'win32' ? constants.F_OK : constants.X_OK); return executable
+    } catch { return undefined }
+  }
   state(): BrowserSetupState { return { ...this.setup } }
   private update(setup: BrowserSetupState) { this.setup = setup; this.options.onSetup?.(this.state()) }
   async ensureExecutable(): Promise<string> {
     if (this.executable) return this.executable
     if (this.installing) return this.installing
+    this.update({ browserEngineState: 'installing', browserEngineMessage: 'Preparing the Forge browser…' })
     this.installing = this.install().then(path => { this.executable = path; this.update({ browserEngineState: 'ready' }); return path }, error => { this.update({ browserEngineState: 'failed', browserEngineMessage: error instanceof Error ? error.message.slice(0, 1024) : 'Browser installation failed.' }); throw error }).finally(() => { this.installing = undefined })
     return this.installing
   }
@@ -43,7 +57,7 @@ export class HeadlessBrowser {
     const platform = platformKey(); const root = this.options.cacheDir ?? getBrowserRuntimeDir(this.options.dataDir)
     const folder = `chrome-headless-shell-${platform}`; const target = join(root, HEADLESS_CHROME_VERSION, platform)
     const executable = join(target, folder, process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell')
-    try { await access(executable); return executable } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    const cached = this.cachedExecutable(); if (cached) return cached
     this.update({ browserEngineState: 'installing', browserEngineMessage: 'Downloading the Forge browser…' })
     const staging = join(root, `.install-${randomUUID()}`); await mkdir(staging, { recursive: true, mode: 0o700 })
     await mkdir(join(root, HEADLESS_CHROME_VERSION), { recursive: true, mode: 0o700 })
@@ -61,10 +75,11 @@ export class HeadlessBrowser {
       for await (const chunk of createReadStream(archive)) { bytes += chunk.length; hash.update(chunk) }
       if (bytes !== length || hash.digest('hex') !== sha256) { await rm(archive); throw new Error('Browser archive did not match its pinned SHA-256 and size.') }
       await extract(archive, { dir: staging })
+      await import('../../utils/atomic-files.js').then(files => files.writeJsonFileAtomic(join(staging, 'integrity.json'), { version: HEADLESS_CHROME_VERSION, sha256: releases[platform][1] }, { mode: 0o600 }))
       if (process.platform !== 'win32') await chmod(join(staging, folder, 'chrome-headless-shell'), 0o755)
       await mkdir(join(root, HEADLESS_CHROME_VERSION), { recursive: true, mode: 0o700 })
       // Concurrent environments may share only the binary cache, never profiles.
-      try { await rename(staging, target) } catch (error) { if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; await access(executable) }
+      try { await rename(staging, target) } catch (error) { if (!['EEXIST', 'ENOTEMPTY'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; if (!this.cachedExecutable()) { await rm(target, { recursive: true, force: true }); await rename(staging, target) } }
       return executable
     } finally { await rm(staging, { recursive: true, force: true }) }
   }

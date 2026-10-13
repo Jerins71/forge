@@ -127,6 +127,12 @@ export function createCdpRelayConnection(
         const { browserContextId: _ignored, ...params } = command.params ?? {};
         return target.send("Browser.setDownloadBehavior", params, undefined);
       }
+      case "Storage.getCookies":
+      case "Storage.setCookies":
+      case "Storage.clearCookies": {
+        const { browserContextId: _ignored, ...params } = command.params ?? {};
+        return target.send(command.method, params, undefined);
+      }
       case "Browser.getVersion":
         return {
           protocolVersion: "1.3",

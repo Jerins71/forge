@@ -23,7 +23,7 @@ export interface RpcDependencies {
 }
 
 export function requestHandler(deps: RpcDependencies, principal: Principal, method: Method, input: unknown, _signal: AbortSignal): Promise<unknown> | unknown {
-  if (method.startsWith('browser.tabs.') || method.startsWith('browser.screencast.') || method.startsWith('browser.cookies.') || method === 'browser.engine.setup') {
+  if (method.startsWith('browser.tabs.') || method.startsWith('browser.screencast.') || method.startsWith('browser.cookies.') || method.startsWith('browser.engine.')) {
     if (!deps.browserEngine) throw new StreamFault('UNAVAILABLE', 'Browser engine is unavailable');
     return deps.browserEngine.execute(principal, method as import('./browser-engine-rpc.js').BrowserEngineMethod, input as RpcInput<import('./browser-engine-rpc.js').BrowserEngineMethod>);
   }

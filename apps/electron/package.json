@@ -35,7 +35,9 @@
   "dependencies": {
     "@forge/client-runtime": "workspace:*",
     "@forge/protocol": "workspace:*",
+    "@napi-rs/keyring": "1.3.0",
     "electron-updater": "^6.8.3",
+    "koffi": "2.15.2",
     "playwright-core": "1.60.0",
     "ws": "^8.19.0"
   },

@@ -1,31 +1,40 @@
+import { join } from 'node:path'
+import { BrowserCookieImport } from './browser-cookie-import.js'
+import { BrowserRecording } from './browser-recording.js'
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { readFile, rm } from 'node:fs/promises'
 import { Value } from '@sinclair/typebox/value'
 import sharp from 'sharp'
-import type { Page, CDPSession, Locator } from 'playwright-core'
+import type { Page, CDPSession, Locator, BrowserContext } from 'playwright-core'
 import { BROWSER_AUTOMATION_OPERATIONS, BROWSER_HOST_PROTOCOL_VERSION, BROWSER_VIEWPORT_PRESETS, BrowserEngineSnapshotSchema,
   type BrowserEngineTab, type BrowserEngineSnapshot, type BrowserEngineInput, type BrowserScreencastItem, type BrowserAutomationOperation,
   type BrowserAutomationInputByOperation, type BrowserAutomationResultByOperation, type BrowserTabSnapshot, type BrowserSnapshotResult,
   type BrowserConsoleEntry, type BrowserNetworkEntry } from '@forge/protocol'
 import type { BrowserAutomationInvocationResult } from './browser-automation-service.js'
 import { writeJsonFileAtomic } from '../../utils/atomic-files.js'
-import { getSessionBrowserStatePath } from '../storage/data-paths.js'
-import { HeadlessBrowser, type BrowserSetupState } from './headless-browser.js'
+import { getSessionBrowserStatePath, getSessionBrowserArtifactsDir } from '../storage/data-paths.js'
+import { HeadlessBrowser, HEADLESS_CHROME_VERSION, type BrowserSetupState } from './headless-browser.js'
 import { DesktopBrowserChannel } from './desktop-browser-channel.js'
 interface LiveTab {
   state: BrowserEngineTab; page: Page; cdp: CDPSession; dispose(): Promise<void>
-  action?: AbortController; actionTail: Promise<unknown>; cursorSequence: number
+  closing?: boolean; actionEpoch: number; action?: AbortController; actionTail: Promise<unknown>; cursorSequence: number
+  recording?: { recordingId: string; startedAt: string; encoder: BrowserRecording; cast: { release(): Promise<void> }; work: Promise<void>; error?: Error }
   console: BrowserConsoleEntry[]; network: BrowserNetworkEntry[]; stream?: ScreencastHub
 }
-interface Session { snapshot: BrowserEngineSnapshot; tabs: Map<string, LiveTab>; write: Promise<void> }
+interface Session { closed?: boolean; snapshot: BrowserEngineSnapshot; tabs: Map<string, LiveTab>; write: Promise<void> }
 interface Viewer { send(item: BrowserScreencastItem): void; pending?: number; last: number }
 class ScreencastHub {
   private readonly viewers = new Set<Viewer>()
   private latest?: Extract<BrowserScreencastItem, { kind: 'frame' }>
   private sequence = 0
   private stopped = false
+  private invalidFrame = false
+  readonly ready: Promise<void>
+  private markReady!: () => void
+  private markFailed!: (error: unknown) => void
   private readonly onFrame: (frame: { data: string; metadata: { timestamp?: number }; sessionId: number }) => void
   constructor(private readonly tab: LiveTab) {
+    this.ready = new Promise<void>((resolve, reject) => { this.markReady = resolve; this.markFailed = reject }); this.ready.catch(() => {})
     this.onFrame = frame => {
       void this.frame(frame).catch(() => {})
       // Chrome has its own small producer budget. Viewers each have an independent
@@ -35,12 +44,25 @@ class ScreencastHub {
     tab.cdp.on('Page.screencastFrame', this.onFrame)
   }
   async start(options: { maxWidth?: number; maxHeight?: number; quality?: number }) {
-    await this.tab.cdp.send('Page.startScreencast', { format: 'jpeg', quality: options.quality ?? 75, maxWidth: options.maxWidth ?? 1280, maxHeight: options.maxHeight ?? 1280, everyNthFrame: 1 })
+    try {
+      const deadline = Date.now() + 15000
+      while (true) {
+        await this.tab.page.waitForLoadState('domcontentloaded', { timeout: Math.max(1, deadline - Date.now()) })
+        try { await this.tab.cdp.send('Page.startScreencast', { format: 'jpeg', quality: options.quality ?? 75, maxWidth: options.maxWidth ?? 1280, maxHeight: options.maxHeight ?? 1280, everyNthFrame: 1 }); break }
+        catch (error) { if (this.tab.page.isClosed() || Date.now() >= deadline) throw error; await new Promise(resolve => setTimeout(resolve, 50)) }
+      }
+      this.markReady()
+    } catch (error) { this.markFailed(error); throw error }
   }
   private async frame(frame: { data: string; metadata: { timestamp?: number } }) {
     if (this.stopped || frame.data.length > 800000) return
     const metadata = await sharp(Buffer.from(frame.data, 'base64')).metadata()
-    if (this.stopped || !metadata.width || !metadata.height || metadata.width < 240 || metadata.height < 240) return
+    if (this.stopped) return
+    if (!metadata.width || !metadata.height || metadata.width < 240 || metadata.height < 240) {
+      if (!this.invalidFrame) for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'error', message: 'Browser viewport is too small for live view. Resize it to at least 240 × 240.' })
+      this.invalidFrame = true; return
+    }
+    this.invalidFrame = false
     this.latest = { kind: 'frame', tabId: this.tab.state.tabId, frameId: ++this.sequence, data: frame.data, mimeType: 'image/jpeg', width: metadata.width, height: metadata.height, timestamp: frame.metadata.timestamp ?? Date.now() / 1000 }
     for (const viewer of this.viewers) this.deliver(viewer)
   }
@@ -48,26 +70,29 @@ class ScreencastHub {
   attach(send: Viewer['send']) {
     const viewer: Viewer = { send, last: 0 }; this.viewers.add(viewer)
     send({ kind: 'state', tabId: this.tab.state.tabId, state: 'ready' }); this.deliver(viewer)
-    return { ack: async (frameId: number) => { if (viewer.pending !== frameId) return; viewer.pending = undefined; this.deliver(viewer) }, release: async () => { this.viewers.delete(viewer); if (!this.viewers.size) { await this.stop(); if (this.tab.stream === this) this.tab.stream = undefined } } }
+    return { ack: async (frameId: number) => { if (viewer.pending !== frameId) return; viewer.pending = undefined; this.deliver(viewer) }, release: async () => { this.viewers.delete(viewer); if (!this.viewers.size) { if (this.tab.stream === this) this.tab.stream = undefined; await this.stop() } } }
   }
   async stop() { if (this.stopped) return; this.stopped = true; this.tab.cdp.off('Page.screencastFrame', this.onFrame); for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'closed' }); this.viewers.clear(); await this.tab.cdp.send('Page.stopScreencast').catch(() => {}) }
 }
 /** Single owner for session tabs, project profiles, actions and viewer streams. */
 export class BrowserEngine {
   private shuttingDown = false
+  readonly cookies: BrowserCookieImport
+  readonly version = HEADLESS_CHROME_VERSION
   readonly desktop: DesktopBrowserChannel
   readonly headless: HeadlessBrowser
   private readonly sessions = new Map<string, Promise<Session>>()
   private readonly watchers = new Map<string, Set<(snapshot: BrowserEngineSnapshot) => void>>()
   private readonly options: { dataDir: string; resolveSession(sessionId: string): string | undefined; browserCacheDir?: string; desktop?: DesktopBrowserChannel }
   constructor(options: BrowserEngine['options']) {
-    this.options = options; this.desktop = options.desktop ?? new DesktopBrowserChannel()
+    this.cookies = new BrowserCookieImport({ engine: this, dataDir: options.dataDir }); this.options = options; this.desktop = options.desktop ?? new DesktopBrowserChannel()
     this.headless = new HeadlessBrowser({ dataDir: options.dataDir, cacheDir: options.browserCacheDir ?? process.env.FORGE_BROWSER_CACHE_DIR, onSetup: () => { for (const work of this.sessions.values()) void work.then(session => this.publish(session)) } })
     this.desktop.onInput = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) this.humanInput(session, tab) }) }
     this.desktop.onClosed = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) { tab.state.errorCode = 'crashed'; tab.state.error = 'Desktop browser page closed.'; this.publish(session) } }) }
   }
   setupState(): BrowserSetupState { return this.desktop.available ? { browserEngineState: 'ready' } : this.headless.state() }
-  async setup(): Promise<BrowserSetupState> { if (!this.desktop.available) await this.headless.ensureExecutable().catch(() => {}); return this.setupState() }
+  async setup(): Promise<BrowserSetupState> { if (!this.desktop.available) void this.headless.ensureExecutable().catch(() => {}); return this.setupState() }
+  projectForSession(sessionId: string) { return this.project(sessionId) }
   private project(sessionId: string) { const project = this.options.resolveSession(sessionId); if (!project) throw new Error('Browser session is unavailable.'); return project }
   private session(sessionId: string): Promise<Session> {
     const projectId = this.project(sessionId); const current = this.sessions.get(sessionId); if (current) return current
@@ -93,11 +118,11 @@ export class BrowserEngine {
     await page.setViewportSize(viewport); page.setDefaultTimeout(15000)
     const cdp = await page.context().newCDPSession(page)
     const state: BrowserEngineTab = { tabId, sessionId: session.snapshot.sessionId, projectId: session.snapshot.projectId, host: this.desktop.available ? 'desktop' : 'headless', url: page.url(), title: '', loading: false, canGoBack: false, canGoForward: false, viewport, controller: 'none' }
-    const tab: LiveTab = { state, page, cdp, dispose, actionTail: Promise.resolve(), cursorSequence: 0, console: [], network: [] }
+    const tab: LiveTab = { state, page, cdp, dispose, actionEpoch: 0, actionTail: Promise.resolve(), cursorSequence: 0, console: [], network: [] }
     page.on('console', message => { tab.console.push({ level: message.type(), text: message.text().slice(0, 4096), timestamp: new Date().toISOString() }); if (tab.console.length > 200) tab.console.shift() })
     page.on('response', response => { tab.network.push({ url: response.url().slice(0, 2048), method: response.request().method(), status: response.status(), failed: false, timestamp: new Date().toISOString() }); if (tab.network.length > 200) tab.network.shift() })
     page.on('crash', () => { tab.action?.abort(); state.error = 'Browser page crashed. Reload or close this tab.'; state.errorCode = 'crashed'; this.publish(session) })
-    page.on('close', () => { if (this.shuttingDown) return; tab.action?.abort(); void tab.stream?.stop(); if (session.tabs.delete(tabId)) { if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; this.publish(session); void this.persist(session) } })
+    page.on('close', () => { if (this.shuttingDown || tab.closing) return; tab.action?.abort(); void tab.stream?.stop(); if (session.tabs.delete(tabId)) { if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; this.publish(session); void this.persist(session) } })
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) void this.refresh(tab).then(() => { this.publish(session); return this.persist(session) }).catch(() => {}) })
     page.on('domcontentloaded', () => { void this.refresh(tab).then(() => this.publish(session)).catch(() => {}) })
     return tab
@@ -112,15 +137,23 @@ export class BrowserEngine {
   private snapshot(session: Session): BrowserEngineSnapshot { return { ...session.snapshot, ...this.setupState(), tabs: [...session.tabs.values()].map(tab => structuredClone(tab.state)) } }
   private publish(session: Session) { session.snapshot.revision++; const snapshot = this.snapshot(session); for (const send of this.watchers.get(snapshot.sessionId) ?? []) send(snapshot) }
   private persist(session: Session): Promise<void> {
+    if (session.closed) return Promise.resolve()
     const snapshot = this.snapshot(session); snapshot.tabs = snapshot.tabs.map(({ agentAction: _action, agentCursor: _cursor, ...tab }) => ({ ...tab, controller: 'none' }))
     const path = getSessionBrowserStatePath(this.options.dataDir, snapshot.projectId, snapshot.sessionId)
     session.write = session.write.catch(() => {}).then(() => writeJsonFileAtomic(path, { schemaVersion: 3, snapshot }, { mode: 0o600 })); return session.write
+  }
+  async withCookieContext<T>(sessionId: string, work: (context: BrowserContext) => Promise<T>): Promise<T> {
+    const projectId = this.project(sessionId)
+    if (!this.desktop.available) return work(await this.headless.context(projectId))
+    for (const loaded of this.sessions.values()) { const session = await loaded; if (session.snapshot.projectId === projectId) { const tab = [...session.tabs.values()][0]; if (tab && !tab.page.isClosed()) return work(tab.page.context()) } }
+    const temporary = await this.desktop.create(randomUUID(), projectId, { width: 1280, height: 800 })
+    try { return await work(temporary.page.context()) } finally { await temporary.close() }
   }
   async getSnapshot(sessionId: string) { return this.snapshot(await this.session(sessionId)) }
   watch(sessionId: string, send: (snapshot: BrowserEngineSnapshot) => void): () => void { this.project(sessionId); const watchers = this.watchers.get(sessionId) ?? new Set(); watchers.add(send); this.watchers.set(sessionId, watchers); return () => { watchers.delete(send); if (!watchers.size) this.watchers.delete(sessionId) } }
   async open(sessionId: string, input: { url?: string; activate?: boolean }) {
     const session = await this.session(sessionId); if (session.tabs.size >= 100) throw new Error('This browser session already has 100 tabs.')
-    const tabId = randomUUID(); const tab = await this.create(session, tabId, { width: 1280, height: 800 }); session.tabs.set(tabId, tab)
+    const tabId = randomUUID(); const tab = await this.create(session, tabId, { width: 1280, height: 800 }); if (session.closed || this.project(sessionId) !== session.snapshot.projectId) { await tab.dispose(); throw new Error('Browser session was closed during tab creation.') }; session.tabs.set(tabId, tab)
     if (input.activate !== false || !session.snapshot.activeTabId) session.snapshot.activeTabId = tabId
     this.publish(session)
     if (input.url) await this.navigate(sessionId, tabId, { url: input.url }); else await this.persist(session)
@@ -128,16 +161,16 @@ export class BrowserEngine {
   }
   private async tab(sessionId: string, tabId?: string): Promise<{ session: Session; tab: LiveTab }> { const session = await this.session(sessionId); const tab = session.tabs.get(tabId ?? session.snapshot.activeTabId ?? ''); if (!tab) throw new Error('Browser tab does not belong to this session.'); return { session, tab } }
   async activate(sessionId: string, tabId: string) { const { session } = await this.tab(sessionId, tabId); session.snapshot.activeTabId = tabId; this.publish(session); await this.persist(session); return this.snapshot(session) }
-  async close(sessionId: string, tabId: string) { const { session, tab } = await this.tab(sessionId, tabId); tab.action?.abort(); await tab.stream?.stop(); session.tabs.delete(tabId); if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; await tab.dispose(); this.publish(session); await this.persist(session); return this.snapshot(session) }
+  async close(sessionId: string, tabId: string) { const { session, tab } = await this.tab(sessionId, tabId); tab.action?.abort(); if (tab.recording) await this.recordingStop(sessionId, tabId); await tab.stream?.stop(); session.tabs.delete(tabId); if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; await tab.dispose(); this.publish(session); await this.persist(session); return this.snapshot(session) }
   async navigate(sessionId: string, tabId: string, input: { url?: string; direction?: 'back' | 'forward' | 'reload' }, signal?: AbortSignal, readiness: 'load' | 'domcontentloaded' | 'commit' = 'domcontentloaded') {
-    const { session, tab } = await this.tab(sessionId, tabId); tab.state.loading = true; delete tab.state.error; delete tab.state.errorCode; this.publish(session)
+    const { session, tab } = await this.tab(sessionId, tabId); if (!signal) this.humanInput(session, tab); tab.state.loading = true; delete tab.state.error; delete tab.state.errorCode; this.publish(session)
     try { const options = { waitUntil: readiness, timeout: 15000, signal }; if (input.url) await tab.page.goto(normalizeUrl(input.url), options); else if (input.direction === 'back') await tab.page.goBack(options); else if (input.direction === 'forward') await tab.page.goForward(options); else await tab.page.reload(options); await this.refresh(tab) }
     catch (error) { tab.state.error = error instanceof Error ? error.message.slice(0, 1024) : 'Navigation failed.'; tab.state.errorCode = /ERR_CONNECTION|ERR_NAME|ERR_ADDRESS/.test(tab.state.error) ? 'unreachable' : 'navigation_failed'; throw error }
     finally { tab.state.loading = false; this.publish(session); await this.persist(session) }
     return this.snapshot(session)
   }
   async resize(sessionId: string, tabId: string, viewport: BrowserEngineTab['viewport']) { if (viewport.width * viewport.height > 3840 * 2160) throw new Error('Browser viewport exceeds its area budget.'); const { session, tab } = await this.tab(sessionId, tabId); await tab.page.setViewportSize(viewport); if (tab.state.host === 'desktop') this.desktop.resize(tabId, viewport); tab.state.viewport = viewport; this.publish(session); await this.persist(session); return this.snapshot(session) }
-  private humanInput(session: Session, tab: LiveTab) { tab.action?.abort(new Error('User input interrupted this browser action.')); tab.state.controller = 'human'; delete tab.state.agentAction; delete tab.state.agentCursor; this.publish(session) }
+  private humanInput(session: Session, tab: LiveTab) { tab.actionEpoch++; tab.action?.abort(new Error('User input interrupted this browser action.')); tab.state.controller = 'human'; delete tab.state.agentAction; delete tab.state.agentCursor; this.publish(session) }
   async input(sessionId: string, tabId: string, input: BrowserEngineInput) {
     const { session, tab } = await this.tab(sessionId, tabId); this.humanInput(session, tab)
     if (input.kind === 'text') await tab.cdp.send('Input.insertText', { text: input.text })
@@ -148,7 +181,29 @@ export class BrowserEngine {
   async screencast(sessionId: string, tabId: string, options: { maxWidth?: number; maxHeight?: number; quality?: number }, send: (item: BrowserScreencastItem) => void) {
     const { tab } = await this.tab(sessionId, tabId)
     if (!tab.stream) { const stream = new ScreencastHub(tab); tab.stream = stream; try { await stream.start(options) } catch (error) { tab.stream = undefined; await stream.stop(); throw error } }
+    await tab.stream.ready
     return tab.stream.attach(send)
+  }
+  async recordingStart(sessionId: string, tabId: string) {
+    const { session, tab } = await this.tab(sessionId, tabId)
+    if (tab.recording) throw new Error('This tab is already recording.')
+    const recordingId = randomUUID(), startedAt = new Date().toISOString()
+    const path = join(getSessionBrowserArtifactsDir(this.options.dataDir, session.snapshot.projectId, sessionId), `${recordingId}.webm`)
+    const encoder = await BrowserRecording.start(this.options.dataDir, path, tab.state.viewport.width, tab.state.viewport.height)
+    const recording: NonNullable<LiveTab['recording']> = { recordingId, startedAt, encoder, cast: { release: async () => {} }, work: Promise.resolve() }
+    const cast = await this.screencast(sessionId, tabId, {}, item => {
+      if (item.kind !== 'frame') return
+      recording.work = recording.work.then(async () => { await encoder.frame(item.data); await cast.ack(item.frameId) }).catch(error => { recording.error = error; void cast.release() })
+    })
+    recording.cast = cast; tab.recording = recording; tab.state.recordingId = recordingId; this.publish(session)
+    return { recordingId, tabId, recording: true, startedAt, mimeType: 'video/webm', ...tab.state.viewport }
+  }
+  async recordingStop(sessionId: string, tabId: string) {
+    const { session, tab } = await this.tab(sessionId, tabId); const recording = tab.recording
+    if (!recording) throw new Error('This tab is not recording.')
+    tab.recording = undefined; delete tab.state.recordingId; await recording.cast.release(); await recording.work
+    try { const sizeBytes = await recording.encoder.stop(); if (recording.error) throw recording.error; return { recordingId: recording.recordingId, tabId, path: recording.encoder.path, mimeType: 'video/webm', extension: 'webm', sizeBytes, ...tab.state.viewport, createdAt: new Date().toISOString() } }
+    finally { this.publish(session) }
   }
   async invoke<O extends BrowserAutomationOperation>(sessionId: string, projectId: string, operation: O, input: BrowserAutomationInputByOperation[O]): Promise<BrowserAutomationInvocationResult<O>> {
     try {
@@ -159,9 +214,11 @@ export class BrowserEngine {
   }
   private async perform(sessionId: string, operation: BrowserAutomationOperation, input: BrowserAutomationInputByOperation[BrowserAutomationOperation]): Promise<unknown> {
     if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: true, host: { connected: true, hostId: 'playwright', hostGeneration: 1, focused: false, capabilities: { protocolVersions: { minimum: BROWSER_HOST_PROTOCOL_VERSION, maximum: BROWSER_HOST_PROTOCOL_VERSION }, supportedOperations: BROWSER_AUTOMATION_OPERATIONS, maxResponseBytes: 8388608 }, connectedAt: null }, panelVisible: false, panelRevealRequested: false, physicalTabVisible: false, selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ? legacyTab(snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId)!) : null, eligibleTabs: [], eligibleTabsTruncated: false } }
-    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, { url: value.url }); if (existing && value.url) await this.navigate(sessionId, existing.tabId, { url: value.url }); return { tab: legacyTab((await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!), created: !existing, panelRevealRequested: value.show !== false } }
+    if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: legacyTab((await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!), created: !existing, panelRevealRequested: value.show !== false } }
     const { session, tab } = await this.tab(sessionId, input.tabId)
+    const actionEpoch = tab.actionEpoch
     const run = async () => {
+      if (tab.actionEpoch !== actionEpoch) throw new Error('User input interrupted this browser action.')
       const action = new AbortController(); tab.action = action; tab.state.controller = 'agent'; tab.state.agentAction = actionLabel(operation, input); this.publish(session)
       try { const result = await this.action(session, tab, operation, input, action.signal); action.signal.throwIfAborted(); await this.refresh(tab); return result }
       finally { if (tab.action === action) { tab.action = undefined; tab.state.controller = action.signal.aborted ? 'human' : 'none'; delete tab.state.agentAction; delete tab.state.agentCursor; this.publish(session) } }
@@ -174,6 +231,8 @@ export class BrowserEngine {
     switch (operation) {
       case 'navigate': { const input = raw as BrowserAutomationInputByOperation['navigate']; const url = input.url ?? `${input.environmentProtocol ?? 'http'}://127.0.0.1:${input.environmentPort}${input.path ?? '/'}`; await this.navigate(session.snapshot.sessionId, tabId, { url }, signal, input.readiness === 'none' ? 'commit' : input.readiness === 'domContentLoaded' ? 'domcontentloaded' : 'load'); return { tab: legacyTab(tab.state), readiness: input.readiness } }
       case 'resize': { const input = raw as BrowserAutomationInputByOperation['resize']; const viewport = input.mode === 'freeform' ? { width: input.width, height: input.height } : input.mode === 'preset' ? { ...BROWSER_VIEWPORT_PRESETS[input.presetId] } : { width: 1280, height: 800 }; if (input.mode === 'preset' && input.orientation === 'landscape') [viewport.width, viewport.height] = [viewport.height, viewport.width]; await this.resize(session.snapshot.sessionId, tabId, viewport); return { tabId, setting: { mode: 'freeform', ...viewport }, viewport: { ...viewport, deviceScaleFactor: 1 } } }
+      case 'recordingStart': return this.recordingStart(session.snapshot.sessionId, tabId)
+      case 'recordingStop': return this.recordingStop(session.snapshot.sessionId, tabId)
       case 'snapshot': return this.capture(tab, signal)
       case 'click': { const input = raw as BrowserAutomationInputByOperation['click']; let point: { x: number; y: number }; if ('x' in input && typeof input.x === 'number' && typeof input.y === 'number') { point = { x: input.x, y: input.y }; tab.state.agentCursor = { ...point, phase: 'click', sequence: ++tab.cursorSequence }; this.publish(session); await page.mouse.click(point.x, point.y) } else { const locator = locate(page, input as { locator?: string; selector?: string }); point = await this.point(session, tab, locator, signal, true); await locator.click({ timeout: input.timeoutMs, signal }) } return { tabId, point } }
       case 'type': { const input = raw as BrowserAutomationInputByOperation['type']; const locator = input.locator || input.selector ? locate(page, input) : page.locator(':focus'); await this.point(session, tab, locator, signal); if (input.clear) await locator.fill(input.text, { timeout: input.timeoutMs, signal }); else await locator.pressSequentially(input.text, { timeout: input.timeoutMs, signal }); return { tabId, characters: input.text.length, cleared: input.clear ?? false } }
@@ -188,9 +247,38 @@ export class BrowserEngine {
     const image = await sharp(await tab.page.screenshot({ type: 'png', signal })).resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true }).png().toBuffer({ resolveWithObject: true })
     const visibleText = await tab.page.locator('body').innerText({ timeout: 15000, signal }).catch(() => '')
     const accessibility = await tab.page.locator('body').ariaSnapshot({ timeout: 15000, signal })
-    return { tabId: tab.state.tabId, url: tab.page.url(), title: await tab.page.title(), loading: tab.state.loading, viewportSetting: { mode: 'freeform', ...tab.state.viewport }, viewport: { ...tab.state.viewport, deviceScaleFactor: 1 }, visibleText: visibleText.slice(0, 20000), interactiveElements: [], accessibility: accessibility.slice(0, 64000), consoleEntries: tab.console.slice(), networkEntries: tab.network.slice(), actionTimeline: [], screenshot: { mimeType: 'image/png', data: image.data.toString('base64'), width: image.info.width, height: image.info.height } }
+    const interactiveElements = await tab.page.evaluate<BrowserSnapshotResult['interactiveElements']>(`(() => {
+      const selector = element => { if (element.id) return '#' + CSS.escape(element.id); const parts = []; for (let node = element; node && node !== document.documentElement; node = node.parentElement) { const siblings = node.parentElement ? [...node.parentElement.children].filter(other => other.tagName === node.tagName) : []; parts.unshift(node.tagName.toLowerCase() + (siblings.length > 1 ? ':nth-of-type(' + (siblings.indexOf(node) + 1) + ')' : '')); if (parts.length >= 8) break; } return parts.join(' > '); };
+      return [...document.querySelectorAll('button,a[href],input:not([type=hidden]),textarea,select,[role=button],[role=link],[contenteditable=true]')].filter(element => { const bounds = element.getBoundingClientRect(); const style = getComputedStyle(element); return bounds.width > 0 && bounds.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'; }).slice(0, 200).map(element => { const bounds = element.getBoundingClientRect(); return { tag: element.tagName.toLowerCase(), role: element.getAttribute('role') || ({BUTTON:'button',A:'link',TEXTAREA:'textbox',SELECT:'combobox',INPUT:'textbox'})[element.tagName] || null, name: (element.getAttribute('aria-label') || element.labels?.[0]?.innerText || element.innerText || element.getAttribute('placeholder') || element.getAttribute('title') || '').slice(0,256), selector: selector(element), x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height }; });
+    })()`)
+    return { tabId: tab.state.tabId, url: tab.page.url(), title: await tab.page.title(), loading: tab.state.loading, viewportSetting: { mode: 'freeform', ...tab.state.viewport }, viewport: { ...tab.state.viewport, deviceScaleFactor: 1 }, visibleText: visibleText.slice(0, 20000), interactiveElements, accessibility: accessibility.slice(0, 64000), consoleEntries: tab.console.slice(), networkEntries: tab.network.slice(), actionTimeline: [], screenshot: { mimeType: 'image/png', data: image.data.toString('base64'), width: image.info.width, height: image.info.height } }
   }
-  async shutdown() { this.shuttingDown = true; for (const work of this.sessions.values()) { const session = await work.catch(() => undefined); if (!session) continue; await this.persist(session); for (const tab of session.tabs.values()) { tab.action?.abort(); await tab.stream?.stop(); await tab.dispose().catch(() => {}) } } this.sessions.clear(); await this.headless.shutdown(); await this.desktop.shutdown() }
+  cancelSession(sessionId: string): number {
+    const loaded = this.sessions.get(sessionId)
+    if (loaded) void loaded.then(session => { for (const tab of session.tabs.values()) { tab.actionEpoch++; tab.action?.abort(new Error('Browser session was stopped.')) } })
+    return loaded ? 1 : 0
+  }
+  async endBrowserTurn(_profileId: string, sessionId: string, _turnId: string): Promise<void> { await this.releaseSessionForLifecycle(_profileId, sessionId, 'stop') }
+  async releaseSessionForLifecycle(_profileId: string, sessionId: string, _reason: 'stop' | 'archive' | 'delete' | 'host-replaced'): Promise<void> {
+    this.cancelSession(sessionId); const loaded = this.sessions.get(sessionId); if (!loaded) return
+    const session = await loaded; await Promise.allSettled([...session.tabs.values()].map(tab => tab.actionTail))
+    for (const tab of session.tabs.values()) { tab.state.controller = 'none'; delete tab.state.agentAction; delete tab.state.agentCursor }
+    this.publish(session)
+  }
+  async archiveSession(profileId: string, sessionId: string): Promise<void> {
+    await this.releaseSessionForLifecycle(profileId, sessionId, 'archive'); this.cookies.releaseSession(sessionId)
+    const loaded = this.sessions.get(sessionId); if (!loaded) return; const session = await loaded
+    await this.persist(session); session.closed = true; this.sessions.delete(sessionId)
+    for (const tab of session.tabs.values()) { tab.closing = true; if (tab.recording) { await tab.recording.cast.release(); await tab.recording.work; await tab.recording.encoder.stop().catch(() => {}) }; await tab.stream?.stop(); await tab.dispose() }
+    session.tabs.clear(); session.snapshot.activeTabId = null; this.publish(session)
+  }
+  async restoreSession(_profileId: string, sessionId: string): Promise<void> { if (this.sessions.has(sessionId)) return; await this.getSnapshot(sessionId) }
+  async deleteSession(profileId: string, sessionId: string): Promise<void> {
+    await this.archiveSession(profileId, sessionId)
+    await rm(getSessionBrowserStatePath(this.options.dataDir, profileId, sessionId), { force: true })
+    await rm(getSessionBrowserArtifactsDir(this.options.dataDir, profileId, sessionId), { recursive: true, force: true })
+  }
+  async shutdown() { this.cookies.shutdown(); this.shuttingDown = true; for (const work of this.sessions.values()) { const session = await work.catch(() => undefined); if (!session) continue; await this.persist(session); for (const tab of session.tabs.values()) { tab.action?.abort(); if (tab.recording) await this.recordingStop(session.snapshot.sessionId, tab.state.tabId).catch(() => {}); await tab.stream?.stop(); await tab.dispose().catch(() => {}) } } this.sessions.clear(); await this.headless.shutdown(); await this.desktop.shutdown() }
 }
 function normalizeUrl(raw: string) { const url = new URL(raw); if (!['http:', 'https:', 'about:'].includes(url.protocol) || url.username || url.password || (url.protocol === 'about:' && url.href !== 'about:blank')) throw new Error('Browser navigation requires HTTP(S) or about:blank, without URL credentials.'); return url.href }
 function locate(page: Page, input: { selector?: string; locator?: string }) { if (input.selector) return page.locator(input.selector); const locator = input.locator ?? ':focus'; if (locator.startsWith('label=')) return page.getByLabel(locator.slice(6), { exact: true }); if (locator.startsWith('text=')) return page.getByText(locator.slice(5), { exact: true }); const role = /^role=([\w-]+)(?:\[name=["'](.*)["']\])?$/.exec(locator); if (role) return page.getByRole(role[1] as Parameters<Page['getByRole']>[0], role[2] ? { name: role[2], exact: true } : {}); return page.locator(locator) }
