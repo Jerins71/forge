@@ -185,7 +185,6 @@ async function main() {
   await stageBundledBackend()
   await stageRendererAssets()
   await stageBackendResources()
-  await stageBrowserRuntime()
   await stageCliArtifact()
   await mkdir(streamDeckStageDir, { recursive: true })
   if (streamDeckSetupEnabled) await stageStreamDeckArtifact()
@@ -419,15 +418,6 @@ async function validateStagedElectronNativeRuntime() {
   })
 
   console.log(`[electron/build-all] Packaged-runtime preflight verified staged native modules with Electron-as-Node: ${report}`)
-}
-
-export async function stageBrowserRuntime() {
-  // Playwright is staged once with the backend dependency closure. Chrome and
-  // FFmpeg install on demand in the owning machine's data directory.
-  const notice = path.join(repoRoot, 'THIRD_PARTY_NOTICES.md')
-  await assertExists(notice, 'browser third-party notice')
-  await mkdir(forgeResourcesDir, { recursive: true })
-  await cp(notice, path.join(forgeResourcesDir, 'THIRD_PARTY_NOTICES.md'))
 }
 
 export async function stageCliArtifact(outputDir = cliStageDir) {
@@ -1726,6 +1716,8 @@ export async function stageBackendResources(outputDir = forgeResourcesDir) {
   const forgeResourcesDir = outputDir
   const stagedSecureRunnerDir = path.join(outputDir, 'apps', 'backend', 'src', 'swarm', 'secure-sessions', 'execution')
   await mkdir(forgeResourcesDir, { recursive: true })
+  // Both Desktop and standalone server archives carry the maintained browser notice.
+  await cp(path.join(repoRoot, 'THIRD_PARTY_NOTICES.md'), path.join(outputDir, 'THIRD_PARTY_NOTICES.md'))
 
   await writeFile(
     path.join(forgeResourcesDir, 'pnpm-workspace.yaml'),

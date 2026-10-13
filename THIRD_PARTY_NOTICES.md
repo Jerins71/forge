@@ -24,4 +24,4 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 ## Playwright
 
-playwright-core 1.63.0 is distributed with its LICENSE, NOTICE, and ThirdPartyNotices.txt files in the backend runtime dependency directory. Chrome for Testing and FFmpeg are installed on demand with their upstream notices.
+playwright-core 1.63.0 is distributed with its LICENSE, NOTICE, and ThirdPartyNotices.txt files in the backend runtime dependency directory. Chrome for Testing and FFmpeg are installed on demand from their upstream distributions.

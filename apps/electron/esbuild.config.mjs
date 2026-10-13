@@ -1,4 +1,5 @@
 import { build } from 'esbuild'
+import { rm } from 'node:fs/promises'
 
 const sharedOptions = {
   bundle: true,
@@ -10,6 +11,9 @@ const sharedOptions = {
   outdir: 'dist',
   logLevel: 'info',
 }
+
+// Packaging includes dist wholesale; removed browser hosts must not survive a rebuild.
+await rm(new URL('./dist/', import.meta.url), { recursive: true, force: true })
 
 await Promise.all([
   build({ ...sharedOptions, entryPoints: [{ in: 'src/browser/browser-engine-fixture-main.ts', out: 'browser-engine-fixture-main' }] }),
