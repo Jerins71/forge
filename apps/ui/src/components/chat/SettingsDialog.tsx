@@ -15,6 +15,7 @@ import { SettingsModels } from '@/components/settings/SettingsModels'
 import { SettingsSkills } from '@/components/settings/SettingsSkills'
 import { SettingsPrompts } from '@/components/settings/SettingsPrompts'
 import { SettingsWorkerPresets } from '@/components/settings/SettingsWorkerPresets'
+import { SettingsSync } from '@/components/settings/SettingsSync'
 import { SettingsProjectResources } from '@/components/settings/SettingsProjectResources'
 import { SettingsProjectSettings, type ProjectSettingsActions } from '@/components/settings/SettingsProjectSettings'
 import { SettingsSlashCommands } from '@/components/settings/SettingsSlashCommands'
@@ -223,6 +224,7 @@ export function SettingsPanel({
       {activeTab === 'browser' && <SettingsBrowser environmentId={environmentId} onOpenBrowserPanel={onOpenBrowserPanel} />}
       {activeTab === 'cli-access' && <SettingsCliAccess backendUrl={backendUrl} apiClient={apiClient} />}
       {activeTab === 'environments' && <EnvironmentsSettings />}
+      {activeTab === 'sync' && <SettingsSync />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}
       {activeTab === 'history' && <SettingsHistory apiClient={apiClient} />}
       {activeTab === 'observability' && <SettingsObservability apiClient={apiClient} />}

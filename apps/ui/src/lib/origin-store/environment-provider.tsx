@@ -2,6 +2,7 @@
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
 import { originRegistry } from './origin-registry'
 import { useManagedHostsRegistrySync } from '@/lib/managed-hosts'
+import { getConfigSyncHub } from '@/lib/config-sync'
 import type { EnvironmentRegistry } from '@forge/client-runtime'
 export interface EnvironmentContextValue {
   registry: EnvironmentRegistry
@@ -15,6 +16,11 @@ export function EnvironmentProvider({
 }: EnvironmentContextValue & { children: ReactNode }) {
   useEffect(() => originRegistry.attach(registry), [registry])
   useManagedHostsRegistrySync(registry)
+  useEffect(() => {
+    const hub = getConfigSyncHub(registry)
+    hub.start()
+    return () => hub.stop()
+  }, [registry])
   // One value per registry: every environment consumer re-renders when this identity changes.
   const value = useMemo(() => ({ registry, primaryEnvironmentId }), [registry, primaryEnvironmentId])
   return (
