@@ -12,6 +12,7 @@ const sharedOptions = {
 }
 
 await Promise.all([
+  build({ ...sharedOptions, entryPoints: [{ in: 'src/browser/browser-engine-fixture-main.ts', out: 'browser-engine-fixture-main' }] }),
   build({
     ...sharedOptions,
     entryPoints: ['src/main.ts'],

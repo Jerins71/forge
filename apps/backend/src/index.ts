@@ -47,6 +47,7 @@ async function main(): Promise<void> {
 
   const server = await startServer({
     config,
+    desktopBrowserParent: isDesktop && authorizedPhysicalParent,
     secureControlToken,
     onReady: ({ port, environment }) => {
       process.send?.({ type: "ready", port, dataDir: config.paths.dataDir, environment });

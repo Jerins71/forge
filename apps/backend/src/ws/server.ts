@@ -341,6 +341,7 @@ export class SwarmWebSocketServer {
     observabilityService?: ObservabilityFacade;
     feedbackService?: FeedbackService;
     remoteUpdateAwarenessService?: LocalRemoteUpdateAwarenessService;
+    browserEngine?: import("../swarm/browser-automation/browser-engine.js").BrowserEngine;
     browserAutomationService?: BrowserAutomationService;
     secureControlToken?: string;
   }) {
@@ -443,6 +444,7 @@ export class SwarmWebSocketServer {
         : undefined,
 
       browserAutomationService: options.browserAutomationService,
+      browserEngine: options.browserEngine,
     });
     this.environmentTransport = this.environment?.composeTransport(this.sessionFeatures, this.terminalService);
 

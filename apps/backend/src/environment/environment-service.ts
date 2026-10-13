@@ -235,6 +235,7 @@ export async function createEnvironmentService(options: {
           featureStream: { subscribe: (principal, input, signal) => sessionFeatures.detailFeatures(principal, input, signal) },
           shellStream,
           detailStream,
+          browserEngine: sessionFeatures.browserEngine,
           browserHost: sessionFeatures.browserHost,
           browser: sessionFeatures.browser,
           terminalTransport,

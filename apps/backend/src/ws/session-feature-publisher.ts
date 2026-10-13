@@ -5,6 +5,7 @@ import { BrowserAutomationService, isEligibleLocalBuilderManager } from '../swar
 import type { TerminalService } from '../terminal/terminal-service.js';
 import type { EnvironmentAccessPort, ControlService, Principal } from '../environment/control/control-types.js';
 import { createBrowserHostRpc, type BrowserHostRpc } from './rpc/browser-host-rpc.js';
+import { createBrowserEngineRpc } from "./rpc/browser-engine-rpc.js";
 import { createBrowserWorkspaceRpc } from './rpc/browser-workspace-rpc.js';
 import { projectDetailFeature } from './rpc/detail-feature-rpc.js';
 import { StreamQueue, StreamFault } from '../environment/streams/stream-budget.js';
@@ -19,15 +20,18 @@ export class SessionFeaturePublisher {
         control: ControlService;
         launchMaterialized?: (sessionId: string) => Promise<void>;
     } | null = null;
+    readonly browserEngine?: ReturnType<typeof createBrowserEngineRpc>;
     readonly browserHost: BrowserHostRpc;
     browser!: ReturnType<typeof createBrowserWorkspaceRpc>;
     constructor(options: {
         swarmManager: SwarmManager;
         browserAutomationService?: BrowserAutomationService;
+        browserEngine?: import("../swarm/browser-automation/browser-engine.js").BrowserEngine;
         terminalService?: TerminalService | null;
         listTerminalsForSession?: (id: string) => TerminalDescriptor[];
     }) {
         this.swarmManager = options.swarmManager;
+        this.browserEngine = options.browserEngine && createBrowserEngineRpc(options.browserEngine);
         this.browserAutomationService = options.browserAutomationService ?? new BrowserAutomationService({ dataDir: this.swarmManager.getConfig().paths.dataDir });
         this.listTerminalsForSession = options.listTerminalsForSession ?? (id => options.terminalService?.listTerminals(id) ?? []);
         this.browserHost = createBrowserHostRpc({ service: this.browserAutomationService, hydrateSessions: () => this.hydrateBrowserHostSessions(), resolveSession: id => this.resolveBrowserProfile(id) });

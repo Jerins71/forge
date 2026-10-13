@@ -10,7 +10,7 @@ import {
 
 interface BrowserAutomationManagerAdapterOptions {
   getDescriptor: (agentId: string) => AgentDescriptor | undefined;
-  getService: () => BrowserAutomationService;
+  getService: () => Pick<BrowserAutomationService, "invoke">;
 }
 
 export function createBrowserAutomationManagerInvoker(options: BrowserAutomationManagerAdapterOptions) {
