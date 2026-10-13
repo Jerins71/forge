@@ -11,7 +11,7 @@ import { PlanSnapshotV2Schema, GoalSnapshotV2Schema, GoalControlV2Schema, Elicit
 export * from './detail-features-v2.js'
 import { BrowserViewportV2Schema, BrowserSnapshotV2Schema, BrowserRegistrationV2Schema, BrowserHostV2Schema, BrowserHostLeaseV2Schema, BrowserHostStreamV2Schema, BrowserStreamV2Schema, BrowserRecordingV2Schema } from './browser-v2.js'
 export * from './browser-v2.js'
-import { browserEngineSchemas as B, BrowserEngineSnapshotSchema, BrowserEngineStreamSchema, BrowserScreencastItemSchema, BrowserCookiePreviewSchema, BrowserCookieTransferSchema, BrowserCookieAuditSchema } from './browser-engine-v2.js'
+import { browserEngineSchemas as B, BrowserEngineSnapshotSchema, BrowserEngineStreamSchema, BrowserScreencastItemSchema, BrowserCookiePreviewSchema, BrowserCookieTransferSchema, BrowserCookieAuditSchema, BrowserEngineSetupSchema } from './browser-engine-v2.js'
 export * from './browser-engine-v2.js'
 import { ContextSourceSelectorSchema, ThreadLineageSchema, SessionLineageSnapshotSchema } from './lineage-v2.js'
 export * from './lineage-v2.js'
@@ -491,6 +491,7 @@ export const rpcSchemas = {
     data: Type.String({ maxLength: 16_384 }) }), V2Empty),
   'terminal.resize': defineRpc(O({ subscriptionId: V2Id,
     cols: Type.Integer({ minimum: 1, maximum: 1000 }), rows: Type.Integer({ minimum: 1, maximum: 1000 }) }), V2Empty),
+  'browser.engine.setup': defineRpc(V2Empty, BrowserEngineSetupSchema),
   'browser.tabs.get': defineRpc(B.session, BrowserEngineSnapshotSchema),
   'browser.tabs.subscribe': defineRpc(B.session, SubscribeResult, { stream: BrowserEngineStreamSchema }),
   'browser.tabs.open': defineRpc(B.open, BrowserEngineSnapshotSchema),
@@ -553,6 +554,7 @@ export const rpcScopes = {
   'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
+  'browser.engine.setup': 'session:operate',
   'browser.tabs.get': 'session:read', 'browser.tabs.subscribe': 'session:read',
   'browser.tabs.open': 'session:operate', 'browser.tabs.activate': 'session:operate', 'browser.tabs.close': 'session:operate', 'browser.tabs.navigate': 'session:operate', 'browser.tabs.resize': 'session:operate', 'browser.tabs.input': 'session:operate',
   'browser.tabs.recording.start': 'session:operate', 'browser.tabs.recording.stop': 'session:operate',

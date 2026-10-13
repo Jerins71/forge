@@ -28,6 +28,11 @@ describe('environment browser engine wire contract', () => {
     expect(Value.Check(rpcSchemas['browser.cookies.apply'].input, { sessionId: 's', importId: 'i', domains: [] })).toBe(false)
     expect(Value.Check(BrowserCookiePreviewSchema, { ok: false, error: { code: 'files-folders-denied', message: 'Allow Forge to read Chrome cookies in Files & Folders.', settingsUrl: 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders' } })).toBe(true)
   })
+  it('adds optional activity, setup and diagnostics without breaking earlier snapshots', () => {
+    expect(Value.Check(rpcSchemas['browser.engine.setup'].input, {})).toBe(true)
+    expect(rpcScopes['browser.engine.setup']).toBe('session:operate')
+    expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [], activeTabId: null, revision: 0, browserEngineState: 'failed', browserEngineMessage: 'Install libnss3 and libgbm1.' })).toBe(true)
+  })
   it('shares simple session tabs across local and remote hosts', () => {
     const snapshot = { sessionId: 's', projectId: 'p', tabs: [], activeTabId: null, revision: 0 }
     expect(Value.Check(BrowserEngineSnapshotSchema, snapshot)).toBe(true)

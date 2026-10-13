@@ -1,7 +1,7 @@
 import type { Method, RpcInput, RpcOutput, RpcStreamItem } from '@forge/protocol/environment-v2'
 import type { StreamObserver } from '../types.js'
 import type { RpcFeatureTransport } from './index.js'
-export type BrowserEngineMethod = Extract<Method, `browser.tabs.${string}` | `browser.cookies.${string}` | `browser.screencast.${string}`>
+export type BrowserEngineMethod = Extract<Method, `browser.engine.${string}` | `browser.tabs.${string}` | `browser.cookies.${string}` | `browser.screencast.${string}`>
 /** Browser state, frames and cookie transfers stay transient. Actions are never
  * put in the durable command queue or replayed after a reconnect. */
 export function createBrowserEngineClient(rpc: RpcFeatureTransport) {
