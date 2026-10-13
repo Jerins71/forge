@@ -6,8 +6,8 @@
 //     itself, streams the page, and marks the agent's tab with what it is doing while it acts;
 //   - on a remote machine (env-b) the page streams into the panel and a click on it reaches the page.
 //   - Settings → Browser on the real engine: setup state, Sign in once, Import from Chrome (reading a
-//     seeded throwaway Chrome through its remote-debugging port; the fleet runs with an isolated HOME, so
-//     the user's own Chrome is never read), sending the chosen sites to env-b, and Forget.
+//     seeded throwaway Chrome through its remote-debugging port; test fleets refuse the user's own
+//     Chrome profile and Keychain), sending the chosen sites to env-b, and Forget.
 // States the engine cannot produce on demand (a crashed tab, a missing or failed browser install, macOS Files & Folders
 // and Keychain refusals, skipped sites) drive a mock engine in a separate browser context.
 // Screenshots land in .internal/browser-panel/.
@@ -20,7 +20,7 @@ import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import { join } from 'node:path'
 import { chromium, expect, type BrowserContext, type Page } from '@playwright/test'
-import { test as base, BROWSER_E2E_HOME } from './fixtures/test.js'
+import { test as base, BROWSER_E2E_CHROME_PROFILE } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, sanitizedEnvironment, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
@@ -130,11 +130,9 @@ async function headlessChrome(): Promise<string> {
   }
   throw new Error('The pinned headless Chrome is not cached yet; run the suite once with network access')
 }
-/** A throwaway Chrome at the default profile path under the fleet's isolated HOME, sharing its remote-debugging port as Chrome 144+ does. */
+/** A throwaway Chrome at the fleet's test profile, sharing its remote-debugging port as Chrome 144+ does. */
 async function startFixtureChrome(): Promise<ChildProcess> {
-  const userDataDir = process.platform === 'darwin'
-    ? join(BROWSER_E2E_HOME, 'Library/Application Support/Google/Chrome')
-    : join(BROWSER_E2E_HOME, '.config/google-chrome')
+  const userDataDir = BROWSER_E2E_CHROME_PROFILE
   await rm(userDataDir, { recursive: true, force: true }); await mkdir(userDataDir, { recursive: true })
   const child = spawn(await headlessChrome(), ['--headless', '--use-mock-keychain', '--password-store=basic', '--remote-debugging-port=0', `--user-data-dir=${userDataDir}`, 'about:blank'], { stdio: 'ignore', env: sanitizedEnvironment() })
   const portFile = await until(() => readFile(join(userDataDir, 'DevToolsActivePort'), 'utf8').catch(() => ''), Boolean, 20_000)
