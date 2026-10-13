@@ -19,7 +19,7 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
   let allowClose = true;
   const consumed = vi.fn();
   const errors = vi.fn();
-  const native = { backgroundTasks: vi.fn(async (_id: string) => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
+  const native = { interrupt: vi.fn(async () => {}), backgroundTasks: vi.fn(async (_id: string) => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
     close: vi.fn(() => { if (!allowClose) return; ended = true; waiting?.({ done: true, value: undefined }); }),
     [Symbol.asyncIterator]() { return this; }, next(): Promise<IteratorResult<SDKMessage>> {
       if (frames.length) return Promise.resolve({ done: false, value: frames.shift()! });
@@ -40,6 +40,24 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
 }
 
 describe("Claude native lifecycle", () => {
+  it("keeps the shown reply while native interruption is still pending", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-freeze-")); const f = await fixture(root);
+    let release!: () => void;
+    f.native.interrupt.mockImplementation(() => new Promise<void>(resolve => { release = resolve; }));
+    const state = f.runtime.getCustomEntries(NATIVE_CLAUDE_STATE).at(-1) as { sessionId: string };
+    const emit = (event: unknown) => f.emit({ type: "stream_event", uuid: "stream", session_id: state.sessionId, parent_tool_use_id: null, event });
+    try {
+      await f.runtime.sendMessage("Work"); await f.input.next();
+      await emit({ type: "content_block_start", index: 0, content_block: { type: "text", text: "Shown" } });
+      const before = f.events.length;
+      const interrupted = f.runtime.interruptProvider();
+      await emit({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: " after Stop" } });
+      expect(f.events.slice(before).filter(event => event.type === "message_update")).toEqual([]);
+      release(); await interrupted; await f.runtime.stopInFlight();
+      expect(f.events.filter(event => event.type === "message_end").at(-1)).toMatchObject({ message: { content: [{ text: "Shown" }] } });
+    } finally { release?.(); await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("updates context from a compact result without streamed message usage", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-compact-meter-")); const f = await fixture(root);
     try {
@@ -62,7 +80,7 @@ describe("Claude native lifecycle", () => {
     let child!: ChildProcess; let output = ""; let waiting: ((result: IteratorResult<SDKMessage>) => void) | undefined; let ended = false;
     // Hung on a provider stream: stdin close and SIGTERM are both ignored.
     const hung = "process.on('SIGTERM',()=>process.stdout.write('term\\n'));process.stdin.on('end',()=>process.stdout.write('eof\\n'));process.stdin.resume();setInterval(()=>{},1000);process.stdout.write('ready\\n')";
-    const native = { backgroundTasks: vi.fn(async () => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
+    const native = { interrupt: vi.fn(async () => {}), backgroundTasks: vi.fn(async () => true), initializationResult: vi.fn(async () => ({})), supportedModels: vi.fn(async () => []),
       close: vi.fn(() => { child.stdin!.end(); }),
       [Symbol.asyncIterator]() { return this; }, next(): Promise<IteratorResult<SDKMessage>> {
         return ended ? Promise.resolve({ done: true, value: undefined }) : new Promise(resolve => { waiting = resolve; });

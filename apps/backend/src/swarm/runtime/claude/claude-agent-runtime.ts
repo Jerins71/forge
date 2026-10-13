@@ -333,14 +333,14 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     }
     if (ids.length) await this.publishStatus();
     // Background completion can trigger a new native turn without new user input.
-    if (frame.type === "assistant" && !this.turnOpen) await this.begin();
+    if (frame.type === "assistant" && !this.turnOpen && !this.interrupted) await this.begin();
     // API failures arrive as synthetic assistant messages and can use a
     // "success" result envelope with is_error=true. Keep the explanation for
     // the runtime error path rather than dropping it as unfinished progress.
     if (frame.type === "assistant" && frame.error) {
       this.turnError = frame.message.content.filter(block => block.type === "text").map(block => block.text).join("\n");
     } else {
-      for (const event of this.mapper.map(frame)) await this.emit(event);
+      if (!this.interrupted) for (const event of this.mapper.map(frame)) await this.emit(event);
     }
     if (frame.type === "stream_event" && frame.event.type === "message_start") {
       const usage = frame.event.message.usage;
@@ -378,7 +378,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     }
     const success = !frame.is_error;
     this.providerOutcome = success ? "completed" : "failed";
-    for (const event of this.mapper.finish(success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);
+    for (const event of this.mapper.finish(!this.interrupted && success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);
     const cost = Math.max(0, frame.total_cost_usd - this.previousCost); this.previousCost = frame.total_cost_usd;
     this.options.providerSession?.usage(frame, cost);
     await this.emit({ type: "turn_end", toolResults: [], meta: { provider: this.descriptor.model.provider, modelId: this.descriptor.model.modelId,
