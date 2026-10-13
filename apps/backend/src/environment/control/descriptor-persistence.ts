@@ -20,8 +20,15 @@ export function createControlDescriptorPersistence(options: { database: Database
       eventSink.append(tx, { topic: "shell", sessionId: row.session_id, event: { type: "session.remove", sessionId: row.session_id } });
       database.prepare("UPDATE control_sessions SET deleted=1 WHERE session_id=?").run(row.session_id);
     }
+    // One read per table: a save rewrites only the rows whose descriptor changed, so it stays cheap with tens of thousands of agents.
+    const descriptors = new Map(store.agents.map(a => [a.agentId, a]));
+    const profilesById = new Map((store.profiles ?? []).map(p => [p.profileId, p]));
+    const sessionRows = new Map((database.prepare("SELECT session_id,summary_json,desired_state,descriptor_json,descriptor_version,deleted FROM control_sessions").all() as StoredRow<{ session_id: string; summary_json: string; desired_state: string }>[]).map(row => [row.session_id, row]));
+    const workerRows = new Map((database.prepare("SELECT session_id,agent_id,descriptor_json,descriptor_version,deleted FROM control_workers").all() as StoredRow<{ session_id: string; agent_id: string }>[]).map(row => [`${row.session_id}\0${row.agent_id}`, row]));
+    const upsertWorker = database.prepare("INSERT INTO control_workers (session_id,agent_id,worker_json,updated_sequence,descriptor_json,descriptor_version,deleted) VALUES (?,?,?,0,?,2,0) ON CONFLICT(session_id,agent_id) DO UPDATE SET descriptor_json=excluded.descriptor_json,descriptor_version=2,deleted=0");
+    const updateSessionDescriptor = database.prepare("UPDATE control_sessions SET descriptor_json=?,deleted=0,descriptor_version=2 WHERE session_id=?");
     for (const profile of store.profiles ?? []) {
-      const descriptor = store.agents.find(a => a.agentId === profile.defaultSessionAgentId);
+      const descriptor = descriptors.get(profile.defaultSessionAgentId);
       const prior = database.prepare("SELECT summary_json FROM control_projects WHERE project_id=?").get(profile.profileId) as { summary_json: string } | undefined;
       const summary: ProjectSummary = { ...(prior ? withoutLegacyDelegation(JSON.parse(prior.summary_json)) : { repository: null, isGit: false, defaultBranch: null }), projectId: profile.profileId, title: profile.displayName, cwd: descriptor?.cwd ?? options.dataDir, updatedAt: profile.updatedAt, sortKey: String(profile.sortOrder ?? profile.createdAt), archived: Boolean(profile.archivedAt), defaultModel: profile.defaultModel, defaultSessionId: profile.defaultSessionAgentId, contextMode: profile.defaultContextMode ?? "summary" };
       if (profile.profileType === "system") database.prepare("INSERT INTO control_projects (project_id,summary_json,updated_sequence) VALUES (?,?,0) ON CONFLICT(project_id) DO UPDATE SET summary_json=excluded.summary_json").run(profile.profileId, JSON.stringify(summary));
@@ -29,19 +36,19 @@ export function createControlDescriptorPersistence(options: { database: Database
       database.prepare("UPDATE control_projects SET profile_json=?,deleted=0 WHERE project_id=?").run(JSON.stringify(profile), profile.profileId);
     }
     for (const descriptor of store.agents) {
+      const json = JSON.stringify(descriptor);
       if (descriptor.role === "worker") {
-        database.prepare("INSERT INTO control_workers (session_id,agent_id,worker_json,updated_sequence,descriptor_json,descriptor_version,deleted) VALUES (?,?,?,0,?,2,0) ON CONFLICT(session_id,agent_id) DO UPDATE SET descriptor_json=excluded.descriptor_json,descriptor_version=2,deleted=0")
-          .run(descriptor.managerId, descriptor.agentId, JSON.stringify({ agentId: descriptor.agentId, title: descriptor.displayName, status: descriptor.status }), JSON.stringify(descriptor));
+        if (!isCurrent(workerRows.get(`${descriptor.managerId}\0${descriptor.agentId}`), json))
+          upsertWorker.run(descriptor.managerId, descriptor.agentId, JSON.stringify({ agentId: descriptor.agentId, title: descriptor.displayName, status: descriptor.status }), json);
         continue;
       }
-      const row = database.prepare("SELECT summary_json,desired_state FROM control_sessions WHERE session_id=?").get(descriptor.agentId) as { summary_json: string; desired_state: string } | undefined;
+      const row = sessionRows.get(descriptor.agentId);
       const prior: SessionSummary | undefined = row && withoutLegacyDelegation(JSON.parse(row.summary_json));
-      const profile = (store.profiles ?? []).find(p => p.profileId === descriptor.profileId);
+      const profile = descriptor.profileId === undefined ? undefined : profilesById.get(descriptor.profileId);
       const summary: SessionSummary = { ...(prior ?? { attention: "none", unread: 0, workerCount: 0 }), sessionId: descriptor.agentId, projectId: descriptor.profileId ?? descriptor.agentId, title: descriptor.sessionLabel ?? descriptor.displayName, status: row?.desired_state === "stopped" ? prior!.status : descriptor.status === "streaming" ? "running" : descriptor.status === "terminated" ? "stopped" : descriptor.status, updatedAt: descriptor.updatedAt, sortKey: descriptor.updatedAt, archived: Boolean(descriptor.archivedAt), workspace: { ...(prior?.workspace ?? { kind: "current_checkout", branch: null }), cwd: descriptor.cwd }, model: { ...descriptor.model, origin: descriptor.modelOrigin === "session_override" ? "session_override" : "profile_default" }, contextMode: { effective: descriptor.contextModeOverride ?? profile?.defaultContextMode ?? "summary", ...(descriptor.contextModeOverride ? { override: descriptor.contextModeOverride } : {}) } };
       if (profile?.profileType === "system") database.prepare("INSERT INTO control_sessions (session_id,project_id,desired_state,summary_json,updated_sequence) VALUES (?,?,'running',?,0) ON CONFLICT(session_id) DO UPDATE SET summary_json=excluded.summary_json").run(descriptor.agentId, descriptor.profileId, JSON.stringify(summary));
       else if (JSON.stringify(summary) !== row?.summary_json) eventSink.append(tx, { topic: "shell", sessionId: descriptor.agentId, event: { type: "session.upsert", session: summary } });
-      database.prepare("UPDATE control_sessions SET descriptor_json=?,deleted=0 WHERE session_id=?").run(JSON.stringify(descriptor), descriptor.agentId);
-      database.prepare("UPDATE control_sessions SET descriptor_version=2 WHERE session_id=?").run(descriptor.agentId);
+      if (!isCurrent(row, json)) updateSessionDescriptor.run(json, descriptor.agentId);
     }
     for (const row of database.prepare("SELECT session_id,agent_id,deleted FROM control_workers WHERE descriptor_json IS NOT NULL").all() as { session_id: string; agent_id: string; deleted: number }[]) if (!agents.has(row.agent_id)) {
       // Publish removal in the same transaction that forgets the descriptor: a later snapshot
@@ -58,6 +65,11 @@ export function createControlDescriptorPersistence(options: { database: Database
     },
     async save(store) { persist(store); },
   };
+}
+
+type StoredRow<T> = T & { descriptor_json: string | null; descriptor_version: number; deleted: number };
+function isCurrent(row: StoredRow<object> | undefined, descriptorJson: string): boolean {
+  return Boolean(row && !row.deleted && row.descriptor_version === 2 && row.descriptor_json === descriptorJson);
 }
 
 function withoutInlinePrompt(descriptor: AgentDescriptor): AgentDescriptor {

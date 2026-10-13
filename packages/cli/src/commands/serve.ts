@@ -10,7 +10,7 @@ export interface ServeOptions {
   backendEntry?: string; manifestPath?: string; cwd?: string; host?: string; port?: number; dataDir?: string;
   publicUrl?: string; tlsCert?: string; tlsKey?: string; tailscaleServe?: boolean;
   pair?: boolean; pairOutput?: string; interactive?: boolean; env?: NodeJS.ProcessEnv;
-  recovery?: 'rekey' | 'adopt' | 'restore'; previousDataDir?: string;
+  recovery?: 'rekey' | 'adopt' | 'restore'; previousDataDir?: string; importV1?: boolean;
 }
 export function validateServeOptions(options: ServeOptions): void {
   for (const value of [options.backendEntry, options.manifestPath, options.dataDir, options.tlsCert, options.tlsKey, options.pairOutput, options.previousDataDir]) if (value && !isAbsolute(value)) throw new Error('Explicit paths must be absolute');
@@ -56,7 +56,7 @@ export async function serveBackend(options: ServeOptions): Promise<number> {
   const pairFile = options.pairOutput ? await open(options.pairOutput, 'wx', 0o600) : null;
   if (options.pairOutput) { try { await protectCliOutput(options.pairOutput); } catch { await pairFile?.close(); await rm(options.pairOutput,{force:true}); throw new Error('Could not restrict pairing output to the current user'); } }
   let wrotePair = false;
-  const env = { ...(options.env ?? process.env), FORGE_HOST: options.host ?? '127.0.0.1', FORGE_PORT: String(options.port ?? 47187), FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: options.pair ? '1' : '0', ...(options.dataDir ? { FORGE_DATA_DIR: options.dataDir } : {}), ...(options.publicUrl ? { FORGE_PUBLIC_URL: options.publicUrl } : {}), ...(options.tlsCert ? { FORGE_TLS_CERT: options.tlsCert, FORGE_TLS_KEY: options.tlsKey } : {}), ...(options.tailscaleServe ? { FORGE_EXPOSURE_MODE: 'tailscale' } : {}), ...(options.recovery ? { FORGE_ENVIRONMENT_RECOVERY: options.recovery } : {}), ...(options.previousDataDir ? { FORGE_ENVIRONMENT_ADOPT_FROM: options.previousDataDir } : {}) };
+  const env = { ...(options.env ?? process.env), FORGE_HOST: options.host ?? '127.0.0.1', FORGE_PORT: String(options.port ?? 47187), FORGE_ENVIRONMENT_BOOTSTRAP_PARENT: options.pair ? '1' : '0', ...(options.dataDir ? { FORGE_DATA_DIR: options.dataDir } : {}), ...(options.publicUrl ? { FORGE_PUBLIC_URL: options.publicUrl } : {}), ...(options.tlsCert ? { FORGE_TLS_CERT: options.tlsCert, FORGE_TLS_KEY: options.tlsKey } : {}), ...(options.tailscaleServe ? { FORGE_EXPOSURE_MODE: 'tailscale' } : {}), ...(options.recovery ? { FORGE_ENVIRONMENT_RECOVERY: options.recovery } : {}), ...(options.previousDataDir ? { FORGE_ENVIRONMENT_ADOPT_FROM: options.previousDataDir } : {}), ...(options.importV1 ? { FORGE_IMPORT_V1: '1' } : {}) };
   try {
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(process.execPath, [entry], { env, cwd: options.cwd ?? process.cwd(), stdio: ['inherit', 'inherit', 'inherit', 'ipc'], windowsHide: true });
