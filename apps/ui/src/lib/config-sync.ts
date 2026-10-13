@@ -1,5 +1,5 @@
 import { configSyncLogicalKey, runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup } from '@forge/client-runtime'
-import type { ConfigSyncHistoryEntry, ConfigSyncHistoryResponse } from '@forge/protocol'
+import type { ConfigSyncHistoryEntry, ConfigSyncHistoryResponse, ConfigSyncManifest } from '@forge/protocol'
 
 /**
  * Configuration sync hub. This app reaches every paired environment, so it compares their
@@ -39,16 +39,33 @@ export function environmentDisplayLabel(registry: EnvironmentRegistry, environme
 }
 
 /** profileId → logical project key for each environment, for projects present on two or more participants. */
-export function sharedProjects(registry: EnvironmentRegistry, environmentIds: readonly string[]): Map<string, Map<string, string>> {
-  const result = new Map(environmentIds.map((id) => [id, new Map<string, string>()]))
-  for (const group of registry.logicalProjects.getSnapshot().values()) {
-    const members = group.members.filter((m) => result.has(m.environmentId))
-    const environments = new Set(members.map((m) => m.environmentId))
-    // Two projects of one repo on the same machine would be ambiguous; both stay local.
-    if (environments.size < 2 || environments.size !== members.length) continue
-    for (const member of members) result.get(member.environmentId)!.set(member.projectId, group.key)
+function projectSyncMapping(registry: EnvironmentRegistry, environmentIds: readonly string[]) {
+  const projects = new Map(environmentIds.map(id => [id, new Map<string, string>()]))
+  const localOnly = new Map(environmentIds.map(id => [id, [] as { profileId: string; reason: string }[]]))
+  const repositories = new Map<string, { environmentId: string; profileId: string; groupKey: string }[]>()
+  for (const environmentId of environmentIds) for (const project of registry.get(environmentId).shell.getSnapshot().projects.values()) {
+    const identity = project.repository
+    if (!identity?.verifiedForSync) {
+      localOnly.get(environmentId)!.push({ profileId: project.projectId, reason: 'No verified remote: missing or ambiguous repository remote' })
+      continue
+    }
+    // Sidebar overrides are presentation only. The backend verified host/full-path and subpath
+    // are the authority; a single physical project per environment is required.
+    const key = `${identity.canonicalRemote}\n${identity.subpath}`
+    repositories.set(key, [...(repositories.get(key) ?? []), { environmentId, profileId: project.projectId, groupKey: identity.key }])
   }
-  return result
+  for (const members of repositories.values()) {
+    const unique = new Set(members.map(member => member.environmentId))
+    const reason = unique.size !== members.length ? 'Duplicate clones on one environment are ambiguous' : unique.size < 2 ? 'Repository is not shared with another selected environment' : null
+    for (const member of members) {
+      if (reason) localOnly.get(member.environmentId)!.push({ profileId: member.profileId, reason })
+      else projects.get(member.environmentId)!.set(member.profileId, members[0]!.groupKey)
+    }
+  }
+  return { projects, localOnly }
+}
+export function sharedProjects(registry: EnvironmentRegistry, environmentIds: readonly string[]): Map<string, Map<string, string>> {
+  return projectSyncMapping(registry, environmentIds).projects
 }
 
 export class ConfigSyncHub {
@@ -91,7 +108,7 @@ export class ConfigSyncHub {
     // Hand the hub role over now rather than when the lease expires. Only the holder's release counts.
     let participants: ConfigSyncParticipant[] = []
     try { participants = this.participants() } catch { /* The registry is already gone; the lease expires on its own. */ }
-    for (const participant of participants) {
+    for (const participant of participants.filter(participant => participant.capability === 2)) {
       void participant.fetchJson('/api/settings/sync/lease', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ holder: this.holder, ttlMs: 0 }),
       }).catch(() => {})
@@ -107,11 +124,13 @@ export class ConfigSyncHub {
   participants(): ConfigSyncParticipant[] {
     const catalog = this.registry.catalog.getSnapshot()
     const ids = this.state.settings.environmentIds.filter((id) => catalog.has(id))
-    const projects = sharedProjects(this.registry, ids)
+    const { projects, localOnly } = projectSyncMapping(this.registry, ids)
     return ids.map((environmentId) => {
       const settings = this.registry.get(environmentId).features.settings
       return {
         environmentId,
+        capability: this.registry.get(environmentId).descriptor()?.capabilities.configSync,
+        localOnly: localOnly.get(environmentId),
         label: environmentDisplayLabel(this.registry, environmentId),
         fetchJson: (path, init) => settings.fetchJson(path, init),
         projects: projects.get(environmentId)!,
@@ -123,7 +142,7 @@ export class ConfigSyncHub {
    * Runs one pass now, or joins the pass already running. A pass the user asked for (`manual`, or
    * `keep` to settle a conflict) takes the hub role from another open client; a timed pass defers.
    */
-  syncNow(options: { keep?: { key: string; environmentId: string }; manual?: boolean } = {}): Promise<void> {
+  syncNow(options: { keep?: { key: string; environmentId: string; versionId: string; acknowledgedVersionIds: string[] }; manual?: boolean } = {}): Promise<void> {
     const explicit = options.manual === true || options.keep !== undefined
     if (this.inflight && !explicit) return this.inflight
     const run = (this.inflight ?? Promise.resolve()).then(async () => {
@@ -145,7 +164,7 @@ export class ConfigSyncHub {
 
   /** Recent replaced and deleted versions on every participant, newest first. */
   async history(): Promise<(ConfigSyncHistoryEntry & { environmentId: string; label: string; logicalKey: string | null })[]> {
-    const lists = await Promise.all(this.participants().map(async (participant) => {
+    const lists = await Promise.all(this.participants().filter(participant => participant.capability === 2).map(async (participant) => {
       try {
         const { entries } = await participant.fetchJson<ConfigSyncHistoryResponse>('/api/settings/sync/history')
         return entries.map((entry) => ({ ...entry, environmentId: participant.environmentId, label: participant.label, logicalKey: configSyncLogicalKey(entry.key, participant.projects) }))
@@ -160,8 +179,9 @@ export class ConfigSyncHub {
   async restore(environmentId: string, entry: { id: string; key: string }): Promise<void> {
     const participant = this.participants().find((p) => p.environmentId === environmentId)
     if (!participant) throw new Error('That environment is not syncing.')
+    const manifest = await participant.fetchJson<ConfigSyncManifest>('/api/settings/sync/manifest')
     await participant.fetchJson('/api/settings/sync/restore', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(entry),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...entry, expectedVersionId: manifest.entries[entry.key]?.current ?? null }),
     })
     await this.syncNow({ manual: true })
   }
@@ -186,7 +206,7 @@ export function describeSyncKey(key: string, groups: ReadonlyMap<string, Logical
   if (skill) return { title: `Skill: ${skill[1]}`, detail: skill[2] }
   const project = /^project\/([^/]+)\/(.+)$/.exec(key)
   if (project) {
-    const name = groups.get(decodeURIComponent(project[1]!))?.title ?? decodeURIComponent(project[1]!)
+    const name = groups.get(decodeURIComponent(project[1]!))?.title ?? decodeURIComponent(project[1]!).split("\n")[0]!
     const rest = project[2]!
     const what = rest === 'memory.md' ? 'Project memory'
       : rest === 'manager-memory.md' ? 'Manager memory'

@@ -88,6 +88,8 @@ export type Scope = Static<typeof ScopeSchema>
 export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItems: 1, maxItems: 7 })
 
 export const EnvironmentCapabilitiesSchema = O({
+  /** Causal configuration sync; absent capabilities never receive sync requests. */
+  configSync: Type.Optional(Type.Literal(2)),
   shellResume: Type.Boolean(),
   sessionDetail: Type.Boolean(),
   durableCommands: Type.Boolean(),
@@ -122,6 +124,8 @@ export type ProjectRef = Static<typeof ProjectRefSchema>
 export type SessionRef = Static<typeof SessionRefSchema>
 
 export const RepositoryIdentitySchema = O({
+  /** Backend verified host/full-path identity suitable for explicit configuration sync. */
+  verifiedForSync: Type.Optional(Type.Boolean()),
   // A grouping hint, never an access grant or a claim of matching content.
   canonicalRemote: Type.String({ minLength: 1, maxLength: 512 }),
   subpath: Type.String({ maxLength: 256 }), // slash-separated, '' at repository root

@@ -9,14 +9,15 @@
 //   - nothing outside the allowlist (secrets, auth) is ever copied.
 //   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 //   pnpm exec playwright test scripts/environment-e2e/sync.spec.ts --config scripts/environment-e2e/playwright.config.ts
-import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import type { SessionSummary } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
-import { openFixtureRpc, until } from './fixtures/rpc-client.js'
+import { exchangePairing } from '../../packages/cli/src/commands/pair.js'
+import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js'
 
 const evidenceRoot = join(repositoryRoot, '.internal/sync')
 const assertions: Record<string, unknown> = {}
@@ -165,6 +166,9 @@ test('"Ask an agent to resolve" starts a session here, and its merge resolves th
 
 test('a file over the size cap is listed as not synced instead of disappearing', async ({ page }) => {
   await write(0, 'skills/big-skill/SKILL.md', '# Big skill\n')
+  await write(0, 'skills/big-skill/model.bin', 'small first')
+  await syncNow(page)
+  await expect.poll(() => read(1, 'skills/big-skill/model.bin'), { timeout: 30_000 }).toBe('small first')
   await write(0, 'skills/big-skill/model.bin', 'x'.repeat(2 * 1024 * 1024 + 1))
   await syncNow(page)
   await expect.poll(() => read(1, 'skills/big-skill/SKILL.md'), { timeout: 30_000 }).toBe('# Big skill\n')
@@ -172,7 +176,7 @@ test('a file over the size cap is listed as not synced instead of disappearing',
   await expect(skipped).toContainText('model.bin')
   await expect(skipped).toContainText('Larger than 2 MB')
   await expect(page.getByTestId('sync-status')).toContainText('1 file skipped')
-  expect(await read(1, 'skills/big-skill/model.bin')).toBeNull()
+  expect(await read(1, 'skills/big-skill/model.bin')).toBe('small first')
   await shot(page, '06-not-synced', page.locator('section').filter({ has: skipped }))
 })
 
@@ -208,4 +212,60 @@ test('with two windows open only one syncs, and Sync now in the other takes over
   } finally {
     await second.close()
   }
+})
+
+
+test('a late C edit survives a merge that acknowledged only A and B', async ({ page }) => {
+  await fleet.stop(fleet.c); await fleet.stop(fleet.b)
+  await write(0, PRESETS, presets(['fixture-worker', 'merge-a']))
+  await syncNow(page)
+  await write(1, PRESETS, presets(['fixture-worker', 'merge-b']))
+  await fleet.start(fleet.b)
+  await expect.poll(async () => { await syncNow(page); return page.getByTestId('sync-conflict').count() }, { timeout: 60_000, intervals: [2_000] }).toBe(1)
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
+  await expect(page.getByTestId('sync-conflict').getByRole('status')).toContainText('An agent is merging')
+  await write(2, PRESETS, presets(['fixture-worker', 'offline-c']))
+  await fleet.start(fleet.c)
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.c.label}` })).toBeVisible({ timeout: 30_000 })
+  await write(0, PRESETS, presets(['fixture-worker', 'merge-a', 'merge-b']))
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  expect(await read(2, PRESETS)).toContain('offline-c')
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Compare' }).click()
+  await expect(page.getByTestId('sync-conflict-version')).toHaveCount(2)
+  await shot(page, '09-late-c-preserved')
+  await page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.a.label}` }).click()
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
+  assertions.lateThirdHeadPreserved = true
+})
+
+test('a tombstone reaches an environment that never had the file', async ({ page }) => {
+  const rel = 'skills/deleted-before-join/SKILL.md'
+  await fleet.stop(fleet.c)
+  await write(0, rel, '# A file before deletion')
+  await syncNow(page)
+  await expect.poll(() => read(1, rel), { timeout: 30_000 }).toBe('# A file before deletion')
+  await rm(join(dataDir(0), rel))
+  await syncNow(page)
+  await expect.poll(() => read(1, rel), { timeout: 30_000 }).toBeNull()
+  await fleet.start(fleet.c)
+  await syncNow(page)
+  await expect(page.getByTestId('sync-status')).toContainText('Last synced', { timeout: 30_000 })
+  expect(await read(2, rel)).toBeNull()
+  const state = JSON.parse((await read(2, 'shared/state/sync/state.json'))!)
+  expect(state.entries['global/skills/deleted-before-join/SKILL.md'].current).not.toBeNull()
+  assertions.tombstoneReachedNewJoiner = true
+})
+
+test('session-only clients cannot read sync manifests, files or history through HTTP', async () => {
+  const environment = manifest.environments[0]!
+  const admin = await controlEnvironment<BootstrapSession>(manifest, environment.name, 'bootstrap')
+  const grant = await fixtureRpcOnce(environment.baseUrl, admin, 'access.grant.create', { kind: 'code', label: 'Sync scope regression', scopes: ['session:read'], expiresInSeconds: 300, reachableBaseUrl: environment.baseUrl })
+  const paired = await exchangePairing({ baseUrl: environment.baseUrl, environmentId: admin.environmentId, credential: { kind: 'code', code: grant.code }, deviceName: 'Sync restricted fixture', deviceKind: 'cli', scopes: ['session:read'] })
+  const headers = { Authorization: `Bearer ${paired.bearerToken}` }
+  for (const path of ['manifest', 'file?key=global%2Fskills%2Fbig-skill%2FSKILL.md', 'history']) {
+    expect((await fetch(`${environment.baseUrl}/api/settings/sync/${path}`, { headers })).status).toBe(403)
+  }
+  assertions.readScopeEnforced = true
 })

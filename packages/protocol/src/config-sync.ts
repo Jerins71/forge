@@ -1,138 +1,101 @@
-/**
- * Configuration sync between paired environments.
- *
- * Each environment exposes an allowlisted set of user-authored files (worker presets, skills,
- * prompts, slash commands, memory). A client that reaches every environment (the hub) compares
- * manifests against each environment's recorded base and pushes the one changed version, or
- * records a conflict when two environments changed the same file differently.
- *
- * Keys are environment-local: `global/<path>` or `profile/<profileId>/<path>`. The hub maps
- * profile keys onto logical projects before comparing environments.
- */
-
-/** A file's hash, or `null` when the file does not exist. */
+/** Configuration sync v2: backends own causality and CAS; clients relay complete retained heads. */
+export const CONFIG_SYNC_VERSION = 2 as const
+export const CONFIG_SYNC_MAX_FILE_BYTES = 2 * 1024 * 1024
+export const CONFIG_SYNC_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 export type ConfigSyncHash = string | null
-
-/** The version a key was last agreed at, and when the hub recorded that agreement. */
-export interface ConfigSyncBase {
+export type ConfigSyncVector = Record<string, number>
+export interface ConfigSyncVersion {
+  /** sha256 of canonical vector, content hash, and executable bits; timestamps never order edits. */
+  id: string
+  vector: ConfigSyncVector
   hash: ConfigSyncHash
-  /** ISO time of the sync pass; a later agreement supersedes an environment's older one. */
+  size: number
+  mode: number
+  author: string
   at: string
 }
-
-/** Each participating environment's hash when the conflict was recorded, by environment id. */
-export type ConfigSyncConflict = Record<string, ConfigSyncHash>
-
-export interface ConfigSyncManifestEntry {
-  key: string
-  /** sha256 hex of the file bytes. */
-  hash: string
-  size: number
-  mtimeMs: number
+export interface ConfigSyncKeyState {
+  /** null is never existed; a deletion has a version id whose hash is null. */
+  current: string | null
+  heads: ConfigSyncVersion[]
 }
-
+export interface ConfigSyncManifestEntry { key: string; hash: string; size: number; mtimeMs: number; mode: number }
 export interface ConfigSyncManifest {
+  version: typeof CONFIG_SYNC_VERSION
+  environmentId: string
   files: ConfigSyncManifestEntry[]
-  /** The version each key was last agreed at with the other environments. */
-  base: Record<string, ConfigSyncBase>
-  /** Open conflicts, keyed like `files`. */
-  conflicts: Record<string, ConfigSyncConflict>
-  /** True until this environment completes its first sync; a joining environment adopts the group's versions. */
-  joining: boolean
-  /** Allowlisted files that cannot sync, with the reason. */
+  entries: Record<string, ConfigSyncKeyState>
   skipped: ConfigSyncSkipped[]
 }
-
 export interface ConfigSyncSkipped {
   key: string
-  size: number
-  reason: 'too-large'
+  size?: number
+  /** A blocked directory also blocks every descendant, including previously tracked missing keys. */
+  subtree?: boolean
+  reason: 'too-large' | 'unreadable' | 'symlink' | 'collision'
+  detail?: string
 }
-
 export interface ConfigSyncFile {
   key: string
+  version: ConfigSyncVersion
   hash: string
-  /** Absolute path on the environment, for an agent asked to merge a conflict there. */
   path: string
-  /** File bytes, base64. */
   contentBase64: string
 }
-
+export interface ConfigSyncHead { version: ConfigSyncVersion; contentBase64: string | null }
 export interface ConfigSyncWrite {
   key: string
-  /** The hash the hub last read; the write is refused if the file changed since. */
+  expectedVersionId: string | null
   expectHash: ConfigSyncHash
-  /** New bytes, base64; `null` deletes the file. The previous version is kept in sync history. */
-  contentBase64: string | null
+  heads: ConfigSyncHead[]
+  /** A resolution consumes only these exact retained versions. Other concurrent heads survive. */
+  resolution?: { acknowledgedVersionIds: string[]; chosenVersionId: string }
 }
-
-export interface ConfigSyncApplyRequest {
-  writes?: ConfigSyncWrite[]
-  /** Agreements to record; `null` forgets a key. */
-  base?: Record<string, ConfigSyncBase | null>
-  /** Conflicts to record; `null` clears one. */
-  conflicts?: Record<string, ConfigSyncConflict | null>
-  /** Marks the environment's first completed sync. */
-  joined?: boolean
-}
-
-export interface ConfigSyncApplyResponse {
-  applied: string[]
-  /** Keys whose file changed after the hub read it; nothing was written for them. */
-  stale: string[]
-}
-
-export const CONFIG_SYNC_MAX_FILE_BYTES = 2 * 1024 * 1024
-/** Writes per apply request are batched to stay under this many content bytes. */
-export const CONFIG_SYNC_MAX_REQUEST_BYTES = 8 * 1024 * 1024
-
-/** One file sync replaced or deleted, kept so it can be restored. */
+export interface ConfigSyncApplyRequest { version: typeof CONFIG_SYNC_VERSION; writes: ConfigSyncWrite[] }
+export interface ConfigSyncApplyResponse { applied: string[]; stale: string[] }
 export interface ConfigSyncHistoryEntry {
-  /** The history batch; with `key`, identifies the kept copy. */
   id: string
   key: string
   action: 'overwrite' | 'delete' | 'restore'
   at: string
   size: number
+  versionId?: string
 }
-
-export interface ConfigSyncHistoryResponse {
-  entries: ConfigSyncHistoryEntry[]
-}
-
-/** Writes a kept version back as an ordinary local edit, which then syncs out. */
-export interface ConfigSyncRestoreRequest {
-  id: string
-  key: string
-}
-
-/**
- * The active hub. Only the holder of an unexpired lease runs sync passes, so two open clients do
- * not duplicate work. The lease lives on the first reachable participant.
- */
-export interface ConfigSyncLeaseRequest {
-  holder: string
-  /** 0 releases the lease if `holder` has it. */
-  ttlMs: number
-  /** Take the lease from another holder (an explicit "Sync now"). */
-  takeover?: boolean
-}
-
-export interface ConfigSyncLeaseResponse {
-  granted: boolean
-  holder: string | null
-  until: string | null
-}
-
-/** Asks the environment holding `key` to write the prompt for an agent that merges a conflict. */
+export interface ConfigSyncHistoryResponse { entries: ConfigSyncHistoryEntry[] }
+export interface ConfigSyncRestoreRequest { id: string; key: string; expectedVersionId: string | null }
+/** A lease reduces duplicate passes; correctness never depends on its holder or clock. */
+export interface ConfigSyncLeaseRequest { holder: string; ttlMs: number; takeover?: boolean }
+export interface ConfigSyncLeaseResponse { granted: boolean; holder: string | null; until: string | null }
 export interface ConfigSyncResolvePromptRequest {
   key: string
-  /** What the file is, as the user sees it, such as "Worker presets". */
   subject: string
-  versions: { label: string; contentBase64: string | null }[]
+  expectedVersionId: string | null
+  acknowledgedVersionIds: string[]
+  versions: { label: string; version: ConfigSyncVersion; contentBase64?: string | null }[]
+}
+export interface ConfigSyncResolvePromptResponse { title: string; text: string }
+
+/** Component-wise causal order. Equality is not strict dominance. */
+export function configSyncDominates(a: ConfigSyncVector, b: ConfigSyncVector): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  return [...keys].every(key => (a[key] ?? 0) >= (b[key] ?? 0)) && [...keys].some(key => (a[key] ?? 0) > (b[key] ?? 0))
+}
+export function configSyncMaxVector(versions: readonly ConfigSyncVersion[]): ConfigSyncVector {
+  const result: ConfigSyncVector = {}
+  for (const version of versions) for (const [id, counter] of Object.entries(version.vector)) result[id] = Math.max(result[id] ?? 0, counter)
+  return result
+}
+export function configSyncFrontier(versions: readonly ConfigSyncVersion[]): ConfigSyncVersion[] {
+  const unique = [...new Map(versions.map(version => [version.id, version])).values()]
+  return unique.filter(version => !unique.some(other => configSyncDominates(other.vector, version.vector))).sort((a, b) => a.id.localeCompare(b.id))
+}
+export function configSyncContentIdentity(version: ConfigSyncVersion): string { return `${version.hash}:${version.mode & 0o111}` }
+export function configSyncVersionIdentity(version: Pick<ConfigSyncVersion, 'vector' | 'hash' | 'mode'>): string {
+  return JSON.stringify([Object.entries(version.vector).sort(([a], [b]) => a.localeCompare(b)), version.hash, version.mode & 0o111])
 }
 
-export interface ConfigSyncResolvePromptResponse {
-  title: string
-  text: string
+/** Conservative portable filename comparison. Literal names are preserved; compatibility or
+ * Unicode case-fold aliases are unsupported rather than choosing a platform-dependent winner. */
+export function configSyncFilenameIdentity(name: string): string {
+  return name.normalize('NFKC').toLowerCase().toUpperCase().toLowerCase().normalize('NFKC')
 }

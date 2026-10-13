@@ -551,22 +551,47 @@ What syncs is an allowlist (`apps/backend/src/environment/sync/config-sync.ts`):
 
 Secrets, sign-ins, credential pools, environment identity and pairing, databases, transcripts,
 sessions, caches and machine paths are not addressable and never leave their machine. Project files
-sync only for a project whose Git repository groups it with a project on another synced environment
-(the same grouping the sidebar uses); other projects are listed as local only.
+sync only between projects with a backend-verified repository identity (host, full repository path
+and project subdirectory), with exactly one matching project per environment. Manual sidebar grouping
+never authorizes sync. Missing or ambiguous remotes, forks and duplicate clones are local only, with
+an explanation in Settings. Relative SSH paths that depend on a login user's home are ambiguous;
+standard Git hosting service remotes such as `git@github.com:owner/repo.git` identify their namespace.
 
-Each environment records the version it last agreed on for every file. One change is pushed
-everywhere; a file changed differently on two environments, including one edited while its machine
-was offline, becomes a conflict that leaves both copies untouched. Settle it with **Keep …**, by
-editing either copy, or with **Ask an agent to resolve**, which starts a session on this machine to
-merge them; the environment the agent runs on writes its instructions. Every file sync overwrites
-or deletes is first copied to `shared/state/sync/history/`, and **History** in Settings → Sync lists
-recent ones with **Restore**, which writes the old version back on its machine so it syncs out like
-any edit.
+Each backend observes local edits, deletions and restores and persists a per-file version vector
+keyed by its stable environment UUID. Content hashes identify retained, complete immutable copies;
+timestamps are for display. Clients relay causal heads. A backend uses an expected version/content
+check and replaces a file only with a causally newer version. Concurrent heads remain recoverable
+and appear as one conflict with every version. A deletion is a causal tombstone; a machine that has
+never held a file has no version. Legacy agreement timestamps are not treated as ancestry.
 
-Files over 2 MB are listed under **Not synced** and stay where they are. Writes are sent in batches of
-up to 8 MB, and a batch that fails is listed with its error and retried on the next pass. With
-several Forge windows or devices open, one holds a short hub lease (kept in the first reachable
-environment's sync state) and the others wait; **Sync now** in another window takes over.
+**Keep …** or **Ask an agent to resolve** acknowledges exact version ids. The resolver's new version
+extends the component-wise maximum of those heads and increments its own durable counter. A third
+independent offline edit remains a conflict. An ordinary edit during a conflict advances only the
+copy it was based on. Agent resolution requires complete, hash-verified inputs and gives the agent
+paths to immutable retained files, including large inputs, without truncation.
+
+Before replacement or deletion, sync durably indexes a unique history entry and moves the actual
+file inode to `shared/state/sync/history/`. It checks the displaced contents and installs a staged
+file exclusively, refusing an intervening save instead of overwriting it. A journal recovers an
+interrupted mutation without hiding history. **Restore** requires the current version it is replacing,
+uses the same mutation primitive and creates an ordinary local version. File modes and skill
+executable bits are preserved.
+
+Every read, enumeration, history operation and mutation validates the same filesystem boundary:
+components under the canonical data root must be real paths without symbolic links, and directory
+identities are checked before and after mutation. Unsupported case or Unicode filename aliases are
+reported without choosing or deleting a version. This protects against legacy/accidental links and
+untrusted peer paths; an attacker who already controls the local account is outside this boundary's
+threat model. No native dependency is required by sync.
+
+Files over 2 MB, unreadable files and blocked paths are listed under **Not synced**. Their versions
+are unavailable rather than absent, so the key cannot trigger changes on other participants.
+Deliveries are batched and a failed or stale delivery records no agreement; recent changes show only
+acknowledged applied writes. Sync's versioned capability is required; older environments display
+**Update required** and are skipped. Read access requires the resource scopes, including
+`workspace:read` for skill content, manifests and history; mutation requires `workspace:write`.
+Several windows can relay overlapping subsets safely. A short hub lease reduces duplicate passes;
+**Sync now** can take it over, but leases and wall clocks never determine correctness.
 
 ### Machine-local skills
 

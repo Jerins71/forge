@@ -1,295 +1,372 @@
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, rm, copyFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { createHash, randomUUID } from 'node:crypto';
+import { dirname, join, relative, sep } from 'node:path';
 import {
-  CONFIG_SYNC_MAX_FILE_BYTES,
-  type ConfigSyncApplyRequest,
-  type ConfigSyncApplyResponse,
-  type ConfigSyncBase,
-  type ConfigSyncConflict,
-  type ConfigSyncFile,
-  type ConfigSyncHash,
-  type ConfigSyncHistoryEntry,
-  type ConfigSyncHistoryResponse,
-  type ConfigSyncLeaseRequest,
-  type ConfigSyncLeaseResponse,
-  type ConfigSyncManifest,
-  type ConfigSyncManifestEntry,
-  type ConfigSyncResolvePromptRequest,
-  type ConfigSyncResolvePromptResponse,
-  type ConfigSyncRestoreRequest,
-  type ConfigSyncSkipped,
-} from "@forge/protocol";
-import { readJsonFileIfExists, writeFileAtomic, writeJsonFileAtomic } from "../../utils/atomic-files.js";
-import { isEnoentError } from "../../utils/fs-errors.js";
-import { getConfigSyncDir, getProfilesDir, sanitizePathSegment } from "../../swarm/storage/data-paths.js";
+  CONFIG_SYNC_MAX_FILE_BYTES, CONFIG_SYNC_VERSION, configSyncContentIdentity, configSyncDominates, configSyncFrontier,
+  configSyncMaxVector, configSyncVersionIdentity,
+  type ConfigSyncApplyRequest, type ConfigSyncApplyResponse, type ConfigSyncFile, type ConfigSyncHead,
+  type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse,
+  type ConfigSyncLeaseRequest, type ConfigSyncLeaseResponse, type ConfigSyncManifest,
+  type ConfigSyncManifestEntry, type ConfigSyncResolvePromptRequest, type ConfigSyncResolvePromptResponse,
+  type ConfigSyncRestoreRequest, type ConfigSyncSkipped, type ConfigSyncVersion,
+} from '@forge/protocol';
+import { getConfigSyncDir, getEnvironmentIdentityPath, sanitizePathSegment } from '../../swarm/storage/data-paths.js';
+import { SyncAliasError, SyncBoundaryError, SyncFilesystem, syncFilenameIdentity } from './filesystem-boundary.js';
 
-/**
- * The allowlist. Only these user-authored files ever leave the machine; secrets, credentials,
- * identity, databases, transcripts and runtime state are not addressable by any key.
- * Each entry maps a key prefix to a data-dir path; `tree` entries take a nested relative path.
- */
-const GLOBAL_FILES: Record<string, string> = {
-  "worker-presets.json": "shared/config/worker-presets.json",
-  "slash-commands.json": "shared/config/slash-commands.json",
+const GLOBAL_FILES: Record<string, string> = { 'worker-presets.json': 'shared/config/worker-presets.json', 'slash-commands.json': 'shared/config/slash-commands.json' };
+const GLOBAL_TREES: Record<string, string> = { skills: 'skills' };
+const PROFILE_FILES: Record<string, (p: string) => string> = {
+  'memory.md': p => `profiles/${p}/memory.md`, 'manager-memory.md': p => `profiles/${p}/sessions/${p}/memory.md`, 'slash-commands.json': p => `profiles/${p}/slash-commands.json`,
 };
-const GLOBAL_TREES: Record<string, string> = { "skills": "skills" };
-const PROFILE_FILES: Record<string, (profileId: string) => string> = {
-  "memory.md": (p) => `profiles/${p}/memory.md`,
-  "manager-memory.md": (p) => `profiles/${p}/sessions/${p}/memory.md`,
-  "slash-commands.json": (p) => `profiles/${p}/slash-commands.json`,
-};
-const PROFILE_TREES: Record<string, (profileId: string) => string> = {
-  "skills": (p) => `profiles/${p}/pi/skills`,
-  "prompts/archetypes": (p) => `profiles/${p}/prompts/archetypes`,
-  "prompts/operational": (p) => `profiles/${p}/prompts/operational`,
-};
-const SKIPPED_NAMES = new Set(["node_modules"]);
-
-interface SyncState {
-  base: Record<string, ConfigSyncBase>;
-  conflicts: Record<string, ConfigSyncConflict>;
-  joined: boolean;
-  /** The active hub's lease; see `ConfigSyncLeaseRequest`. */
-  hub?: { holder: string; until: number };
-}
-
-const HISTORY_LIST_LIMIT = 50;
-const PROMPT_VERSION_MAX_CHARS = 40_000;
-
-class NotSyncedError extends Error {
-  constructor(key: string) { super(`${key} is not synced`); }
-}
-
-function validSegment(segment: string): boolean {
-  return segment.length > 0 && !segment.startsWith(".") && !SKIPPED_NAMES.has(segment) && !/[\\/\0]/.test(segment);
-}
-
-/** Data-dir relative path for a key, or a NotSyncedError. */
+const PROFILE_TREES: Record<string, (p: string) => string> = { skills: p => `profiles/${p}/pi/skills`, 'prompts/archetypes': p => `profiles/${p}/prompts/archetypes`, 'prompts/operational': p => `profiles/${p}/prompts/operational` };
+class NotSyncedError extends Error { constructor(key: string) { super(`${key} is not synced`); } }
+const validSegment = (part: string) => part.length > 0 && !part.startsWith('.') && part !== 'node_modules' && !/[\\/\0:]/.test(part);
 export function resolveConfigSyncKey(key: string): string {
-  const parts = key.split("/");
-  if (!parts.every(validSegment)) throw new NotSyncedError(key);
-  const [scope, ...rest] = parts;
-  const lookup = (files: Record<string, string>, trees: Record<string, string>, path: string[]): string | null => {
-    const joined = path.join("/");
-    if (files[joined]) return files[joined]!;
-    for (const [prefix, dir] of Object.entries(trees)) {
-      const prefixParts = prefix.split("/");
-      if (path.length > prefixParts.length && prefixParts.every((p, i) => path[i] === p)) {
-        return `${dir}/${path.slice(prefixParts.length).join("/")}`;
-      }
-    }
+  if (typeof key !== 'string' || !key.split('/').every(validSegment)) throw new NotSyncedError(String(key));
+  const parts = key.split('/'); const scope = parts.shift();
+  const lookup = (files: Record<string, string>, trees: Record<string, string>, path: string[]) => {
+    const direct = files[path.join('/')]; if (direct) return direct;
+    for (const [prefix, dir] of Object.entries(trees)) if (path.join('/').startsWith(`${prefix}/`)) return `${dir}/${path.join('/').slice(prefix.length + 1)}`;
     return null;
   };
-  let resolved: string | null = null;
-  if (scope === "global") resolved = lookup(GLOBAL_FILES, GLOBAL_TREES, rest);
-  if (scope === "profile" && rest.length > 1 && sanitizePathSegment(rest[0]!) === rest[0]) {
-    const profileId = rest[0]!;
-    resolved = lookup(
-      Object.fromEntries(Object.entries(PROFILE_FILES).map(([k, f]) => [k, f(profileId)])),
-      Object.fromEntries(Object.entries(PROFILE_TREES).map(([k, f]) => [k, f(profileId)])),
-      rest.slice(1),
-    );
+  let path: string | null = null;
+  if (scope === 'global') path = lookup(GLOBAL_FILES, GLOBAL_TREES, parts);
+  if (scope === 'profile' && parts.length > 1 && sanitizePathSegment(parts[0]!) === parts[0]) {
+    const p = parts.shift()!; path = lookup(Object.fromEntries(Object.entries(PROFILE_FILES).map(([k, f]) => [k, f(p)])), Object.fromEntries(Object.entries(PROFILE_TREES).map(([k, f]) => [k, f(p)])), parts);
   }
-  if (!resolved) throw new NotSyncedError(key);
-  return resolved;
+  if (!path) throw new NotSyncedError(key); return path;
 }
-
-export function isConfigSyncKeyError(error: unknown): boolean {
-  return error instanceof NotSyncedError;
+export function isConfigSyncKeyError(error: unknown): boolean { return error instanceof NotSyncedError || error instanceof SyncBoundaryError; }
+const hash = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
+function exact(value: unknown, fields: string[], subject: string): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw new NotSyncedError(`Unknown or invalid ${subject} fields`);
 }
+const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
+interface LocalKey { current: string | null; heads: string[]; retained: string[]; counter: number; legacy?: boolean; resolution?: { current: string | null; acknowledged: string[] } }
+interface Pending { key: string; historyId: string; expectedHash: string | null; desired: string; staged?: string }
+interface SyncState {
+  version: 2; environmentId: string; entries: Record<string, LocalKey>; versions: Record<string, ConfigSyncVersion>;
+  pending: Pending[];
+}
+interface Snapshot { bytes: Buffer; hash: string; mode: number; mtimeMs: number }
+export interface ConfigSyncStoreOptions {
+  environmentId?: string;
+  /** Deterministic filesystem interleavings for real-store schedule tests. */
+  beforeDisplace?: () => Promise<void>; afterDisplace?: () => Promise<void>;
+}
+const queues = new Map<string, Promise<unknown>>();
+// Leases are ephemeral work suppression. Restart forgets them; wall clocks never delay takeover.
+const leases = new Map<string, { holder: string; until: number }>();
 
-const sha256 = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
-
-export function createConfigSyncStore(dataDir: string) {
-  const syncDir = getConfigSyncDir(dataDir);
-  const statePath = join(syncDir, "state.json");
-  let queue: Promise<unknown> = Promise.resolve();
-  const serialized = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = queue.then(work, work);
-    queue = next.catch(() => undefined);
-    return next;
+export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreOptions = {}) {
+  const sync = relative(dataDir, getConfigSyncDir(dataDir)).split(sep).join('/');
+  const statePath = `${sync}/state.json`;
+  const blob = (v: ConfigSyncVersion) => `${sync}/blobs/${v.hash}`;
+  const serialized = <T>(fn: (fs: SyncFilesystem, state: SyncState) => Promise<T>): Promise<T> => {
+    const prior = queues.get(dataDir) ?? Promise.resolve();
+    const next = prior.catch(() => undefined).then(async () => {
+      const fs = new SyncFilesystem(dataDir);
+      try { const state = load(fs); recover(fs, state); return await fn(fs, state); } finally { fs.close(); }
+    });
+    queues.set(dataDir, next.catch(() => undefined)); return next;
   };
-
-  async function loadState(): Promise<SyncState> {
-    const raw = await readJsonFileIfExists<Partial<SyncState>>(statePath);
-    return { base: raw?.base ?? {}, conflicts: raw?.conflicts ?? {}, joined: raw?.joined === true, ...(raw?.hub ? { hub: raw.hub } : {}) };
+  function load(fs: SyncFilesystem): SyncState {
+    const raw = fs.json<SyncState & { base?: Record<string, { hash: string | null }>; conflicts?: Record<string, unknown> }>(statePath);
+    const identity = fs.json<{ environmentId: string }>(relative(dataDir, getEnvironmentIdentityPath(dataDir)).split(sep).join('/'));
+    const environmentId = options.environmentId ?? identity?.environmentId ?? raw?.environmentId ?? randomUUID();
+    if (raw?.version === 2) {
+      if (raw.environmentId !== environmentId) throw new Error('Config sync environment identity changed');
+      return raw;
+    }
+    const state: SyncState = { version: 2, environmentId, entries: {}, versions: {}, pending: [] };
+    // Legacy times convey no ancestry. A previously tracked key must still distinguish an
+    // observed absence (a deletion) from a never-existed key, even if its first read is blocked.
+    for (const key of new Set([...Object.keys(raw?.base ?? {}), ...Object.keys(raw?.conflicts ?? {})])) {
+      resolveConfigSyncKey(key);
+      const entry: LocalKey = { current: null, heads: [], retained: [], counter: 0, legacy: true };
+      state.entries[key] = entry;
+      if (raw?.base?.[key]?.hash === null) {
+        const tombstone = localVersion(state, entry, [], null);
+        entry.current = tombstone.id; entry.heads = [tombstone.id]; entry.retained = [tombstone.id]; delete entry.legacy;
+      }
+    }
+    save(fs, state); return state;
   }
-
-  /** One file's manifest entry; a file over the size cap is reported in `skipped` instead. */
-  async function entry(key: string, absolute: string, skipped: ConfigSyncSkipped[]): Promise<ConfigSyncManifestEntry | null> {
+  const save = (fs: SyncFilesystem, state: SyncState) => fs.saveJson(statePath, state);
+  const versions = (state: SyncState, entry: LocalKey) => entry.heads.map(id => state.versions[id]!);
+  function snapshot(fs: SyncFilesystem, key: string): Snapshot | null {
+    const rel = resolveConfigSyncKey(key);
     try {
-      const stat = await lstat(absolute);
-      if (!stat.isFile()) return null;
-      if (stat.size > CONFIG_SYNC_MAX_FILE_BYTES) { skipped.push({ key, size: stat.size, reason: "too-large" }); return null; }
-      return { key, hash: sha256(await readFile(absolute)), size: stat.size, mtimeMs: Math.round(stat.mtimeMs) };
-    } catch (error) {
-      if (isEnoentError(error)) return null;
-      throw error;
-    }
+      const stat = fs.stat(rel);
+      if (!stat.isFile()) throw new SyncBoundaryError('Only regular files sync');
+      if (stat.size > CONFIG_SYNC_MAX_FILE_BYTES) throw Object.assign(new Error('Larger than 2 MB'), { reason: 'too-large', size: stat.size });
+      const value = fs.read(rel);
+      if (value.bytes.length > CONFIG_SYNC_MAX_FILE_BYTES) throw Object.assign(new Error('Larger than 2 MB'), { reason: 'too-large', size: value.bytes.length });
+      return { ...value, hash: hash(value.bytes) };
+    } catch (error) { if (missing(error)) return null; throw error; }
   }
-
-  async function walk(keyPrefix: string, dir: string, out: ConfigSyncManifestEntry[], skipped: ConfigSyncSkipped[]): Promise<void> {
-    let names: string[];
-    try { names = await readdir(dir); } catch (error) { if (isEnoentError(error) || (error as NodeJS.ErrnoException).code === "ENOTDIR") return; throw error; }
-    for (const name of names.sort()) {
-      if (!validSegment(name)) continue;
-      const absolute = join(dir, name);
-      const stat = await lstat(absolute).catch(() => null);
-      if (!stat || stat.isSymbolicLink()) continue;
-      if (stat.isDirectory()) await walk(`${keyPrefix}/${name}`, absolute, out, skipped);
-      else {
-        const found = await entry(`${keyPrefix}/${name}`, absolute, skipped);
-        if (found) out.push(found);
+  function retain(fs: SyncFilesystem, state: SyncState, version: ConfigSyncVersion, bytes: Buffer | null) {
+    if (bytes !== null) {
+      try { fs.writeExclusive(blob(version), bytes, 0o444); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      if (hash(fs.read(blob(version)).bytes) !== version.hash) throw new Error('Retained content hash mismatch');
+    }
+    state.versions[version.id] = version;
+  }
+  function localVersion(state: SyncState, entry: LocalKey, parents: ConfigSyncVersion[], current: Snapshot | null): ConfigSyncVersion {
+    const vector = configSyncMaxVector(parents); const id = state.environmentId;
+    entry.counter = Math.max(entry.counter, vector[id] ?? 0) + 1; vector[id] = entry.counter;
+    const value: ConfigSyncVersion = { id: '', vector, hash: current?.hash ?? null, mode: current?.mode ?? 0, size: current?.bytes.length ?? 0, author: id, at: new Date().toISOString() };
+    value.id = hash(configSyncVersionIdentity(value)); state.versions[value.id] = value; return value;
+  }
+  function observe(fs: SyncFilesystem, state: SyncState, key: string, current: Snapshot | null): LocalKey | undefined {
+    let entry = state.entries[key];
+    if (!entry?.current && current === null && !entry?.legacy) return entry;
+    entry ??= state.entries[key] = { current: null, heads: [], retained: [], counter: 0 };
+    const before = entry.current ? state.versions[entry.current] : undefined;
+    if (process.platform === 'win32' && before && current) current.mode = (current.mode & ~0o111) | (before.mode & 0o111);
+    if (before && before.hash === (current?.hash ?? null) && (before.mode & 0o111) === ((current?.mode ?? 0) & 0o111)) return entry;
+    let parents = before ? [before] : [];
+    if (entry.resolution?.current === entry.current) parents = entry.resolution.acknowledged.map(id => state.versions[id]!);
+    else if (before) parents = versions(state, entry).filter(v => configSyncContentIdentity(v) === configSyncContentIdentity(before));
+    if (!parents.length && before) parents = [before];
+    const version = localVersion(state, entry, parents, current); retain(fs, state, version, current?.bytes ?? null);
+    delete entry.legacy; entry.retained.push(version.id); entry.current = version.id; entry.heads = configSyncFrontier([...versions(state, entry), version]).map(v => v.id); delete entry.resolution;
+    return entry;
+  }
+  function validateHead(head: ConfigSyncHead): Buffer | null {
+    exact(head, ['version', 'contentBase64'], 'head');
+    const v = head?.version;
+    exact(v, ['id', 'vector', 'hash', 'mode', 'size', 'author', 'at'], 'version');
+    if (!v || typeof v.id !== 'string' || !v.vector || !Object.keys(v.vector).length || Object.entries(v.vector).some(([id, n]) => !/^[a-zA-Z0-9-]{1,128}$/.test(id) || !Number.isSafeInteger(n) || n < 1 || n >= Number.MAX_SAFE_INTEGER) || !Number.isInteger(v.mode) || v.mode < 0 || v.mode > 0o777 || typeof v.author !== 'string' || !v.vector[v.author] || typeof v.at !== 'string') throw new Error('Invalid causal version');
+    if (hash(configSyncVersionIdentity(v)) !== v.id) throw new Error('Version identity mismatch');
+    if (v.hash === null) { if (head.contentBase64 !== null || v.size !== 0) throw new Error('Invalid tombstone'); return null; }
+    if (typeof head.contentBase64 !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(head.contentBase64)) throw new Error('Missing complete version content');
+    const bytes = Buffer.from(head.contentBase64, 'base64');
+    if (bytes.length > CONFIG_SYNC_MAX_FILE_BYTES || bytes.length !== v.size || hash(bytes) !== v.hash) throw new Error('Version content hash or size mismatch'); return bytes;
+  }
+  function addHeads(fs: SyncFilesystem, state: SyncState, entry: LocalKey, heads: ConfigSyncHead[]) {
+    for (const head of heads) { const bytes = validateHead(head); retain(fs, state, head.version, bytes); if (!entry.retained.includes(head.version.id)) entry.retained.push(head.version.id); }
+    entry.counter = Math.max(entry.counter, ...heads.map(head => head.version.vector[state.environmentId] ?? 0));
+    entry.heads = configSyncFrontier([...versions(state, entry), ...heads.map(h => h.version)]).map(v => v.id);
+  }
+  function recover(fs: SyncFilesystem, state: SyncState) {
+    if (!state.pending.length) return;
+    const remaining: Pending[] = [];
+    for (const pending of state.pending) {
+      try {
+      const target = resolveConfigSyncKey(pending.key), kept = `${sync}/history/${pending.historyId}/${pending.key}`;
+      const desired = state.versions[pending.desired]!; const actual = snapshot(fs, pending.key);
+      if (actual?.hash === desired.hash && (process.platform === 'win32' || (actual.mode & 0o111) === (desired.mode & 0o111))) state.entries[pending.key]!.current = desired.id;
+      else if (!actual) {
+        let displaced: Buffer | null = null; try { displaced = fs.read(kept).bytes; } catch (error) { if (!missing(error)) throw error; }
+        if (desired.hash === null && displaced && hash(displaced) === pending.expectedHash) state.entries[pending.key]!.current = desired.id;
+        else if (displaced) { try { fs.link(kept, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
       }
+      if (pending.staged) { try { fs.unlink(pending.staged); } catch (error) { if (!missing(error)) throw error; } }
+      } catch (error) { if (error instanceof SyncBoundaryError || (error as { reason?: string }).reason === 'too-large' || ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) remaining.push(pending); else throw error; }
+    }
+    state.pending = remaining; save(fs, state);
+  }
+  async function mutate(fs: SyncFilesystem, state: SyncState, key: string, expected: Snapshot | null, desired: ConfigSyncVersion, action: ConfigSyncHistoryEntry['action']): Promise<boolean> {
+    const target = resolveConfigSyncKey(key), id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`;
+    const dir = `${sync}/history/${id}`, kept = `${dir}/${key}`, staged = `${dirname(target).split(sep).join('/')}/.forge-sync-${randomUUID()}.tmp`;
+    const bytes = desired.hash === null ? null : fs.read(blob(desired)).bytes;
+    if (bytes !== null) fs.writeExclusive(staged, bytes, expected ? (expected.mode & ~0o111) | (desired.mode & 0o111) : 0o644 | (desired.mode & 0o111));
+    const history: ConfigSyncHistoryEntry = { id, key, action, at: new Date().toISOString(), size: expected?.bytes.length ?? 0, ...(state.entries[key]?.current ? { versionId: state.entries[key]!.current! } : {}) };
+    // Index and causal state are fsynced BEFORE displacement. A partial batch or crash cannot hide
+    // the preserved inode, and every operation gets its own id (never a shared key backup).
+    fs.saveJson(`${dir}/entries.json`, expected ? [history] : []);
+    const pending: Pending = { key, historyId: id, expectedHash: expected?.hash ?? null, desired: desired.id, ...(bytes !== null ? { staged } : {}) };
+    state.pending.push(pending); save(fs, state);
+    await options.beforeDisplace?.(); fs.revalidate();
+    if (expected) {
+      // rename, not copy: the actually displaced inode remains accessible even to an editor that
+      // had it open before sync. Publishing uses an exclusive link and never replaces a later save.
+      // eslint-disable-next-line no-restricted-syntax -- Move the actual displaced inode; atomic overwrite would lose intervening saves.
+      try { fs.rename(target, kept); } catch (error) { if (!missing(error)) throw error; return stale(); }
+      await options.afterDisplace?.();
+      fs.syncFile(kept); const displaced = fs.read(kept); history.size = displaced.bytes.length; fs.saveJson(`${dir}/entries.json`, [history]);
+      if (hash(displaced.bytes) !== expected.hash || process.platform !== 'win32' && (displaced.mode & 0o111) !== (expected.mode & 0o111)) return stale();
+    } else if (snapshot(fs, key)) return stale();
+    if (bytes !== null) {
+      try { fs.link(staged, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; return stale(); }
+    } else if (snapshot(fs, key)) return stale();
+    if (bytes !== null) fs.unlink(staged);
+    state.entries[key]!.current = desired.id; state.pending = state.pending.filter(p => p !== pending); save(fs, state); return true;
+    function stale() {
+      if (expected) { try { fs.link(kept, target); } catch (error) { if (!missing(error) && (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
+      if (bytes !== null) { try { fs.unlink(staged); } catch (error) { if (!missing(error)) throw error; } }
+      state.pending = state.pending.filter(p => p !== pending); observe(fs, state, key, snapshot(fs, key)); save(fs, state); return false;
     }
   }
-
   async function manifest(): Promise<ConfigSyncManifest> {
-    const files: ConfigSyncManifestEntry[] = [];
-    const skipped: ConfigSyncSkipped[] = [];
-    for (const [key, rel] of Object.entries(GLOBAL_FILES)) {
-      const found = await entry(`global/${key}`, join(dataDir, rel), skipped);
-      if (found) files.push(found);
-    }
-    for (const [key, rel] of Object.entries(GLOBAL_TREES)) await walk(`global/${key}`, join(dataDir, rel), files, skipped);
-    let profiles: string[] = [];
-    try { profiles = await readdir(getProfilesDir(dataDir)); } catch (error) { if (!isEnoentError(error)) throw error; }
-    for (const profileId of profiles.sort()) {
-      if (!validSegment(profileId) || sanitizePathSegment(profileId) !== profileId) continue;
-      for (const [key, rel] of Object.entries(PROFILE_FILES)) {
-        const found = await entry(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)), skipped);
-        if (found) files.push(found);
+    return serialized(async (fs, state) => {
+      const files: ConfigSyncManifestEntry[] = [], skipped: ConfigSyncSkipped[] = [], seen = new Set<string>();
+      const skip = (key: string, error: unknown, subtree = false) => skipped.push({ key, reason: error instanceof SyncAliasError ? 'collision' : error instanceof SyncBoundaryError ? 'symlink' : (error as { reason?: string }).reason === 'too-large' ? 'too-large' : 'unreadable', ...(subtree ? { subtree } : {}), ...((error as { size?: number }).size === undefined ? {} : { size: (error as { size: number }).size }), detail: String((error as Error).message) });
+      const inspect = (key: string) => {
+        if (seen.has(key)) return; seen.add(key);
+        try { const current = snapshot(fs, key); observe(fs, state, key, current); if (current) files.push({ key, hash: current.hash, size: current.bytes.length, mode: current.mode, mtimeMs: current.mtimeMs }); }
+        catch (error) { skip(key, error); }
+      };
+      const walk = (prefix: string, rel: string) => {
+        let names: string[]; try { names = fs.names(rel); } catch (error) { if (!missing(error)) skip(prefix, error, true); return; }
+        const counts = new Map<string, number>(); for (const name of names) counts.set(syncFilenameIdentity(name), (counts.get(syncFilenameIdentity(name)) ?? 0) + 1);
+        for (const name of names) {
+          if (!validSegment(name)) continue; const key = `${prefix}/${name}`;
+          if (counts.get(syncFilenameIdentity(name))! > 1) { skip(key, new SyncAliasError('Unsupported filename collision'), true); continue; }
+          try { const info = fs.stat(`${rel}/${name}`); if (info.isDirectory()) walk(key, `${rel}/${name}`); else inspect(key); }
+          catch (error) { skip(key, error, true); }
+        }
+      };
+      for (const key of Object.keys(GLOBAL_FILES)) inspect(`global/${key}`);
+      for (const [key, rel] of Object.entries(GLOBAL_TREES)) walk(`global/${key}`, rel);
+      let profiles: string[] = []; try { profiles = fs.names('profiles'); } catch (error) { if (!missing(error)) skip('profile', error, true); }
+      for (const p of profiles) {
+        if (!validSegment(p) || sanitizePathSegment(p) !== p) continue;
+        for (const key of Object.keys(PROFILE_FILES)) inspect(`profile/${p}/${key}`);
+        for (const [key, fn] of Object.entries(PROFILE_TREES)) walk(`profile/${p}/${key}`, fn(p));
       }
-      for (const [key, rel] of Object.entries(PROFILE_TREES)) await walk(`profile/${profileId}/${key}`, join(dataDir, rel(profileId)), files, skipped);
-    }
-    const state = await loadState();
-    return { files, base: state.base, conflicts: state.conflicts, joining: !state.joined, skipped };
+      for (const key of Object.keys(state.entries)) if (!skipped.some(item => key === item.key || item.subtree && key.startsWith(`${item.key}/`))) inspect(key);
+      save(fs, state);
+      return { version: 2, environmentId: state.environmentId, files, entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, { current: entry.current, heads: versions(state, entry) }])), skipped };
+    });
   }
-
-  async function readSyncFile(key: string): Promise<ConfigSyncFile> {
-    const path = join(dataDir, resolveConfigSyncKey(key));
-    const bytes = await readFile(path);
-    return { key, hash: sha256(bytes), path, contentBase64: bytes.toString("base64") };
+  async function readSyncFile(key: string, versionId?: string): Promise<ConfigSyncFile> {
+    resolveConfigSyncKey(key);
+    return serialized(async (fs, state) => {
+      // Even retained reads validate the live key's boundary; symlinks never make a key addressable.
+      const current = snapshot(fs, key); observe(fs, state, key, current); save(fs, state);
+      const entry = state.entries[key], version = state.versions[versionId ?? entry?.current ?? ''];
+      if (!entry || !version || version.hash === null || !entry.retained.includes(version.id)) throw new NotSyncedError(key);
+      const bytes = fs.read(blob(version)).bytes; if (hash(bytes) !== version.hash || bytes.length !== version.size) throw new Error('Retained version content mismatch');
+      return { key, version, hash: version.hash, path: join(fs.path, blob(version)), contentBase64: bytes.toString('base64') };
+    });
   }
-
-  async function currentHash(absolute: string): Promise<ConfigSyncHash> {
-    try { return sha256(await readFile(absolute)); } catch (error) { if (isEnoentError(error)) return null; throw error; }
-  }
-
   async function apply(request: ConfigSyncApplyRequest): Promise<ConfigSyncApplyResponse> {
-    const writes = request.writes ?? [];
-    const targets = writes.map((write) => join(dataDir, resolveConfigSyncKey(write.key)));
-    for (const key of [...Object.keys(request.base ?? {}), ...Object.keys(request.conflicts ?? {})]) resolveConfigSyncKey(key);
-    return serialized(async () => {
-      const applied: string[] = [];
-      const stale: string[] = [];
-      const keep = keeper();
-      for (const [index, write] of writes.entries()) {
-        const target = targets[index]!;
-        const current = await currentHash(target);
-        if (current !== write.expectHash) { stale.push(write.key); continue; }
-        if (current !== null) await keep(write.key, target, write.contentBase64 === null ? "delete" : "overwrite");
-        if (write.contentBase64 === null) await rm(target, { force: true });
-        else await writeFileAtomic(target, Buffer.from(write.contentBase64, "base64"));
-        applied.push(write.key);
+    exact(request, ['version', 'writes'], 'apply request');
+    if (request?.version !== CONFIG_SYNC_VERSION || !Array.isArray(request.writes)) throw new Error('Update required: config sync version 2');
+    const targets = new Set<string>();
+    for (const write of request.writes) {
+      exact(write, ['key', 'expectedVersionId', 'expectHash', 'heads', 'resolution'], 'write');
+      if (write.resolution) exact(write.resolution, ['acknowledgedVersionIds', 'chosenVersionId'], 'resolution');
+      const target = syncFilenameIdentity(resolveConfigSyncKey(write.key)); if (targets.has(target)) throw new SyncAliasError('Duplicate sync target'); targets.add(target);
+      if (!Array.isArray(write.heads) || write.heads.length === 0 && !write.resolution || !('expectedVersionId' in write) || !('expectHash' in write)) throw new Error('Complete heads and expected version required');
+      for (const head of write.heads) validateHead(head);
+    }
+    return serialized(async (fs, state) => {
+      const applied: string[] = [], stale: string[] = [];
+      for (const write of request.writes) {
+        const current = snapshot(fs, write.key); const entry = observe(fs, state, write.key, current);
+        if ((entry?.current ?? null) !== write.expectedVersionId || (current?.hash ?? null) !== write.expectHash) { save(fs, state); stale.push(write.key); continue; }
+        const local = entry ?? (state.entries[write.key] = { current: null, heads: [], retained: [], counter: 0 });
+        addHeads(fs, state, local, write.heads);
+        let resolutionVersion: ConfigSyncVersion | undefined;
+        if (write.resolution) {
+          const ids = write.resolution.acknowledgedVersionIds;
+          if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.length < 2 || !ids.includes(write.resolution.chosenVersionId) || ids.some(id => !local.retained.includes(id))) throw new Error('Missing exact resolution heads');
+          const selected = state.versions[write.resolution.chosenVersionId]!;
+          const chosen = selected.hash === null ? null : { ...fs.read(blob(selected)), hash: selected.hash };
+          const resolved = localVersion(state, local, ids.map(id => state.versions[id]!), chosen);
+          retain(fs, state, resolved, chosen?.bytes ?? null); local.retained.push(resolved.id); resolutionVersion = resolved; local.heads = configSyncFrontier([...versions(state, local), resolved]).map(v => v.id);
+        }
+        save(fs, state);
+        const heads = versions(state, local);
+        // Concurrent distinct content remains untouched. Equal-content independent versions are
+        // safe to co-observe; the next local edit descends from their component-wise maximum.
+        if (!resolutionVersion && new Set(heads.map(configSyncContentIdentity)).size > 1) continue;
+        const currentVersion = local.current ? state.versions[local.current] : undefined;
+        const desired = resolutionVersion ?? heads.find(head => !currentVersion || configSyncDominates(head.vector, currentVersion.vector)) ?? heads[0]!;
+        if ((current?.hash ?? null) === desired.hash && ((current?.mode ?? 0) & 0o111) === (desired.mode & 0o111)) { local.current = desired.id; save(fs, state); continue; }
+        if (await mutate(fs, state, write.key, current, desired, desired.hash === null ? 'delete' : 'overwrite')) applied.push(write.key); else stale.push(write.key);
       }
-      await keep.finish();
-      const state = await loadState();
-      for (const [key, base] of Object.entries(request.base ?? {})) {
-        if (stale.includes(key)) continue;
-        if (base === null) delete state.base[key];
-        else state.base[key] = base;
-      }
-      for (const [key, conflict] of Object.entries(request.conflicts ?? {})) {
-        if (stale.includes(key)) continue;
-        if (conflict === null) delete state.conflicts[key];
-        else state.conflicts[key] = conflict;
-      }
-      if (request.joined) state.joined = true;
-      await writeJsonFileAtomic(statePath, state);
       return { applied, stale };
     });
   }
-
-  /** Copies files about to be replaced into one history batch, with an index of what happened. */
-  function keeper() {
-    const at = new Date().toISOString();
-    const id = `${at.replace(/[:.]/g, "-")}-${process.hrtime.bigint()}`;
-    const dir = join(syncDir, "history", id);
-    const entries: ConfigSyncHistoryEntry[] = [];
-    const keep = async (key: string, target: string, action: ConfigSyncHistoryEntry["action"]) => {
-      const kept = join(dir, key);
-      await mkdir(dirname(kept), { recursive: true });
-      await copyFile(target, kept);
-      entries.push({ id, key, action, at, size: (await lstat(kept)).size });
-    };
-    keep.finish = async () => { if (entries.length) await writeJsonFileAtomic(join(dir, "entries.json"), entries); };
-    return keep;
-  }
-
   async function history(): Promise<ConfigSyncHistoryResponse> {
-    let ids: string[] = [];
-    try { ids = await readdir(join(syncDir, "history")); } catch (error) { if (!isEnoentError(error)) throw error; }
-    const entries: ConfigSyncHistoryEntry[] = [];
-    for (const id of ids.sort().reverse()) {
-      const batch = await readJsonFileIfExists<ConfigSyncHistoryEntry[]>(join(syncDir, "history", id, "entries.json"));
-      for (const item of [...(batch ?? [])].reverse()) entries.push(item);
-      if (entries.length >= HISTORY_LIST_LIMIT) break;
-    }
-    return { entries: entries.slice(0, HISTORY_LIST_LIMIT) };
-  }
-
-  /** Writes a kept version back; the version it replaces is kept too. Sync then sees an ordinary local edit. */
-  async function restore(request: ConfigSyncRestoreRequest): Promise<void> {
-    const target = join(dataDir, resolveConfigSyncKey(request.key));
-    if (typeof request.id !== "string" || !validSegment(request.id)) throw new NotSyncedError(`history ${String(request.id)}`);
-    const bytes = await readFile(join(syncDir, "history", request.id, request.key));
-    await serialized(async () => {
-      const keep = keeper();
-      if (await currentHash(target) !== null) await keep(request.key, target, "restore");
-      await writeFileAtomic(target, bytes);
-      await keep.finish();
-    });
-  }
-
-  function lease(request: ConfigSyncLeaseRequest): Promise<ConfigSyncLeaseResponse> {
-    if (typeof request.holder !== "string" || !request.holder || typeof request.ttlMs !== "number" || request.ttlMs < 0) {
-      return Promise.reject(new Error("Lease needs a holder and a ttlMs"));
-    }
-    return serialized(async () => {
-      const state = await loadState();
-      const now = Date.now();
-      const free = !state.hub || state.hub.until <= now || state.hub.holder === request.holder || request.takeover === true;
-      if (free) {
-        if (request.ttlMs === 0) delete state.hub;
-        else state.hub = { holder: request.holder, until: now + Math.min(request.ttlMs, 5 * 60_000) };
-        await writeJsonFileAtomic(statePath, state);
+    return serialized(async (fs) => {
+      let ids: string[]; try { ids = fs.names(`${sync}/history`); } catch (error) { if (missing(error)) return { entries: [] }; throw error; }
+      const entries: ConfigSyncHistoryEntry[] = [];
+      for (const id of ids.sort().reverse()) {
+        if (!validSegment(id)) continue;
+        const index = `${sync}/history/${id}/entries.json`;
+        let batch = fs.json<ConfigSyncHistoryEntry[]>(index);
+        if (!batch) {
+          // V1 could move/copy a file and fail before publishing its batch index. Recover those
+          // allowlisted copies without reading unrelated files or changing their contents.
+          batch = [];
+          const discover = (prefix: string) => {
+            const path = `${sync}/history/${id}/${prefix}`;
+            for (const name of fs.names(path)) {
+              if (!validSegment(name)) continue;
+              const key = `${prefix}/${name}`, file = `${sync}/history/${id}/${key}`;
+              const stat = fs.stat(file);
+              if (stat.isDirectory()) discover(key);
+              else {
+                try { resolveConfigSyncKey(key); } catch (error) { if (error instanceof NotSyncedError) continue; throw error; }
+                batch!.push({ id, key, action: 'overwrite', at: new Date(stat.mtimeMs).toISOString(), size: stat.size });
+              }
+            }
+          };
+          for (const scope of ['global', 'profile']) { try { discover(scope); } catch (error) { if (!missing(error)) throw error; } }
+          if (batch.length) fs.saveJson(index, batch);
+        }
+        for (const item of [...batch].reverse()) {
+          resolveConfigSyncKey(item.key);
+          try { const info = fs.stat(`${sync}/history/${id}/${item.key}`); if (info.isFile()) entries.push({ ...item, id, size: info.size }); } catch (error) { if (!missing(error)) throw error; }
+        }
       }
-      const hub = state.hub;
-      return { granted: free, holder: hub?.holder ?? null, until: hub ? new Date(hub.until).toISOString() : null };
+      return { entries: entries.slice(0, 50) };
+    });
+  }
+  async function restore(request: ConfigSyncRestoreRequest): Promise<void> {
+    exact(request, ['id', 'key', 'expectedVersionId'], 'restore request');
+    resolveConfigSyncKey(request.key); if (!validSegment(request.id) || !('expectedVersionId' in request)) throw new NotSyncedError('history version');
+    return serialized(async (fs, state) => {
+      const kept = fs.read(`${sync}/history/${request.id}/${request.key}`);
+      if (process.platform === 'win32') {
+        const record = fs.json<ConfigSyncHistoryEntry[]>(`${sync}/history/${request.id}/entries.json`)?.find(item => item.key === request.key);
+        const keptVersion = record?.versionId ? state.versions[record.versionId] : undefined;
+        if (keptVersion) kept.mode = (kept.mode & ~0o111) | (keptVersion.mode & 0o111);
+      }
+      const current = snapshot(fs, request.key);
+      const entry = observe(fs, state, request.key, current); save(fs, state);
+      if ((entry?.current ?? null) !== request.expectedVersionId) throw new Error('File changed since restore was requested');
+      const local = entry ?? (state.entries[request.key] = { current: null, heads: [], retained: [], counter: 0 });
+      const desired = localVersion(state, local, local.current ? [state.versions[local.current]!] : [], { ...kept, hash: hash(kept.bytes) });
+      retain(fs, state, desired, kept.bytes); local.retained.push(desired.id); local.heads = configSyncFrontier([...versions(state, local), desired]).map(v => v.id);
+      if (!await mutate(fs, state, request.key, current, desired, 'restore')) throw new Error('File changed during restore');
+    });
+  }
+  async function lease(request: ConfigSyncLeaseRequest): Promise<ConfigSyncLeaseResponse> {
+    exact(request, ['holder', 'ttlMs', 'takeover'], 'lease request');
+    if (typeof request.holder !== 'string' || !request.holder || !Number.isFinite(request.ttlMs) || request.ttlMs < 0) throw new Error('Lease needs holder and ttlMs');
+    return serialized(async () => {
+      const now = performance.now(), hub = leases.get(dataDir); const release = request.ttlMs === 0;
+      const free = release ? hub?.holder === request.holder : !hub || hub.until <= now || hub.holder === request.holder || request.takeover === true;
+      if (free) { if (release) leases.delete(dataDir); else leases.set(dataDir, { holder: request.holder, until: now + Math.min(request.ttlMs, 300_000) }); }
+      const active = leases.get(dataDir);
+      return { granted: free, holder: active?.holder ?? null, until: active ? new Date(Date.now() + Math.max(0, active.until - now)).toISOString() : null };
     });
   }
 
-  /** The one place the merge instructions for an agent are written. */
   async function resolvePrompt(request: ConfigSyncResolvePromptRequest): Promise<ConfigSyncResolvePromptResponse> {
-    const path = join(dataDir, resolveConfigSyncKey(request.key));
-    const subject = String(request.subject ?? request.key).slice(0, 200);
-    const clip = (text: string) => text.length > PROMPT_VERSION_MAX_CHARS ? `${text.slice(0, PROMPT_VERSION_MAX_CHARS)}\n…(truncated)` : text;
-    const versions = Array.isArray(request.versions) ? request.versions : [];
-    const text = [
-      `Resolve a Forge configuration sync conflict for "${subject}".`,
-      "",
-      `The file changed differently on ${versions.map((v) => v.label).join(" and ") || "more than one environment"}. Merge the versions below so that no one's intended change is lost, then write the merged result to:`,
-      path,
-      "",
-      "Write only that file. Sync propagates your edit to the other environments automatically, and the replaced versions stay in sync history.",
-      ...versions.map((v) => `\n--- Version from ${v.label} ---\n${v.contentBase64 === null ? "(deleted on this environment)" : clip(Buffer.from(v.contentBase64, "base64").toString("utf8"))}`),
-    ].join("\n");
-    return { title: `Resolve sync conflict: ${subject}`.slice(0, 120), text };
+    exact(request, ['key', 'subject', 'expectedVersionId', 'acknowledgedVersionIds', 'versions'], 'resolve prompt request');
+    resolveConfigSyncKey(request.key);
+    return serialized(async (fs, state) => {
+      const current = snapshot(fs, request.key); const entry = observe(fs, state, request.key, current); save(fs, state);
+      if (!entry || entry.current !== request.expectedVersionId) throw new Error('File changed before resolution');
+      const ids = request.acknowledgedVersionIds;
+      if (!Array.isArray(ids) || ids.length < 2 || new Set(ids).size !== ids.length || !Array.isArray(request.versions) || request.versions.length !== ids.length || request.versions.some(v => !ids.includes(v.version.id)) || new Set(request.versions.map(v => v.version.id)).size !== ids.length) throw new Error('Complete exact conflict versions required');
+      for (const input of request.versions) { exact(input, ['label', 'version', 'contentBase64'], 'resolution input'); const retained = state.versions[input.version.id]; if (!retained || !entry.retained.includes(retained.id)) throw new Error('Missing complete conflict version'); const contentBase64 = input.contentBase64 === undefined ? retained.hash === null ? null : fs.read(blob(retained)).bytes.toString('base64') : input.contentBase64; const bytes = validateHead({ version: input.version, contentBase64 }); if (!entry.heads.includes(input.version.id)) throw new Error('Missing conflict version'); retain(fs, state, input.version, bytes); }
+      entry.resolution = { current: entry.current, acknowledged: [...ids] }; save(fs, state);
+      const subject = String(request.subject).slice(0, 200);
+      return { title: `Resolve sync conflict: ${subject}`.slice(0, 120), text: [
+        `Resolve a Forge configuration sync conflict for "${subject}".`, '',
+        'Read every complete immutable input listed below. Merge the intended changes, then write only the merged file to:', join(fs.path, resolveConfigSyncKey(request.key)), '',
+        'This resolution acknowledges only these exact version ids. New concurrent edits stay unresolved. Sync keeps the displaced file in history.',
+        ...request.versions.map(v => `\n--- Version from ${v.label} (${v.version.id}) ---\n${v.version.hash === null ? '(deleted)' : join(fs.path, blob(v.version))}`),
+      ].join('\n') };
+    });
   }
-
-  return { manifest, readFile: async (key: string) => readSyncFile(key), apply, history, restore, lease, resolvePrompt };
+  return { manifest, readFile: readSyncFile, apply, history, restore, lease, resolvePrompt };
 }
-
 export type ConfigSyncStore = ReturnType<typeof createConfigSyncStore>;

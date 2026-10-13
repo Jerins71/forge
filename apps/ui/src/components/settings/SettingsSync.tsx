@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, Bot, Check, ChevronDown, History, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import type { ConfigSyncConflictItem, ConfigSyncParticipant } from '@forge/client-runtime'
 import { configSyncLogicalKey, readConfigSyncFile, readConfigSyncText } from '@forge/client-runtime'
-import type { ConfigSyncResolvePromptResponse } from '@forge/protocol'
+import type { ConfigSyncManifest, ConfigSyncResolvePromptResponse } from '@forge/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -74,18 +74,21 @@ function SettingsSyncContent() {
           {entries.map((entry) => {
             const status = statusFor(entry.environmentId)
             const label = environmentDisplayLabel(registry, entry.environmentId)
+            const descriptor = registry.get(entry.environmentId).descriptor()
+            const updateRequired = descriptor !== null && descriptor.capabilities.configSync !== 2
             return (
               <li key={entry.environmentId} className="flex items-center gap-3">
                 <Checkbox
                   id={`sync-${entry.environmentId}`}
                   aria-label={`Sync ${label}`}
+                  disabled={updateRequired}
                   checked={chosen.has(entry.environmentId)}
                   onCheckedChange={(on) => toggleEnvironment(entry.environmentId, on === true)}
                 />
                 <label htmlFor={`sync-${entry.environmentId}`} className="min-w-0 flex-1 text-[13px] text-foreground">
                   {label}{entry.primary ? <span className="ml-1.5 text-subtle-foreground">(this machine)</span> : null}
                 </label>
-                {settings.enabled && chosen.has(entry.environmentId) && status ? (
+                {updateRequired ? <span className="text-[12px] text-amber-600 dark:text-amber-400">Update required</span> : settings.enabled && chosen.has(entry.environmentId) && status ? (
                   status.ok && !status.error
                     ? <span className="text-[12px] text-muted-foreground">{status.files} files</span>
                     : <span className="max-w-[60%] truncate text-[12px] text-amber-600 dark:text-amber-400" title={status.error}>{status.error ?? 'Unavailable'}</span>
@@ -97,7 +100,7 @@ function SettingsSyncContent() {
         {settings.enabled ? (
           <div className="flex items-center gap-2 text-[12.5px] text-muted-foreground" data-testid="sync-status">
             {running ? <Loader2 className="size-3.5 animate-spin" /> : report?.conflicts.length || unreachable.length || report?.skipped.length || report?.activeHub ? <AlertTriangle className="size-3.5 text-amber-500" /> : <Check className="size-3.5 text-emerald-500" />}
-            {chosen.size < 2
+            {running ? 'Syncing…' : chosen.size < 2
               ? 'Choose at least two environments.'
               : report?.activeHub
                 ? 'Another open Forge window is syncing these environments. Sync now here to take over.'
@@ -116,10 +119,10 @@ function SettingsSyncContent() {
       {settings.enabled && report?.conflicts.length ? (
         <SettingsSection
           label="Conflicts"
-          description="These files changed differently on more than one environment. Both versions are untouched. Keep one, or ask an agent to merge them; editing either copy also resolves the conflict."
+          description="These files changed differently on more than one environment. Every concurrent version is retained. Keep one or ask an agent to merge the versions shown. New concurrent edits stay unresolved."
         >
           {report.conflicts.map((conflict) => (
-            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(environmentId) => hub.syncNow({ keep: { key: conflict.key, environmentId } })} />
+            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(environmentId, versionId) => hub.syncNow({ keep: { key: conflict.key, environmentId, versionId, acknowledgedVersionIds: conflict.sides.map(side => side.versionId) } })} />
           ))}
         </SettingsSection>
       ) : null}
@@ -150,7 +153,7 @@ function SettingsSyncContent() {
                 <li key={`${item.environmentId}-${item.key}`} className="flex items-baseline gap-2">
                   <span className="min-w-0 flex-1 truncate text-foreground" title={item.key}>{described.title}{described.detail ? <span className="text-subtle-foreground"> · {described.detail}</span> : null}</span>
                   <span className="shrink-0 text-muted-foreground">
-                    {item.reason === 'too-large' ? `Larger than 2 MB (${formatSize(item.size ?? 0)})` : `Could not be written: ${item.detail ?? 'unknown error'}`}
+                    {item.reason === 'too-large' ? `Larger than 2 MB (${formatSize(item.size ?? 0)})` : item.detail ?? item.reason}
                   </span>
                   <Badge variant="outline" className="shrink-0">{item.label}</Badge>
                 </li>
@@ -170,7 +173,7 @@ function SettingsSyncContent() {
           <ul className="space-y-1.5 text-[12.5px]" aria-label="Local-only projects">
             {localOnly.map((item) => (
               <li key={`${item.environmentId}-${item.profileId}`} className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-foreground">{item.title}</span>
+                <span className="min-w-0 text-foreground">{item.title}<span className="ml-2 text-subtle-foreground">{item.reason}</span></span>
                 <Badge variant="outline" className="shrink-0">{item.environment}</Badge>
               </li>
             ))}
@@ -185,7 +188,7 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
   conflict: ConfigSyncConflictItem
   describe: { title: string; detail?: string }
   participants: ConfigSyncParticipant[]
-  onKeep: (environmentId: string) => Promise<void>
+  onKeep: (environmentId: string, versionId: string) => Promise<void>
 }) {
   const registry = useEnvironmentRegistry()
   const [open, setOpen] = useState(false)
@@ -195,28 +198,31 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
   const participant = (id: string) => participants.find((p) => p.environmentId === id)
   // One column per distinct version, naming every environment that holds it.
   const versions = useMemo(() => {
-    const grouped = new Map<string | null, { hash: string | null; labels: string[]; text: string | null }>()
+    const grouped = new Map<string, { id: string; hash: string | null; mode: number; labels: string[]; text: string | null }>()
     for (const side of conflict.sides) {
-      const entry = grouped.get(side.hash) ?? { hash: side.hash, labels: [], text: texts?.[side.environmentId] ?? null }
-      entry.labels.push(side.label)
-      grouped.set(side.hash, entry)
+      const id = `${side.hash}:${side.version.mode & 0o111}`
+      const entry = grouped.get(id) ?? { id, hash: side.hash, mode: side.version.mode, labels: [], text: texts?.[side.versionId] ?? null }
+      entry.labels.push(...(side.labels.length ? side.labels : [side.label]))
+      grouped.set(id, entry)
     }
     const all = [...grouped.values()]
     return all.map((version) => {
       const others = new Set(all.filter((v) => v !== version).flatMap((v) => v.text?.split('\n') ?? []))
-      return { ...version, unique: new Set((version.text ?? '').split('\n').filter((line) => !others.has(line))) }
+      return { ...version, labels: [...new Set(version.labels)], unique: new Set((version.text ?? '').split('\n').filter((line) => !others.has(line))) }
     })
   }, [conflict.sides, texts])
 
-  const loadTexts = async () => {
+  useEffect(() => {
+    setTexts(null)
+    if (!open) return
+    let active = true
     const loaded: Record<string, string | null> = {}
-    await Promise.all(conflict.sides.map(async (side) => {
-      const p = participant(side.environmentId)
-      loaded[side.environmentId] = side.hash === null || !p ? null : await readConfigSyncText(p, side.localKey)
-    }))
-    setTexts(loaded)
-    return loaded
-  }
+    void Promise.all(conflict.sides.map(async side => {
+      const p = participants.find(item => item.environmentId === side.environmentId)
+      loaded[side.versionId] = side.hash === null || !p ? null : await readConfigSyncText(p, side.localKey, side.version)
+    })).then(() => { if (active) setTexts(loaded) })
+    return () => { active = false }
+  }, [open, conflict.sides, participants])
 
   const askAgent = async () => {
     setBusy('agent')
@@ -229,15 +235,17 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
       const projectId = /^profile\/([^/]+)\//.exec(target.localKey)?.[1] ?? projects[0]?.projectId
       if (!projectId) throw new Error(`${target.label} has no project to run an agent in.`)
       // The environment the agent runs on writes the prompt; this client only gathers the versions.
-      const versions = (await Promise.all(conflict.sides.map(async (side) => {
-        if (side.hash === null) return { label: side.label, contentBase64: null }
+      const versions = await Promise.all(conflict.sides.map(async (side) => {
+        if (side.hash === null) return { label: side.label, version: side.version, contentBase64: null }
         const p = participant(side.environmentId)
-        const file = p ? await readConfigSyncFile(p, side.localKey) : null
-        return file ? { label: side.label, contentBase64: file.contentBase64 } : []
-      }))).flat()
+        const file = p ? await readConfigSyncFile(p, side.localKey, side.version) : null
+        if (!file) throw new Error(`Could not read the complete version from ${side.label}. Try again when it is reachable.`)
+        return { label: side.label, version: side.version, contentBase64: file.contentBase64 }
+      }))
+      const manifest = await client.features.settings.fetchJson<ConfigSyncManifest>('/api/settings/sync/manifest')
       const prompt = await client.features.settings.fetchJson<ConfigSyncResolvePromptResponse>('/api/settings/sync/resolve-prompt', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ key: target.localKey, subject: describe.detail ? `${describe.title} (${describe.detail})` : describe.title, versions }),
+        body: JSON.stringify({ key: target.localKey, subject: describe.detail ? `${describe.title} (${describe.detail})` : describe.title, expectedVersionId: manifest.entries[target.localKey]?.current ?? null, acknowledgedVersionIds: conflict.sides.map(side => side.versionId), versions: versions.map(({ label, version }) => ({ label, version })) }),
       })
       const receipt = await client.request('session.launch', {
         commandId: crypto.randomUUID(),
@@ -262,15 +270,15 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
           <div className="text-[13px] font-medium text-foreground">{describe.title}</div>
           {describe.detail ? <div className="truncate text-[12px] text-subtle-foreground">{describe.detail}</div> : null}
         </div>
-        <Button size="sm" variant="ghost" className="gap-1 text-[12px]" onClick={() => { setOpen(!open); if (!texts) void loadTexts() }}>
+        <Button size="sm" variant="ghost" className="gap-1 text-[12px]" onClick={() => setOpen(!open)}>
           Compare <ChevronDown className={cn('size-3.5 transition-transform', open && 'rotate-180')} />
         </Button>
       </div>
       {open ? (
         <div className="grid gap-2 @min-[40rem]/settings:grid-cols-2">
           {versions.map((version) => (
-            <div key={version.hash ?? 'deleted'} className="min-w-0 rounded-lg border border-hairline" data-testid="sync-conflict-version">
-              <div className="border-b border-hairline px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground">{version.labels.join(' · ')}</div>
+            <div key={version.id} className="min-w-0 rounded-lg border border-hairline" data-testid="sync-conflict-version">
+              <div className="border-b border-hairline px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground">{version.labels.join(' · ')}{version.mode & 0o111 ? ' · Executable' : ''}</div>
               <pre className="max-h-72 overflow-auto px-2.5 py-2 font-mono text-[11.5px] text-foreground">
                 {version.hash === null ? 'Deleted here' : !texts ? 'Loading…' : version.text === null ? 'Could not read this version.'
                   : version.text.split('\n').map((line, index) => (
@@ -284,8 +292,8 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {conflict.sides.map((side) => (
-          <Button key={side.environmentId} size="sm" variant="outline" disabled={busy !== null}
-            onClick={async () => { setBusy(side.environmentId); try { await onKeep(side.environmentId) } finally { setBusy(null) } }}>
+          <Button key={side.versionId} size="sm" variant="outline" disabled={busy !== null}
+            onClick={async () => { setBusy(side.environmentId); try { await onKeep(side.environmentId, side.versionId) } finally { setBusy(null) } }}>
             {busy === side.environmentId ? <Loader2 className="size-3.5 animate-spin" /> : null}
             Keep {side.label}{side.hash === null ? ' (deleted)' : ''}
           </Button>

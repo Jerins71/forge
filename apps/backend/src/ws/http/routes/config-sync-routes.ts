@@ -1,6 +1,6 @@
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { ConfigSyncApplyRequest, ConfigSyncLeaseRequest, ConfigSyncResolvePromptRequest, ConfigSyncRestoreRequest } from "@forge/protocol";
-import { createConfigSyncStore, isConfigSyncKeyError } from "../../../environment/sync/config-sync.js";
+import { createConfigSyncStore, isConfigSyncKeyError, type ConfigSyncStore } from "../../../environment/sync/config-sync.js";
 import { isEnoentError } from "../../../utils/fs-errors.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
 import type { HttpRoute } from "../shared/http-route.js";
@@ -9,7 +9,7 @@ const PREFIX = "/api/settings/sync/";
 
 /** Configuration sync: a manifest of allowlisted files, single-file reads, and guarded writes. */
 export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[] {
-  const store = createConfigSyncStore(options.dataDir);
+  const store: ConfigSyncStore = createConfigSyncStore(options.dataDir);
   const route = (name: string, methods: string, handle: HttpRoute["handle"]): HttpRoute => ({
     methods: `${methods}, OPTIONS`,
     matches: (pathname) => pathname === `${PREFIX}${name}`,
@@ -28,7 +28,7 @@ export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[
   return withEnvironmentRouteAccess([
     route("manifest", "GET", async (_request, response) => { sendJson(response, 200, { ...await store.manifest() }); }),
     route("file", "GET", async (_request, response, requestUrl) => {
-      sendJson(response, 200, { ...await store.readFile(requestUrl.searchParams.get("key") ?? "") });
+      sendJson(response, 200, { ...await store.readFile(requestUrl.searchParams.get("key") ?? "", requestUrl.searchParams.get("versionId") ?? undefined) });
     }),
     route("apply", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.apply(await readJsonBody(request, 32 * 1024 * 1024) as ConfigSyncApplyRequest) });
@@ -45,5 +45,5 @@ export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[
       sendJson(response, 200, { ...await store.resolvePrompt(await readJsonBody(request, 8 * 1024 * 1024) as ConfigSyncResolvePromptRequest) });
     }),
   // The same access as editing presets, skills and prompts directly, so existing pairings can sync.
-  ], { GET: { scopes: ["session:read"] }, POST: { scopes: ["workspace:write"] } });
+  ], { GET: { scopes: ["session:read", "workspace:read"] }, POST: { scopes: ["workspace:write"] } });
 }
