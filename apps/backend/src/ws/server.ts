@@ -46,6 +46,8 @@ import {
 } from "../swarm/notification-settings-service.js";
 import { isPidAlive } from "../swarm/platform.js";
 import type { SwarmManager } from "../swarm/swarm-manager.js";
+import { SessionTitleNamer } from "../swarm/session-titles.js";
+import { createSessionAutoTitlesRoutes } from "./http/routes/session-auto-titles-routes.js";
 import type { BrowserAutomationService } from "../swarm/browser-automation/index.js";
 import { UnreadTracker } from "../swarm/session/unread-tracker.js";
 import { createNoopObservabilityFacade } from "../observability/noop-observability.js";
@@ -205,6 +207,8 @@ export class SwarmWebSocketServer {
   private generationThroughputRefreshInterval: NodeJS.Timeout | null = null;
 
   private ownsControlPidFile = false;
+
+  private sessionTitles?: SessionTitleNamer;
 
   private readonly onConversationMessage = (event: ServerEvent): void => {
     if (event.type !== "conversation_message" || isRetiredMessageSource(event.sourceContext)) return;
@@ -583,6 +587,7 @@ export class SwarmWebSocketServer {
       ...(this.nativeRuntimeUpdateService ? createNativeRuntimeRoutes(this.nativeRuntimeUpdateService) : []),
       ...this.settingsRoutes.routes,
       ...createWorkerPresetRoutes({ swarmManager: this.swarmManager }),
+      ...createSessionAutoTitlesRoutes({ swarmManager: this.swarmManager }),
       ...createModelCacheVisualizationRoutes({
         swarmManager: this.swarmManager,
         broadcastEvent: (event) => this.sessionFeatures.publish(event),
@@ -716,6 +721,8 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.on("conversation_message", this.onConversationMessage);
+    this.sessionTitles = new SessionTitleNamer(this.swarmManager);
+    this.swarmManager.on("conversation_message", this.sessionTitles.onConversationMessage);
     this.swarmManager.on("choice_request", this.onChoiceRequest);
     this.swarmManager.on("codex_elicitation_request", this.onCodexElicitation);
     this.swarmManager.on("codex_elicitation_dismissed", this.onCodexElicitation);
@@ -784,6 +791,7 @@ export class SwarmWebSocketServer {
     }
 
     this.swarmManager.off("conversation_message", this.onConversationMessage);
+    if (this.sessionTitles) this.swarmManager.off("conversation_message", this.sessionTitles.onConversationMessage);
     this.swarmManager.off("choice_request", this.onChoiceRequest);
     this.swarmManager.off("codex_elicitation_request", this.onCodexElicitation);
     this.swarmManager.off("codex_elicitation_dismissed", this.onCodexElicitation);

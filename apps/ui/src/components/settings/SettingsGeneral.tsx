@@ -24,6 +24,7 @@ import {
   storeSidebarProviderUsagePref,
 } from '@/lib/sidebar-prefs'
 import { SettingsSection, SettingsSectionGrid, SettingsWithCTA } from './settings-row'
+import { SessionAutoTitlesSetting } from './SessionAutoTitlesSetting'
 import { isElectron, type SleepBlockerStatus } from '@/lib/electron-bridge'
 import {
   EDITOR_LABELS,
@@ -692,6 +693,8 @@ export function SettingsGeneral({
           </div>
         </SettingsWithCTA>
       </SettingsSection>
+
+      <SessionAutoTitlesSetting apiClient={apiClient} />
 
       <SettingsSection
         label="Conversation Response Throughput"

@@ -421,6 +421,10 @@ export function getModelCacheVisualizationSettingsPath(dataDir: string): string 
   return join(getSharedConfigDir(dataDir), "model-cache-visualization.json");
 }
 
+export function getSessionAutoTitlesSettingsPath(dataDir: string): string {
+  return join(getSharedConfigDir(dataDir), "session-auto-titles.json");
+}
+
 export function getRepositorySettingsPath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "repository-settings.json");
 }

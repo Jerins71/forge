@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import type { AgentModelDescriptor, ConversationAttachment } from '@forge/protocol'
-import type { CommandReceipt, ProjectRef, WorkspaceStrategy } from '@forge/protocol/environment-v2'
+import { placeholderSessionTitle, type CommandReceipt, type ProjectRef, type WorkspaceStrategy } from '@forge/protocol/environment-v2'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { describeEnvironmentStatus } from '@/components/settings/environments/environment-status'
 import { isInterruptedReceipt } from '@forge/client-runtime'
@@ -87,7 +87,7 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
       const receipt = await whenSettled(() => client.request('session.launch', {
         commandId: pending.commandId,
         projectId: target.projectId,
-        title: titleFromText(text),
+        title: placeholderSessionTitle(text),
         workspaceStrategy: workspace,
         ...(model ? { model: { provider: model.provider, modelId: model.modelId, ...(model.thinkingLevel ? { thinkingLevel: model.thinkingLevel } : {}) } } : {}),
         initialMessage: { text, artifactIds },
@@ -111,12 +111,6 @@ export function useLaunchSession(initialTarget: ProjectRef | null, onLaunched: (
   }, [model, onLaunched, registry, target, workspace])
 
   return { target, setTarget, workspace, setWorkspace, model, setModel, error, submitting, launch }
-}
-
-function titleFromText(text: string): string {
-  const line = text.trim().split('\n', 1)[0]?.trim() ?? ''
-  if (!line) return 'New session'
-  return line.length > 60 ? `${line.slice(0, 57)}…` : line
 }
 
 export function attachmentFingerprint(attachment: ConversationAttachment): string {
