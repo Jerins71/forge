@@ -1,4 +1,4 @@
-**Settings → History** is local Builder only. It shows indexing activity for agent-only history recall and can pause or resume that work. Restricted runtimes are not included.
+**Settings → History** is local Builder only. It shows indexing activity for agent-only history recall and can pause or resume that work. Recall covers the last 30 days: only sessions and workers active in that window are indexed, older rows are removed from the index in the background, and search and read return nothing older. The limit is fixed. Restricted runtimes are not included.
 
 History search is not a toggle. Indexing starts on its own after local Builder hydration. Pause stops indexing; it does not enable or disable search, stop conversation recording, or rebuild or delete the cache.
 

@@ -2,14 +2,17 @@ import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HistorySearchRequest } from "@forge/protocol";
 import { HistorySearchService } from "../history-recall/history-search-service.js";
 import { getSessionFilePath, getWorkerSessionFilePath } from "../storage/data-paths.js";
 import type { AgentDescriptor, ManagerProfile, SwarmConfig } from "../types.js";
 
 const fixtures: Array<{ service: HistorySearchService; root: string }> = [];
+// Fixture rows are dated 2026-09-07; keep them inside the 30-day recall window.
+beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-09-08T00:00:00.000Z")); });
 afterEach(async () => {
+  vi.useRealTimers();
   for (const fixture of fixtures.splice(0)) { await fixture.service.dispose(); await rm(fixture.root, { recursive: true, force: true }); }
 });
 function row(id: string, text: string, role = "user") {

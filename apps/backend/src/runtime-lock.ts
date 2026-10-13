@@ -1,6 +1,7 @@
-import { mkdirSync, openSync, closeSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
-import { execSync } from "node:child_process";
-import { join } from "node:path";
+import { mkdirSync, openSync, closeSync, writeFileSync, readFileSync, unlinkSync, realpathSync, statSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { hostname, uptime } from "node:os";
+import { join, sep } from "node:path";
 
 export interface RuntimeLock {
   release(): void;
@@ -8,6 +9,8 @@ export interface RuntimeLock {
 
 const RUNTIME_LOCK_FILE = "runtime.lock";
 const LOCK_CONTENT_SEP = "\n";
+/** A reboot moves boot time far more than clock adjustments of a running machine do. */
+const BOOT_TIME_TOLERANCE_MS = 2 * 60_000;
 const LOCK_IN_USE_ERROR =
   "Another Forge instance is using this data directory. " +
   "Close it first or use FORGE_DATA_DIR to specify a different directory.";
@@ -18,18 +21,23 @@ const LOCK_IN_USE_ERROR =
  * automatically reclaimed. This prevents leftover lock files from blocking
  * startup after crashes or unclean shutdowns.
  *
+ * The lock also records which directory, machine, and boot it was taken for.
+ * A lock copied with the directory (backup, clone, sync to another machine)
+ * names a live process that is not using this directory, so it is stale.
+ *
  * Throws if another live instance already holds the lock.
  */
 export function acquireRuntimeLock(dataDir: string): RuntimeLock {
   mkdirSync(dataDir, { recursive: true });
 
   const lockFile = join(dataDir, RUNTIME_LOCK_FILE);
+  const identity = readLockIdentity(dataDir);
 
   while (true) {
     try {
       const fd = openSync(lockFile, "wx");
       try {
-        writeFileSync(fd, `${process.pid}${LOCK_CONTENT_SEP}${new Date().toISOString()}${LOCK_CONTENT_SEP}`);
+        writeFileSync(fd, [process.pid, new Date().toISOString(), JSON.stringify(identity), ""].join(LOCK_CONTENT_SEP));
       } finally {
         closeSync(fd);
       }
@@ -50,7 +58,7 @@ export function acquireRuntimeLock(dataDir: string): RuntimeLock {
         throw error;
       }
 
-      const stale = isStaleRuntimeLock(lockFile);
+      const stale = isStaleRuntimeLock(lockFile, dataDir, identity);
       if (!stale) {
         throw new Error(LOCK_IN_USE_ERROR);
       }
@@ -58,8 +66,29 @@ export function acquireRuntimeLock(dataDir: string): RuntimeLock {
   }
 }
 
-function isStaleRuntimeLock(lockFile: string): boolean {
-  const existingPid = readRuntimeLockPid(lockFile);
+interface LockIdentity {
+  host: string;
+  bootTime: number;
+  dir: string;
+  dev: number;
+  ino: number;
+}
+
+function readLockIdentity(dataDir: string): LockIdentity {
+  const dir = realpathSync(dataDir);
+  const stat = statSync(dir);
+  return { host: hostname(), bootTime: Math.round(Date.now() - uptime() * 1000), dir, dev: stat.dev, ino: stat.ino };
+}
+
+/** Same machine, same boot, and the same directory object (a copy has a new inode). */
+function isSameLockIdentity(recorded: Partial<LockIdentity>, current: LockIdentity): boolean {
+  return recorded.host === current.host
+    && typeof recorded.bootTime === "number" && Math.abs(recorded.bootTime - current.bootTime) <= BOOT_TIME_TOLERANCE_MS
+    && recorded.dev === current.dev && recorded.ino === current.ino;
+}
+
+function isStaleRuntimeLock(lockFile: string, dataDir: string, identity: LockIdentity): boolean {
+  const { pid: existingPid, identity: recorded } = readRuntimeLock(lockFile);
   if (existingPid === null) {
     clearStaleRuntimeLock(lockFile);
     return true;
@@ -84,7 +113,38 @@ function isStaleRuntimeLock(lockFile: string): boolean {
     return true;
   }
 
+  // A live node process holds a lock for some directory. Honor it only when
+  // it was taken for this one; older lock files record no identity, so ask
+  // whether the owner has anything open here instead.
+  const ours = recorded ? isSameLockIdentity(recorded, identity) : hasOpenFilesUnder(existingPid, [dataDir, identity.dir]);
+  if (!ours) {
+    clearStaleRuntimeLock(lockFile);
+    return true;
+  }
+
   return false;
+}
+
+/**
+ * Whether `pid` has an open file under one of `dirs`. A Forge backend keeps its
+ * SQLite databases open for its whole life. Returns true if we can't determine
+ * (fail-safe: don't steal a live lock).
+ */
+function hasOpenFilesUnder(pid: number, dirs: string[]): boolean {
+  if (process.platform === "win32") {
+    return true;
+  }
+  let out: string;
+  try {
+    out = execFileSync("lsof", ["-a", "-p", String(pid), "-Fn"], { encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"] });
+  } catch (error) {
+    // lsof exits 1 when it lists nothing for the process; anything else is unknown.
+    const result = error as { status?: number; stdout?: string };
+    if (result.status !== 1 || typeof result.stdout !== "string") return true;
+    out = result.stdout;
+  }
+  const prefixes = dirs.map((dir) => dir.endsWith(sep) ? dir : `${dir}${sep}`);
+  return out.split("\n").some((line) => line.startsWith("n") && prefixes.some((prefix) => line.slice(1).startsWith(prefix)));
 }
 
 /**
@@ -128,26 +188,38 @@ function isNodeProcess(pid: number): boolean {
   }
 }
 
-function readRuntimeLockPid(lockFile: string): number | null {
+function readRuntimeLock(lockFile: string): { pid: number | null; identity?: Partial<LockIdentity> } {
   let raw: string;
 
   try {
     raw = readFileSync(lockFile, "utf8");
   } catch (error) {
     if (isErrorWithCode(error, "ENOENT")) {
-      return null;
+      return { pid: null };
     }
 
     throw error;
   }
 
-  const firstLine = raw.split(LOCK_CONTENT_SEP, 2)[0]?.trim();
+  const [firstLine, , identityLine] = raw.split(LOCK_CONTENT_SEP).map((line) => line.trim());
   if (!firstLine) {
-    return null;
+    return { pid: null };
   }
 
   const pid = Number.parseInt(firstLine, 10);
-  return Number.isInteger(pid) && pid > 0 ? pid : null;
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return { pid: null };
+  }
+  if (!identityLine) {
+    return { pid };
+  }
+  try {
+    const identity = JSON.parse(identityLine) as unknown;
+    return { pid, identity: typeof identity === "object" && identity !== null ? identity as Partial<LockIdentity> : {} };
+  } catch {
+    // An unreadable identity matches nothing, so the lock is stale.
+    return { pid, identity: {} };
+  }
 }
 
 function clearStaleRuntimeLock(lockFile: string): void {

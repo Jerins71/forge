@@ -24,7 +24,7 @@ Manager prompts receive `common.md`, the canonical profile `memory.md`, and the 
 
 ## History recall
 
-Transcript history preserves messages and tool results. Local Builder managers and ordinary workers can browse context windows, list earlier items, search, and read evidence with the agent-only `history` tool. The agent starts with the current session and associated workers, then widens to a project or explicitly selected session when needed. Searches outside the current project need a reason, without a separate approval prompt.
+Transcript history preserves messages and tool results. Local Builder managers and ordinary workers can browse context windows, list earlier items, search, and read evidence with the agent-only `history` tool. Recall covers the last 30 days; older history is neither indexed nor returned. The agent starts with the current session and associated workers, then widens to a project or explicitly selected session when needed. Searches outside the current project need a reason, without a separate approval prompt.
 
 Ranked word searches help discover related work. Literal search finds exact wording, paths, or errors. Results report incomplete coverage or bounded scans, so an empty partial result does not prove that evidence is absent. The agent should read relevant results and verify current state before acting.
 

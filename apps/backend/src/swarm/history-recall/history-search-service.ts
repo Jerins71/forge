@@ -52,7 +52,10 @@ import {
   sourcesFromCatalog,
 } from "./source-catalog.js";
 import {
+  BACKGROUND_SLICE_MS,
   BACKGROUND_SLICE_SOURCES,
+  HISTORY_RECALL_WINDOW_DAYS,
+  isWithinRecallWindow,
   DEFAULT_SEARCH_LIMIT,
   DEFAULT_SESSION_LIMIT,
   EMPTY_CATALOG,
@@ -64,6 +67,7 @@ import {
   MAX_SEARCH_LIMIT,
   MAX_SESSION_LIMIT,
   MAX_SNAPSHOT_HITS,
+  PRUNE_INTERVAL_MS,
   SCAN_BATCH_BYTES,
   SNAPSHOT_TTL_MS,
   type HistorySearchServiceHost,
@@ -99,12 +103,16 @@ export class HistorySearchService {
   private backgroundTimer: ReturnType<typeof setTimeout> | undefined;
   private backgroundRunning = false;
   private backgroundWake = false;
+  private backgroundRestUntil = 0;
   private readonly searchSnapshots = new Map<string, SnapshotPage<HistorySearchHit>>();
   private readonly sessionSnapshots = new Map<string, SnapshotPage<HistorySessionHit>>();
   private activeCursor = 0;
   private archivalCursor = 0;
   private catalogNeedsDiscovery = true;
   private readonly undiscoveredSourceIds = new Set<string>();
+  /** Indexed sources no longer in the catalog, deleted one batch per slice. */
+  private readonly orphanSourceIds = new Set<string>();
+  private nextPruneAt = 0;
   private preferReady = false;
 
   private readonly preferences: HistoryIndexPreferences;
@@ -130,7 +138,8 @@ export class HistorySearchService {
     return {
       paused: this.preferences.paused,
       activity: this.preferences.paused ? "paused" : !statistics ? "unavailable" : !this.started ? "starting"
-        : statistics.runnableSources > 0 || this.undiscoveredSourceIds.size > 0 || this.dirtySourceIds.size > 0 ? "indexing" : this.catalog.hydration !== "complete" ? "starting" : "idle",
+        : statistics.runnableSources > 0 || this.undiscoveredSourceIds.size > 0 || this.dirtySourceIds.size > 0
+          || this.orphanSourceIds.size > 0 || this.nextPruneAt === 0 ? "indexing" : this.catalog.hydration !== "complete" ? "starting" : "idle",
       catalogHydration: this.catalog.hydration,
       eligibleSources: this.catalog.hydration === "complete" ? sources.length : null,
       schemaVersion: INDEX_SCHEMA_VERSION, statistics,
@@ -200,7 +209,7 @@ export class HistorySearchService {
     const sourceId = `${source.sessionAgentId}:${source.actorAgentId}`;
     this.canonical.clear();
     await this.runExclusive((store) => {
-      store.purgeSource(sourceId);
+      store.retireSource(sourceId);
     }).catch(() => undefined);
     this.dirtySourceIds.add(sourceId);
     if (this.started) {
@@ -426,6 +435,7 @@ export class HistorySearchService {
       if (!projected || projected.entryId !== ref.entryId || this.currentSourceGeneration(source) !== generation) {
         throw new HistoryRecallError("History reference is stale or does not identify this row", 409);
       }
+      if (!isWithinRecallWindow(projected.parts[0]?.timestamp)) throw outsideRecallWindow();
       const selected = selectReadParts(projected.parts, ref.partId, ref.chunkIndex);
       const combined = combineReadParts(projected, selected);
       const entry = this.toReadEntry(
@@ -456,13 +466,16 @@ export class HistorySearchService {
       if (!indexed) {
         throw new HistoryRecallError("History entry not found", 404);
       }
+      if (!isWithinRecallWindow(indexed.timestamp)) throw outsideRecallWindow();
       if (ref.partId) {
         const parts = store.listIndexedParts(source.sourceId, ref.entryId);
         if (!parts.some((part) => part.part_id === ref.partId && (ref.chunkIndex === undefined || part.chunk_index === ref.chunkIndex))) {
           throw new HistoryRecallError("History part was not found on this entry", 404);
         }
       }
-      const neighbors = store.listNeighbors(source.sourceId, indexed.byte_offset, clampNeighbors(request.before), clampNeighbors(request.after), indexed);
+      const listed = store.listNeighbors(source.sourceId, indexed.byte_offset, clampNeighbors(request.before), clampNeighbors(request.after), indexed);
+      const recent = (row: EntryRow) => isWithinRecallWindow(row.timestamp);
+      const neighbors = { before: listed.before.filter(recent), after: listed.after.filter(recent) };
       const budget = { remaining: MAX_READ_RESPONSE_CHARS };
       const warnings: string[] = [];
       const main = this.readIndexedEntry(source, generation, indexed, request, budget, warnings);
@@ -484,8 +497,9 @@ export class HistorySearchService {
     this.assertOpen();
     this.canonical.clear();
     await this.runExclusive((store) => {
-      store.purgeSession(sessionAgentId);
+      store.retireSession(sessionAgentId);
     });
+    this.scheduleBackground(0);
   }
 
   async dispose(): Promise<void> {
@@ -554,6 +568,8 @@ export class HistorySearchService {
     if (this.backgroundRunning) {
       return;
     }
+    // Wakeups never cut a rest short; the rest is what keeps the server responsive.
+    const restMs = this.backgroundRestUntil - performance.now();
     if (this.backgroundTimer) {
       if (delayMs === 0) {
         clearTimeout(this.backgroundTimer);
@@ -565,7 +581,7 @@ export class HistorySearchService {
     this.backgroundTimer = setTimeout(() => {
       this.backgroundTimer = undefined;
       void this.runBackgroundTick();
-    }, delayMs);
+    }, Math.max(delayMs, restMs));
     this.backgroundTimer.unref?.();
   }
 
@@ -584,7 +600,19 @@ export class HistorySearchService {
     this.backgroundWake = false;
     let pendingWork = false;
     try {
-      pendingWork = await this.runExclusive((store) => this.preferences.paused ? false : this.runBackgroundSlice(store));
+      pendingWork = await this.runExclusive((store) => {
+        if (this.preferences.paused) return false;
+        const sliceStarted = performance.now();
+        try {
+          return this.runBackgroundSlice(store);
+        } finally {
+          // A slice that overran its budget (a large SQLite merge or purge) is
+          // followed by an equal rest, so indexing never takes more than half of
+          // the event loop and startup, health, and sessions keep running.
+          const elapsed = performance.now() - sliceStarted;
+          this.backgroundRestUntil = elapsed > BACKGROUND_SLICE_MS ? performance.now() + elapsed : 0;
+        }
+      });
       this.backgroundError = null;
     } catch {
       this.backgroundError = "Indexing could not complete a batch. Forge will retry automatically.";
@@ -605,7 +633,8 @@ export class HistorySearchService {
     if (this.catalogNeedsDiscovery) {
       const indexed = new Set(store.listIndexedSourceIds());
       if (this.catalog.hydration === "complete") {
-        for (const id of indexed) if (!byId.has(id)) store.purgeSource(id);
+        for (const id of indexed) if (!byId.has(id)) this.orphanSourceIds.add(id);
+        for (const id of this.orphanSourceIds) if (byId.has(id)) this.orphanSourceIds.delete(id);
         for (const id of this.undiscoveredSourceIds) if (!byId.has(id)) this.undiscoveredSourceIds.delete(id);
       }
       for (const source of catalogSources) if (!indexed.has(source.sourceId)) this.undiscoveredSourceIds.add(source.sourceId);
@@ -640,7 +669,15 @@ export class HistorySearchService {
       }
     }
     let remaining = MAX_INDEX_CATCHUP_BYTES;
-    const deadline = performance.now() + 25;
+    const deadline = performance.now() + BACKGROUND_SLICE_MS;
+    // Removal is one bounded batch per slice: sources that left the catalog
+    // (deleted, or past the recall window) first, then rows that aged out.
+    const orphan = this.orphanSourceIds.values().next().value;
+    if (orphan !== undefined) {
+      if (store.purgeSourceSlice(orphan)) this.orphanSourceIds.delete(orphan);
+    } else if (performance.now() >= this.nextPruneAt) {
+      this.nextPruneAt = store.pruneExpiredRows() ? 0 : performance.now() + PRUNE_INTERVAL_MS;
+    }
     for (const source of queue) {
       if (remaining <= 0 || performance.now() >= deadline) break;
       const result = store.ingestSource(source, Math.min(remaining, SCAN_BATCH_BYTES));
@@ -650,7 +687,8 @@ export class HistorySearchService {
       this.dirtySourceIds.delete(source.sourceId);
       this.undiscoveredSourceIds.delete(source.sourceId);
     }
-    return [...this.dirtySourceIds, ...this.undiscoveredSourceIds].some((id) => byId.has(id)) || store.readySourceIds(1, readyScope).length > 0;
+    return this.orphanSourceIds.size > 0 || this.nextPruneAt === 0
+      || [...this.dirtySourceIds, ...this.undiscoveredSourceIds].some((id) => byId.has(id)) || store.readySourceIds(1, readyScope).length > 0;
   }
 
   private ensureStore(): void {
@@ -1259,4 +1297,8 @@ function filterActor(sources: HistorySourceDescriptor[], actorAgentId: string | 
   const selected = sources.filter(source => source.actorAgentId === actorAgentId);
   if (!selected.length) throw new HistoryRecallError("Requested actor is not available in this history scope", 404);
   return selected;
+}
+
+function outsideRecallWindow(): HistoryRecallError {
+  return new HistoryRecallError(`History recall covers only the last ${HISTORY_RECALL_WINDOW_DAYS} days; this entry is older`, 404);
 }
