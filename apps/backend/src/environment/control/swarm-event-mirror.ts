@@ -1,3 +1,4 @@
+import type { DetailHistoryWindow } from "../streams/stream-types.js";
 import { loadState } from "./orchestration/store.js";
 import { projectLifecycleStatus, projectWorkerStatus, workerCreatedAt } from "./orchestration/lifecycle-projection.js";
 import { requestForChoice, requestAttention, withChoiceTimes } from "./orchestration/request-projection.js";
@@ -38,6 +39,8 @@ export interface SwarmEventMirror {
   attach(): void;
   reconcileBeforeReady(): Promise<void>;
   ensureDetailInitialized(sessionId: string): Promise<{ historyCursor: string | null }>;
+  /** Read the final canonical head and its cursor inside the detail snapshot barrier. */
+  readDetailWindow(sessionId: string): DetailHistoryWindow;
   /** Settles once an acknowledged launch has its swarm session, or at once when none is pending. */
   launchMaterialized(sessionId: string): Promise<void>;
   readHistory(principal: Principal, input: RpcInput<"session.history">): Promise<RpcOutput<"session.history">>;
@@ -231,12 +234,14 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
   function saveHistoryCursor(state: HistoryState): string | null {
     if (state.sources.every(source => source.cursor === null)) return null;
     const cursor = `history:${randomUUID()}`;
-    eventSink.transaction(() => {
+    const write = () => {
       // Opaque source locators survive restart, without placing per-worker cursor state on the wire.
       recordSource(cursor, { generation: "history-v1", size: 0 }, JSON.stringify(state));
       database.prepare("DELETE FROM mirror_sources WHERE source_key LIKE 'history:%' AND updated_at<?").run(Date.now() - 7 * 86_400_000);
       database.prepare("DELETE FROM mirror_sources WHERE source_key IN (SELECT source_key FROM mirror_sources WHERE source_key LIKE 'history:%' ORDER BY updated_at DESC LIMIT -1 OFFSET 10000)").run();
-    });
+    };
+    // Detail snapshots already hold the shared database barrier. Cursor metadata emits no events.
+    if (database.inTransaction) write(); else eventSink.transaction(write);
     return cursor;
   }
   function historyWindow(sessionId: string, turns: number, state?: HistoryState): { rows: CanonicalRow[]; next: HistoryState } {
@@ -443,6 +448,11 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
         } else { initialized.add(sessionId); for (const actor of sources) tail(actor); }
         return { historyCursor: saveHistoryCursor(recent.next) };
       })().finally(() => initializing.delete(sessionId)); initializing.set(sessionId, work); return work;
+    },
+    readDetailWindow(sessionId) {
+      const window = historyWindow(sessionId, 20);
+      return { historyCursor: saveHistoryCursor(window.next),
+        items: window.rows.map(row => ({ ...row.projected, artifacts: (wireProjection.artifacts?.(row.entry, sessionId) ?? []).slice(0, 20) })) };
     },
     async readHistory(principal, input) {
       authorizeRead(principal, input.sessionId);

@@ -62,11 +62,13 @@ export function createDetailStream(deps: StreamDependencies) {
             const row = deps.database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(input.sessionId, type) as { payload_json: string } | undefined;
             return row ? JSON.parse(row.payload_json).snapshot : undefined;
           };
+          // One canonical policy chooses both the head and its cursor at this barrier, after any tails.
+          const window = deps.readDetailWindow?.(input.sessionId);
           const snapshot: DetailSnapshot = {
             lineage: lineageSnapshot(loadState(deps.database),input.sessionId),
             plan: feature("plan.upsert"), goal: feature("goal.upsert"), recovery: deps.recovery?.() ?? null,
-            session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId).map(item => projectDetailItem(item)),
-            workers: workers.workers, choices, historyCursor: initialized?.historyCursor ?? null, workersCursor: workers.nextPage,
+            session: requireSession(input.sessionId), items: recentItems(deps.database, input.sessionId, window?.items).map(item => projectDetailItem(item)),
+            workers: workers.workers, choices, historyCursor: window ? window.historyCursor : initialized?.historyCursor ?? null, workersCursor: workers.nextPage,
           };
           // Keep closed question history within the existing metadata budget; pending requests stay mandatory.
           while (choices.length > pendingChoices && encodedBytes({ ...snapshot, items: snapshot.items.map(item => ({ ...item, text: "" })) }) > SNAPSHOT_BYTES - 1024) choices.pop();

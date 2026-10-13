@@ -251,3 +251,66 @@ describe('native session state controls', () => {
     expect(facade.getState().unreadCounts['session-1'] ?? 0).toBe(before)
   })
 })
+
+// Older-page races may overlap a current snapshot or a row updated while the request was pending.
+it('prepends only unseen conversation and activity IDs, preserving live row updates', async () => {
+  const { server, client, facade } = await environment()
+  const snapshot = structuredClone(server.seed.details!['session-1']!)
+  const reply = { ...snapshot.items[0], text: 'current reply' }
+  const activity = { ...reply, itemId: 'activity-1', kind: 'activity' as const, text: 'completed now' }
+  snapshot.items = [reply, activity]
+  snapshot.historyCursor = 'older-page'
+  server.emit({ kind: 'snapshot', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 10, snapshot }, 'session.subscribe')
+  await until(() => facade.getState().conversationPage?.nextCursor === 'older-page')
+  let complete!: (page: unknown) => void
+  const request = vi.spyOn(client, 'request').mockImplementationOnce(() => new Promise(resolve => { complete = resolve }) as never)
+  const loading = facade.loadOlderConversation()
+  server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 11, event: { type: 'item.upsert', item: { ...reply, text: 'updated while paging' } } }, 'session.subscribe')
+  await until(() => facade.getState().messages.some(message => message.type === 'conversation_message' && message.text === 'updated while paging'))
+  const oldest = { ...reply, itemId: 'oldest', kind: 'user' as const, text: 'first user' }
+  complete({ sequence: 11, streamEpoch: server.seed.descriptor.streamEpoch, items: [oldest, oldest, { ...reply, text: 'stale reply' }, { ...activity, text: 'stale activity' }], nextCursor: null })
+  await loading
+  request.mockRestore()
+  const state = facade.getState()
+  expect(state.messages.filter(message => message.type === 'conversation_message').map(message => ({ id: message.id, text: message.text }))).toEqual([
+    { id: 'oldest', text: 'first user' }, { id: reply.itemId, text: 'updated while paging' },
+  ])
+  expect(state.activityMessages).toHaveLength(1)
+  expect(state.activityMessages[0]).toMatchObject({ timelineEntryId: 'activity-1', displaySummary: 'completed now' })
+  expect(state.conversationPage?.hasOlder).toBe(false)
+})
+
+it('keeps older rows and the oldest loaded cursor across live detail updates', async () => {
+  const { server, client, facade } = await environment()
+  const snapshot = structuredClone(server.seed.details!['session-1']!)
+  snapshot.historyCursor = 'initial-window'
+  server.emit({ kind: 'snapshot', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 10, snapshot }, 'session.subscribe')
+  await until(() => facade.getState().conversationPage?.nextCursor === 'initial-window')
+  const oldest = { ...snapshot.items[0], itemId: 'first-user', kind: 'user' as const, text: 'older loaded user' }
+  const request = vi.spyOn(client, 'request').mockResolvedValueOnce({ sequence: 10, streamEpoch: server.seed.descriptor.streamEpoch, items: [oldest], nextCursor: 'oldest-loaded-page' } as never)
+  await facade.loadOlderConversation()
+  request.mockRestore()
+  server.emit({ kind: 'event', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 11, event: { type: 'item.upsert', item: { ...snapshot.items[0], text: 'new live text' } } }, 'session.subscribe')
+  await until(() => facade.getState().messages.some(message => message.type === 'conversation_message' && message.text === 'new live text'))
+  expect(facade.getState().messages.some(message => message.type === 'conversation_message' && message.id === oldest.itemId)).toBe(true)
+  expect(facade.getState().conversationPage?.nextCursor).toBe('oldest-loaded-page')
+})
+
+it('drops an older result when the viewed session changes before the detail mount catches up', async () => {
+  const { server, client, facade } = await environment()
+  facade.setViewedSession('session-1')
+  const snapshot = structuredClone(server.seed.details!['session-1']!)
+  snapshot.historyCursor = 'session-1-window'
+  server.emit({ kind: 'snapshot', streamEpoch: server.seed.descriptor.streamEpoch, sequence: 10, snapshot }, 'session.subscribe')
+  await until(() => facade.getState().conversationPage?.nextCursor === 'session-1-window')
+  let complete!: (page: unknown) => void
+  const request = vi.spyOn(client, 'request').mockImplementationOnce(() => new Promise(resolve => { complete = resolve }) as never)
+  const loading = facade.loadOlderConversation()
+  facade.setViewedSession('session-2')
+  complete({ sequence: 10, streamEpoch: server.seed.descriptor.streamEpoch, items: [{ ...snapshot.items[0], itemId: 'foreign-old-row', text: 'Only session one owns this text' }], nextCursor: null })
+  const result = await loading
+  request.mockRestore()
+  expect(result).toBeNull()
+  expect(facade.getState().messages.some(message => message.type === 'conversation_message' && message.id === 'foreign-old-row')).toBe(false)
+  expect(facade.getState().conversationPage).toBeNull()
+})

@@ -7,3 +7,9 @@ export type ShellEvent = Static<typeof ShellEventSchema>;
 export type DetailEvent = Static<typeof DetailEventSchema>;
 export type WorkerSummary = Static<typeof WorkerSummarySchema>;
 export type ChoiceSummary = Static<typeof ChoiceSummarySchema>;
+
+/** The canonical window and the cursor that starts immediately before it. */
+export interface DetailHistoryWindow {
+  historyCursor: string | null;
+  items: DetailItem[];
+}
