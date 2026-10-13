@@ -13,6 +13,9 @@ import { PrimaryBrowserAutomationHost, type BrowserAutomationHostHandle } from '
 import { BrowserPreviewSurface } from '@/components/browser/BrowserPreviewSurface'
 import { BrowserPanel, BrowserUnavailableOnRemote, type BrowserWorkspaceCommandPort } from '@/components/browser/BrowserPanel'
 import { countOpenBrowserTabs, projectRuntimeBrowserTabState } from '@/components/browser/browser-runtime-state'
+import { BrowserDock, BrowserPanelToggle } from '@/components/browser-panel/BrowserDock'
+import { useBrowserPanelOpen } from '@/components/browser-panel/browser-panel-layout'
+import { useBrowserPanelPort } from '@/components/browser-panel/use-browser-panel-port'
 import type { ManagedBrowserWorkspaceMode } from '@/lib/electron-bridge'
 import { ArchiveView } from '@/components/index-page/ArchiveView'
 import { type MessageSourceView } from '@/components/chat/ChatHeader'
@@ -731,6 +734,11 @@ export function BuilderSurface({
   const browserSessionSnapshot = browserSessionAgentId
     ? state.browserSessions[browserSessionAgentId] ?? null
     : null
+
+  // ── Browser panel: the session's tabs, docked to the right of the chat ──
+  const browserPanelSessionKey = activeAgentId ? `${selectedEnvironmentId ?? 'local'}:${activeAgentId}` : null
+  const browserPanelPort = useBrowserPanelPort({ environmentClient, sessionId: activeAgentId, isPrimary: isPrimarySelected })
+  const [isBrowserPanelOpen, setBrowserPanelOpen] = useBrowserPanelOpen(browserPanelPort ? browserPanelSessionKey : null)
 
   // ── Workspace panels (file browser / diff viewer / artifacts / activity rail) ──
   const panels = useWorkspacePanels({
@@ -2480,6 +2488,9 @@ export function BuilderSurface({
                   onToggleFileBrowser: panels.handleGuardedToggleFileBrowser,
                   onToggleMobileSidebar: () =>
                     panels.setIsMobileSidebarOpen((previous) => !previous),
+                  browserToggle: browserPanelPort ? (
+                    <BrowserPanelToggle port={browserPanelPort} open={isBrowserPanelOpen} onToggle={() => setBrowserPanelOpen(!isBrowserPanelOpen)} />
+                  ) : null,
                   showDesktopWorkspaceActions: !showActivityRail,
                   sessionFeedbackVote: isActiveManager && activeAgentId ? feedback.getVote(activeAgentId) : null,
                   sessionFeedbackHasComment: isActiveManager && activeAgentId ? feedback.hasComment(activeAgentId) : false,
@@ -2688,6 +2699,15 @@ export function BuilderSurface({
               <SideChatPanel {...sideChatPanelProps} />
             ) : null}
           </div>
+
+          {activeView === 'chat' && !panels.isInlineDiffViewerOpen && browserPanelPort && browserPanelSessionKey ? (
+            <BrowserDock
+              port={browserPanelPort}
+              sessionKey={browserPanelSessionKey}
+              open={isBrowserPanelOpen}
+              onOpenChange={setBrowserPanelOpen}
+            />
+          ) : null}
 
           {activeView === 'chat' && !panels.isInlineDiffViewerOpen && sideChat.isOpen && sideChat.isExpanded ? (
             <SideChatPanel {...sideChatPanelProps} />

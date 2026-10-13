@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { ArrowLeftRight, ClipboardList, FolderOpen, GitBranch, GitMerge, Loader2, Menu, Minimize2, MoreHorizontal, Package, ScrollText, Sparkles, Square, SquareTerminal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -108,6 +108,8 @@ interface ChatHeaderProps {
   onToggleFileBrowser?: () => void
   fileBrowserAvailable?: boolean
   onToggleMobileSidebar?: () => void
+  /** The Browser panel toggle; shown on every width, beside the actions menu. */
+  browserToggle?: ReactNode
   /** When false, desktop header workspace actions (terminal, files, changes, artifacts) are hidden. Mobile always shows them. */
   showDesktopWorkspaceActions?: boolean
   sessionFeedbackVote?: 'up' | 'down' | null
@@ -210,6 +212,7 @@ export function ChatHeader({
   onToggleFileBrowser,
   fileBrowserAvailable = true,
   onToggleMobileSidebar,
+  browserToggle,
   showDesktopWorkspaceActions = true,
   sessionFeedbackVote,
   sessionFeedbackHasComment,
@@ -464,6 +467,8 @@ export function ChatHeader({
             />
           </>
         ) : null}
+
+        {browserToggle}
 
         {/* ── Three-dots dropdown: secondary actions ── */}
         {(compact || showCompact || showNewChat || showStopAll || mergeBack || (showSessionAudit && onOpenSessionAudit)) ? (

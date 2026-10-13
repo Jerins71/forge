@@ -143,6 +143,8 @@ export interface ElectronBridge {
   openReleaseNotes?(): Promise<void>
   platform: string
   browserAutomation?: BrowserAutomationBridge
+  /** Places the primary environment's native browser tab under the browser panel. */
+  browserEngine?: import('@forge/protocol').BrowserEngineDesktopBridge
   browserPreview?: BrowserPreviewBridge
   browserWorkspace?: BrowserWorkspaceBridge
   externalChrome?: ExternalChromeBridge
