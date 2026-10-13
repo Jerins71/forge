@@ -7,8 +7,9 @@ import { launchFleet, readManifest, verifyFleetHealth, repositoryRoot } from '..
 const BACKEND_ENTRIES: Record<string, string> = { 'lineage-ui': 'lineage-backend-process.ts', activity: 'claude-backend-process.ts' };
 /** The browser suite reuses one pinned headless Chrome download across runs (gitignored), and points
  * Import from Chrome at a seeded throwaway Chrome profile; test fleets never read the user's own. */
+export const BROWSER_E2E_BROWSER_CACHE = join(repositoryRoot, '.internal/browser-engine/runtime');
 export const BROWSER_E2E_CHROME_PROFILE = join(repositoryRoot, '.internal/browser-e2e-chrome');
-const BACKEND_ENV: Record<string, NodeJS.ProcessEnv> = { browser: { FORGE_BROWSER_CACHE_DIR: join(repositoryRoot, '.internal/browser-engine-runtime'), FORGE_BROWSER_TEST_CHROME_PROFILE: BROWSER_E2E_CHROME_PROFILE } };
+const BACKEND_ENV: Record<string, NodeJS.ProcessEnv> = { browser: { FORGE_BROWSER_CACHE_DIR: BROWSER_E2E_BROWSER_CACHE, FORGE_BROWSER_TEST_CHROME_PROFILE: BROWSER_E2E_CHROME_PROFILE } };
 
 /** Suite options force separate workers: destructive slice scenarios cannot contaminate UI/load. */
 export const test = base.extend<{ environmentFailure: void }, { environmentSuite: string; environmentManifest: string }>({

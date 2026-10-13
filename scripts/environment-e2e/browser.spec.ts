@@ -12,7 +12,8 @@
 // and Keychain refusals, skipped sites) drive a mock engine in a separate browser context.
 // Screenshots land in .internal/browser-panel/.
 //   pnpm exec playwright test scripts/environment-e2e/browser.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
-import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { HeadlessBrowser } from '../../apps/backend/src/swarm/browser-automation/headless-browser.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 
 import { randomUUID } from 'node:crypto'
@@ -20,7 +21,7 @@ import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
 import { join } from 'node:path'
 import { chromium, expect, type BrowserContext, type Page } from '@playwright/test'
-import { test as base, BROWSER_E2E_CHROME_PROFILE } from './fixtures/test.js'
+import { test as base, BROWSER_E2E_CHROME_PROFILE, BROWSER_E2E_BROWSER_CACHE } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, sanitizedEnvironment, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
@@ -117,18 +118,10 @@ test.afterAll(async () => {
   fixtureChrome?.kill()
 })
 
-/** The pinned headless Chrome from the suite's cache. */
+/** The same verified runtime installer as the real fleet, including cold caches. */
 async function headlessChrome(): Promise<string> {
-  const root = join(repositoryRoot, '.internal/browser-engine-runtime')
-  for (const version of await readdir(root)) {
-    if (version.startsWith('.')) continue
-    for (const platform of await readdir(join(root, version)).catch(() => [] as string[])) {
-      for (const folder of await readdir(join(root, version, platform)).catch(() => [] as string[])) {
-        if (folder.startsWith('chrome-headless-shell')) return join(root, version, platform, folder, process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell')
-      }
-    }
-  }
-  throw new Error('The pinned headless Chrome is not cached yet; run the suite once with network access')
+  const browser = new HeadlessBrowser({ dataDir: join(repositoryRoot, '.internal/browser-e2e-runtime'), cacheDir: BROWSER_E2E_BROWSER_CACHE })
+  return browser.ensureExecutable()
 }
 /** A throwaway Chrome at the fleet's test profile, sharing its remote-debugging port as Chrome 144+ does. */
 async function startFixtureChrome(): Promise<ChildProcess> {
