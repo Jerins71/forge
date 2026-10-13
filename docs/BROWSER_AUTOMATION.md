@@ -1,5 +1,59 @@
 # Browser automation
 
+## V2 Playwright browser engine (replacement in progress)
+
+The environment backend owns one Playwright engine for both local and remote tabs.
+A tab belongs to a session; its persistent cookie profile belongs to the project on
+that machine. Agent tools and the right-side Browser panel address the same tab IDs.
+There are no browser leases, journals, or durable action receipts. A reconnect may
+resubscribe to state but never repeats page mutations. Only explicit user input in
+that tab cancels the agent action; opening the panel does not.
+
+The new environment-v2 contract is `browserEngine: true` in capabilities,
+`browser.tabs.{get,subscribe,open,activate,close,navigate,resize,input}` and
+`browser.tabs.recording.{start,stop}`. Every call carries `sessionId`; tab actions
+also carry `tabId`. `navigate` takes either `url` or `direction` (`back`, `forward`,
+`reload`). Tabs report `host: desktop | headless`, viewport and navigation state.
+The tabs stream starts with a snapshot and publishes replacement snapshots.
+Actions return current state directly and require `session:operate`; reads require
+`session:read`. The old singular `browser.tab.*` path is removed after acceptance.
+
+Electron owns extension-free WebContentsViews in persistent project partitions.
+Its existing backend fork IPC is the private CDP relay channel. Playwright's public
+`connectOverCDP` needs a WebSocket endpoint: the backend bridges that to a private
+Unix-domain socket (Windows named pipe), never a TCP port, and accepts only its
+one Playwright connection. This corrects the reference implementation's transient
+loopback TCP listener while retaining its per-page CDP relay pattern. A backend
+without its Electron parent launches a pinned Chrome for Testing headless shell in
+its own data directory, with the Chromium sandbox enabled. No automation masking
+flags are required.
+
+Desktop renderers use `electronBridge.browserEngine.present({tabId,bounds})` and
+`hide()` to place the actual native view. Remote and web-only clients subscribe to
+`browser.screencast.subscribe({sessionId,tabId,maxWidth?,maxHeight?,quality?})`.
+Frames contain bounded JPEG base64, dimensions, timestamp and `frameId`; after
+rendering a frame, acknowledge it with `browser.screencast.ack({subscriptionId,
+frameId})`. The subscription ID is supplied by the environment stream observer.
+At most one unacknowledged frame is delivered per viewer. Frames remain in memory;
+the existing authenticated RPC connection provides transport and backpressure.
+Mouse, wheel, key and text input use the discriminated `browser.tabs.input` schema.
+
+`browser.cookies.preview({sessionId,source})` reads running Chrome via its explicit
+Chrome 144+ inspect toggle (`chrome-running`) or the macOS/Linux cookie database
+fallback (`chrome-database`). It returns only an expiring import ID and site counts
+grouped by eTLD+1, or a typed error (including Files & Folders denial and a settings
+link). `apply({sessionId,importId,domains})` writes only selected sites. The audit
+and `forget` APIs keep site names and counts, never decrypted values. Windows
+supports only running Chrome. Nothing copies Login Data or a whole Chrome profile.
+
+Explicit cross-environment cookie sending is opt-in: `prepareSend` consumes the
+selected domains from an import and returns a one-time in-memory transfer;
+`receive` writes it on the chosen authenticated target environment. Clients must
+never persist, log or include the transfer in history/artifacts. Import/apply on
+one environment does not otherwise forward profile data to any other machine.
+
+The separate CLI-based agent-browser skill has its own browser lifecycle.
+
 Forge Desktop exposes one protocol-v2 **Automatic Browser Host** to normal local Builder managers. The host privately runs each logical tab on either Forge's embedded Electron browser or the optional Chrome adapter. This is not a user- or caller-selected host preference, and neither target kind is a Skill.
 
 Automatic Browser and External Chrome remain supported on Windows, but the Windows experience is beta and has known issues. Hash pinning, signed-package checks, and the rest of the security contract are unchanged.

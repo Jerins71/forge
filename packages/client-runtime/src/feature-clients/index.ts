@@ -1,3 +1,4 @@
+import { createBrowserEngineClient } from './browser-engine.js'
 import { createBrowserHostClient } from './browser-host.js'
 import type {
   ProjectAgentReferenceWrite, ProjectAgentReferenceDelete, ProjectAgentReferenceMutationResult,
@@ -341,6 +342,7 @@ export interface EnvironmentFeatureClients {
     ): Promise<TerminalIssueTicketResponse>
   }
   /** Desktop's embedded browser host. Attach only on the primary environment; the subscription is the host connection. */
+  browserEngine: ReturnType<typeof createBrowserEngineClient>
   browserHost: ReturnType<typeof createBrowserHostClient>
 
 }
@@ -692,6 +694,7 @@ export function createFeatureClients(
       ticket: (terminalId, i) =>
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
     },
+    browserEngine: createBrowserEngineClient(rpc),
     browserHost: createBrowserHostClient(rpc),
 
   }

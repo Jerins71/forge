@@ -81,3 +81,5 @@ export * from "./openrouter-routing.js";
 export * from './project-agent-v2.js'
 export type * from './managed-hosts.js'
 export * from "./orchestration.js";
+
+export * from "./browser-engine-v2.js";

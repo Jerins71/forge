@@ -9,3 +9,5 @@ export * from './registry.js'
 export * from './drafts.js'
 export { retryDelayMs } from './connection/supervisor.js'
 export * from './receipts.js'
+
+export * from './feature-clients/browser-engine.js'
