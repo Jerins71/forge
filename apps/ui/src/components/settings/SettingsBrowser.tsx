@@ -187,8 +187,8 @@ function SignedInSites({ engine, environmentId, machine, project }: {
     <>
       <SettingsSection
         label="Signed-in sites"
-        description={<>Sites <span className="font-medium text-foreground">{project.title}</span>’s browser is signed in to. Forget a site to sign this project out of it.</>}
-        cta={<Button size="sm" variant="secondary" onClick={() => setImportOpen(true)}>Import from Chrome…</Button>}
+        description={<>Sites <span className="font-medium text-foreground">{project.title}</span>’s browser is signed in to. Forget a site to sign this project out of it.{engine.canImport ? null : <> Importing from Chrome needs this app’s <span className="font-medium text-foreground">Change settings</span> permission for this machine.</>}</>}
+        cta={<Button size="sm" variant="secondary" onClick={() => setImportOpen(true)} disabled={!engine.canImport}>Import from Chrome…</Button>}
       >
         {error ? <p role="alert" className="text-[12.5px] text-destructive">{error}</p> : null}
         {sites === null && !error ? (

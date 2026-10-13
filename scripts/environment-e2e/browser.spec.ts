@@ -387,5 +387,21 @@ test.describe('states the engine cannot produce on demand yet (mock engine)', ()
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('old-forum.example')
     await expect(dialog.getByTestId('browser-import-skipped')).toContainText('expired')
     await shot(page, 'import-skipped')
+    await page.keyboard.press('Escape')
+
+    // Closing the dialog after reading sites releases that preview on the machine at once.
+    await page.getByRole('button', { name: 'Import from Chrome…' }).click()
+    await dialog.getByRole('button', { name: 'Show sites' }).click()
+    await expect(dialog.locator('[data-site]').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(dialog).toHaveCount(0)
+    await expect.poll(() => mock(`engine.settings.calls.filter(call => call.method === 'cancel').length`)).toBe(1)
+
+    // Without Change settings for this machine, importing is unavailable and says why.
+    await mock(`(engine.settings.canImport = false, true)`)
+    await reopenTab()
+    await expect(page.getByRole('button', { name: 'Import from Chrome…' })).toBeDisabled()
+    await expect(page.getByTestId('settings-browser')).toContainText('needs this app’s Change settings permission')
+    await mock(`(engine.settings.canImport = true, true)`)
   })
 })

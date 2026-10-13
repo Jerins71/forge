@@ -14,6 +14,8 @@ export interface MockBrowserSettingsState {
   /** Domains the engine skips on import. */
   skip: string[]
   calls: Array<{ environmentId: string; method: string; domains?: string[] }>
+  /** False models a pairing without Change settings. */
+  canImport?: boolean
 }
 
 const DAY = 86_400_000
@@ -82,6 +84,8 @@ export function createMockBrowserSettingsEngine(port: MockBrowserPanelPort, envi
       return { transferId: `mock-transfer-${Date.now()}`, expiresAt: new Date(Date.now() + 60_000).toISOString(), domains, cookies: [] }
     },
     async receive(_sessionId, transfer) { log('receive', transfer.domains); return wait(write(transfer.domains)) },
+    async cancel(_sessionId, importId) { log('cancel', [importId]) },
+    get canImport() { return state.canImport !== false },
     async openTab(_sessionId, url) { log('openTab'); await port.open(url) },
   }
 }
