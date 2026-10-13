@@ -81,7 +81,7 @@ export async function serveBackend(options: ServeOptions): Promise<number> {
           bootstrapReceived = true;
           if (timer) clearTimeout(timer);
           if (!m.grant?.pairingUrl || m.error) { fail(new Error('Private backend pairing bootstrap was rejected')); return; }
-          pendingWrite = (async () => { if (pairFile) { await pairFile.writeFile(m.grant!.pairingUrl! + '\n'); await pairFile.sync(); } else process.stderr.write(`Pair with this environment (expires in 60 seconds):\n${m.grant!.pairingUrl}\n`); wrotePair = true; })();
+          pendingWrite = (async () => { if (pairFile) { await pairFile.writeFile(m.grant!.pairingUrl! + '\n'); await pairFile.sync(); } else process.stderr.write(`Pair with this environment (works once, expires in 10 minutes; later links: forge pair-link):\n${m.grant!.pairingUrl}\n`); wrotePair = true; })();
           pendingWrite.catch(() => fail(new Error('Protected pairing output could not be written')));
         }
       });

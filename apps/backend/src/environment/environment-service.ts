@@ -23,6 +23,7 @@ import { createEnvironmentArtifactRoutes } from "../ws/http/routes/environment-a
 import { loadEnvironmentIdentity, EnvironmentIdentityMismatch, type IdentityOptions } from "./identity.js";
 import { createEnvironmentAccess, type EnvironmentAccess } from "./access/access-service.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
+import { startLocalPairingChannel } from "./access/local-pairing.js";
 import type { ExposurePolicy } from "./exposure-policy.js";
 import { loadState } from "./control/orchestration/store.js";
 import { createProjectPolicy } from "./control/project-policy.js";
@@ -57,6 +58,8 @@ export interface EnvironmentService {
     terminalTransport: ReturnType<typeof createTerminalRpcTransport>;
   };
   start(): void;
+  /** Opens the local `forge pair-link` channel once the public address is final. */
+  listenLocalPairing(): Promise<void>;
   stop(): Promise<void>;
 }
 export async function createEnvironmentService(options: {
@@ -183,6 +186,7 @@ export async function createEnvironmentService(options: {
     const source = mirror;
     const auth = access;
     let stopped = false;
+    let localPairing: Awaited<ReturnType<typeof startLocalPairingChannel>> | undefined;
     return {
       database,
       access: auth,
@@ -244,9 +248,14 @@ export async function createEnvironmentService(options: {
       start() {
         owner.effectWorker.start();
       },
+      async listenLocalPairing() {
+        if (stopped || localPairing) return;
+        localPairing = await startLocalPairingChannel({ dataDir: config.paths.dataDir, publicBaseUrl: exposure.publicBaseUrl, createGrant: (input) => auth.createLocalGrant(input) });
+      },
       async stop() {
         if (stopped) return;
         stopped = true;
+        await localPairing?.close().catch(() => {});
         await owner.controlService.close();
         await owner.effectWorker.stop();
         source.dispose();

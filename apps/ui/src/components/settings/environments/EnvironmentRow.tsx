@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowUpCircle, Check, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, Wrench, X } from 'lucide-react'
+import { ArrowUpCircle, Check, Link2, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, Wrench, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -22,6 +22,7 @@ import { useEnvironmentSelector } from '@/hooks/use-environment-selector'
 import { environmentLabel, hostOf, selectCachedAt, selectProjectCount, selectSessionCount } from './environment-runtime'
 import { formatAge } from './environment-status'
 import { useManagedHosts } from '@/lib/managed-hosts'
+import { PairEnvironmentDialog } from './PairEnvironmentDialog'
 
 export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
   const registry = useEnvironmentRegistry()
@@ -38,6 +39,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [repairOpen, setRepairOpen] = useState(false)
   const { bridge: managedBridge, statuses: managedStatuses } = useManagedHosts()
   const managed = managedStatuses.find((candidate) => candidate.environmentId === entry.environmentId) ?? null
   const managedAction = async (action: 'repair' | 'update') => {
@@ -45,6 +47,8 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
     const result = await managedBridge[action](managed.hostAlias)
     if (!result.ok) throw new Error(result.error.message)
   }
+  // A managed host re-pairs itself over SSH (Repair); any other lost pairing takes a new link.
+  const needsRepair = !entry.primary && !managed && (status.kind === 'revoked' || (status.kind === 'needs-pairing' && status.label !== 'HTTPS required'))
   const updateAvailable = Boolean(managed && (status.kind === 'update-required' || managed.desiredVersion && managed.desiredVersion !== managed.installedVersion))
 
   const run = async (action: string, task: () => Promise<void>) => {
@@ -101,7 +105,7 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
             </form>
           ) : (
             <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-[14px] font-medium text-foreground">{label}</span>
+              <span className="truncate text-[14px] font-medium text-foreground" data-testid="environment-name">{label}</span>
               {entry.primary ? <span className="shrink-0 rounded-md bg-primary/12 px-1.5 text-[10.5px] font-medium leading-[18px] text-primary">This machine</span> : null}
               <Button
                 type="button"
@@ -147,7 +151,12 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
               </Button>
             </>
           ) : null}
-          {entry.enabled && status.kind !== 'online' && status.kind !== 'connecting' ? (
+          {needsRepair ? (
+            <Button size="sm" variant="outline" className="gap-1" onClick={() => setRepairOpen(true)}>
+              <Link2 className="size-3.5" /> Re-pair
+            </Button>
+          ) : null}
+          {entry.enabled && !needsRepair && status.kind !== 'online' && status.kind !== 'connecting' ? (
             <Button
               size="sm"
               variant="ghost"
@@ -177,6 +186,14 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
         </div>
       </div>
       {error ? <p role="alert" className="mt-2 pl-12 text-xs text-danger">{error}</p> : null}
+
+      {needsRepair || repairOpen ? (
+        <PairEnvironmentDialog
+          open={repairOpen}
+          onOpenChange={setRepairOpen}
+          repair={{ environmentId: entry.environmentId, label, baseUrl: entry.baseUrl }}
+        />
+      ) : null}
 
       <AlertDialog open={confirmRemove} onOpenChange={setConfirmRemove}>
         <AlertDialogContent>

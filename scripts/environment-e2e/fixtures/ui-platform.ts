@@ -29,7 +29,8 @@ export function createFixturePlatform(environments: EnvironmentFixture[], primar
   const target = (id: string) => {
     const session = sessions.get(id);
     const environment = environments.find(environment => environment.environment?.environmentId === id);
-    if (!session || !environment) throw new Error('Unknown paired fixture target');
+    // Like Desktop main: an environment without a stored credential needs pairing.
+    if (!session || !environment) throw Object.assign(new Error('Environment needs pairing'), { code: 'UNAUTHENTICATED' });
     return { session, environment };
   };
   const metadata = (session: BootstrapSession) => {
@@ -86,6 +87,7 @@ export function createFixturePlatform(environments: EnvironmentFixture[], primar
       if (!response.ok) throw new Error('Artifact unavailable');
       return { bytes: [...new Uint8Array(await response.arrayBuffer())], mimeType: response.headers.get('content-type') ?? 'application/octet-stream', fileName: 'fixture' };
     } else throw new Error('Unknown fixture bridge operation');
+    if (response.status === 401) throw Object.assign(new Error('Environment needs pairing'), { code: 'UNAUTHENTICATED' });
     if (!response.ok) throw new Error(`Fixture platform HTTP ${response.status}`);
     return response.json();
   };

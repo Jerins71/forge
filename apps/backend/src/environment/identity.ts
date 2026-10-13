@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { hostname } from "node:os";
 import type Database from "better-sqlite3";
 import type { EnvironmentCapabilities, EnvironmentDescriptor } from "@forge/protocol/environment-v2";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
@@ -57,10 +58,14 @@ const capabilities: EnvironmentCapabilities = {
   contextTransfers: true,
   resendUndelivered: true,
 };
+/** A machine's short hostname ("dev1" for dev1.tailnet.ts.net), so paired environments are told apart. */
+export function defaultEnvironmentLabel(name: string): string {
+  return name.trim().split(".")[0]!.trim().slice(0, 80) || "Forge";
+}
 function describe(file: EnvironmentIdentityFile, options: IdentityOptions): EnvironmentIdentity {
   const descriptor: EnvironmentDescriptor = {
     environmentId: file.environmentId,
-    label: options.label ?? "Forge",
+    label: options.label ?? defaultEnvironmentLabel(hostname()),
     platform: {
       os: ["darwin", "linux", "win32"].includes(process.platform) ? (process.platform as "darwin" | "linux" | "win32") : "unknown",
       arch: process.arch,

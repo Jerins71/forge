@@ -188,7 +188,7 @@ function environmentRow(page: Page, environment: UiEnvironment) {
 }
 
 async function pairByLink(page: Page, pairingUrl: string) {
-  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(pairingUrl)
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
 }
@@ -231,7 +231,7 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
 
   const code = await fleet!.mintGrant(c, 'code')
   secrets.push(code.code!)
-  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('tab', { name: 'Address + code' }).click()
   await page.getByLabel('Environment address').fill(c.baseUrl)
   // Lowercase without hyphens is accepted as typed.
@@ -246,7 +246,7 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
   await expect(environmentRow(page, c)).toHaveAttribute('data-environment-status', 'online')
 
   // The link input is cleared once the dialog closes.
-  await page.getByRole('button', { name: 'Add environment' }).click()
+  await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('tab', { name: 'Pairing link', exact: true }).click()
   await expect(page.getByRole('textbox', { name: 'Pairing link', exact: true })).toHaveValue('')
   await page.getByRole('button', { name: 'Cancel' }).click()
@@ -1166,7 +1166,7 @@ test('v1 remote shows Update required, retains the managed SSH Update action, an
 test('9.2.9 revoking this device on C shows Revoked and leaves A/B online', async ({ page }) => {
   const { a, b, c } = fleet!
   await openEnvironmentsSettings(page)
-  await page.getByLabel('Environment to pair').click()
+  await page.getByLabel('Machine to share').click()
   await page.getByRole('option', { name: c.label }).click()
   const devices = page.getByRole('list', { name: `Devices paired with ${c.label}` })
   await devices.locator('li').filter({ hasText: 'This device' }).getByRole('button', { name: 'Revoke' }).click()

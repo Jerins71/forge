@@ -39,6 +39,7 @@ const VALUE_FLAG_OPTIONS = {
   '--instructions': 'instructions',
   '--answers': 'answers',
   '--pinned': 'pinned',
+  '--expires': 'expires',
 } as const satisfies Record<string, ValueOptionKey>
 
 type ValueFlag = keyof typeof VALUE_FLAG_OPTIONS
@@ -56,6 +57,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
     if (token === '--pair') { options.pair = true; continue }
     if (token === '--tailscale-serve') { options.tailscaleServe = true; continue }
+    if (token === '--code') { options.code = true; continue }
     if (token === '--json') {
       options.json = true
       continue

@@ -17,7 +17,8 @@ import {
 } from "@forge/protocol/environment-v2";
 import type { EnvironmentAccessPort, Principal } from "../control/control-types.js";
 import type { EnvironmentIdentity } from "../identity.js";
-import type { ExposurePolicy } from "../exposure-policy.js";
+import { detectExposureSuggestions, isLoopbackHost, type ExposurePolicy } from "../exposure-policy.js";
+import type { LocalPairingRequest, LocalPairingResult } from "./local-pairing.js";
 import { AccessStore, deviceView, type DeviceRow } from "./access-store.js";
 import { createEnvironmentRoutes } from "../../ws/http/routes/environment-routes.js";
 import { createEnvironmentAccessRoutes } from "../../ws/http/routes/environment-access-routes.js";
@@ -335,10 +336,33 @@ export function createEnvironmentAccess({
   /** Trusted parent channel/local runtime-lock owner only. Never route this method publicly or to renderer. */
   async function createBootstrapGrant(input: { reachableBaseUrl: string }) {
     return mintGrant(
-      { kind: "link", label: "Local host bootstrap", scopes: fullScopes, expiresInSeconds: 60, reachableBaseUrl: input.reachableBaseUrl },
+      { kind: "link", label: "Local host bootstrap", scopes: fullScopes, expiresInSeconds: 600, reachableBaseUrl: input.reachableBaseUrl },
       "@physical-parent",
       true,
     );
+  }
+  /** The address pairing links name; a loopback-only one works on this machine alone. */
+  function pairingAddress() {
+    const baseUrl = exposure.publicBaseUrl;
+    return { baseUrl, loopbackOnly: isLoopbackHost(new URL(baseUrl).hostname) };
+  }
+  async function pairingAddressInfo(p: Principal): Promise<RpcOutput<"access.pairing.address">> {
+    authorize(p, ["access:admin"]);
+    const address = pairingAddress();
+    return { ...address, ...(address.loopbackOnly ? await detectExposureSuggestions() : { tailscaleUrl: null, lanAddresses: [] }) };
+  }
+  /** Local data-directory owner only (the local pairing channel). Never route this publicly. */
+  async function createLocalGrant(input: LocalPairingRequest): Promise<LocalPairingResult> {
+    if (!input || typeof input !== "object") throw new AccessError("INVALID_INPUT", "Invalid pairing request");
+    const scopes = input.scopes ?? fullScopes;
+    if (!scopesValidator.Check(scopes)) throw new AccessError("INVALID_INPUT", `Scopes must be some of: ${fullScopes.join(", ")}`);
+    const expiresInSeconds = input.expiresInSeconds ?? 600;
+    if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 3600)
+      throw new AccessError("INVALID_INPUT", "Expiry must be between 1 and 60 minutes");
+    const label = typeof input.label === "string" && input.label.trim() ? input.label.trim().slice(0, 80) : "New device";
+    const address = pairingAddress();
+    const grant = mintGrant({ kind: input.kind ?? "link", label, scopes, expiresInSeconds, reachableBaseUrl: address.baseUrl }, "@local-owner");
+    return { grant, ...address };
   }
   function redeem(input: PairingExchange, origin: string | null): { result: PairingExchangeResult; token: string } {
     if (!exchangeValidator.Check(input)) throw new AccessError("INVALID_INPUT", "Invalid pairing exchange");
@@ -622,6 +646,9 @@ export function createEnvironmentAccess({
     registerResource,
     issueWsTicket,
     createBootstrapGrant,
+    createLocalGrant,
+    pairingAddress,
+    pairingAddressInfo,
     createChallenge,
     exchangeHttp,
     session,

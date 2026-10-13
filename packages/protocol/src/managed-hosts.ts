@@ -54,6 +54,18 @@ export interface ManagedHostAddInput {
   serviceName?: string
   remotePort?: number
 }
+/** A Forge found on an SSH host before installing; pairing with it avoids a second install. */
+export interface ExistingForgeInstall {
+  dataDir: string
+  /** Its runtime lock names a live process. */
+  running: boolean
+  /** It publishes the local pairing channel (`forge pair-link`), so a link can be issued over SSH. */
+  pairable: boolean
+  /** The address its links name, when pairable. */
+  publicUrl: string | null
+  /** HTTPS beyond the host's loopback, so this app can connect to it directly. */
+  reachable: boolean
+}
 export interface ManagedHostsBridge {
   add(input: ManagedHostAddInput): Promise<ManagedHostResult<ManagedHostStatus>>
   status(hostAlias?: string): Promise<ManagedHostResult<ManagedHostStatus[]>>
@@ -65,5 +77,9 @@ export interface ManagedHostsBridge {
       removed: boolean
     }>
   >
+  /** Looks for a Forge already on the host (running service, or a data directory). */
+  detect(hostAlias: string): Promise<ManagedHostResult<ExistingForgeInstall[]>>
+  /** Issues a one-time pairing link from a detected, running, reachable Forge on the host. */
+  pairingLink(hostAlias: string, dataDir: string): Promise<ManagedHostResult<{ pairingUrl: string }>>
   onChanged(listener: (statuses: ManagedHostStatus[]) => void): () => void
 }

@@ -17,6 +17,7 @@ Global options:
 Commands:
   serve [--backend-entry <absolute-file>] [--host <address>] [--port <n>] [--data-dir <absolute-directory>] [--pair --pair-output <absolute-file>]
   pair <url-or-host> [--credential-file <absolute-file>]
+  pair-link [--data-dir <absolute-directory>] [--code] [--scopes <comma-separated>] [--label <name>] [--expires 10m]
   environment rekey|adopt|restore --data-dir <absolute-directory>
   status
   doctor
@@ -51,6 +52,8 @@ export function commandHelp(command: string | undefined): string {
       return 'Usage: forge serve [--backend-entry <absolute-file>] [--host <address>] [--port <0..65535>] [--data-dir <absolute-directory>] [--public-url <https-origin>] [--tls-cert <absolute-file> --tls-key <absolute-file>] [--tailscale-serve] [--pair [--pair-output <absolute-file>]]\n\nRuns the ordinary installed Forge backend in the foreground. The standalone CLI does not include backend assets. Remote binding requires a public HTTPS URL and TLS plan. Noninteractive pairing requires a new protected output file.'
     case 'pair':
       return 'Usage: forge pair <url-or-host> [--credential-file <absolute-file>] [--environment-id <uuid>] [--scopes <comma-separated>]\n\nEnter a pairing link or code privately at the terminal. Stores the session in OS credential storage where available; an explicit owner-only fallback file is supported.'
+    case 'pair-link':
+      return 'Usage: forge pair-link [--data-dir <absolute-directory>] [--code] [--scopes <comma-separated>] [--label <name>] [--expires <1m..60m>] [--json]\n\nIssues a one-time pairing link (or code with --code) from the Forge already running on this machine, without restarting it. Run it as the account that owns the data directory (default $FORGE_DATA_DIR or ~/.forge). The link goes to stdout and works once; it expires after 10 minutes unless --expires says otherwise. Grants every permission unless --scopes narrows them.'
     case 'environment':
       return 'Usage: forge environment rekey|adopt|restore --data-dir <absolute-directory> [--backend-entry <absolute-file>] [--from-data-dir <previous-directory>]\n\nLocal recovery runs under the ordinary backend runtime lock. Re-key assigns a new identity and revokes sessions; adopt retires the old data-path binding; restore rotates the stream epoch and revokes stale tokens.'
     case 'status':

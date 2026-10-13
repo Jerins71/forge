@@ -15,6 +15,7 @@ import type { EnvironmentDescriptor } from '@forge/protocol/environment-v2'
 import type { createEnvironmentCredentialService } from './environment-credentials-ipc.js'
 import { createOpenSshDriver, shellQuote as q } from './managed-hosts-ssh.js'
 import { assertManagedHostIdle } from './managed-hosts-idle.js'
+import { detectExistingForge, issueExistingForgeLink } from './managed-hosts-detect.js'
 export interface ManagedServerArtifact {
   version: string
   sha256: string
@@ -871,6 +872,37 @@ export function createManagedHostService(options: {
         statuses.get(r.hostAlias)!.desiredVersion = artifact.version
         await setup(r, artifact)
         return statuses.get(r.hostAlias)!
+      }),
+    detect: (alias: string) =>
+      envelope(async () => {
+        validateAlias(alias)
+        return detectExistingForge(driver, alias)
+      }),
+    pairingLink: (alias: string, dataDir: string) =>
+      envelope(async () => {
+        validateAlias(alias)
+        // Only a Forge detection just found, running with an address this app can reach.
+        const forge = (await detectExistingForge(driver, alias)).find(
+          (candidate) => candidate.dataDir === dataDir,
+        )
+        if (!forge?.running || !forge.pairable || !forge.reachable || !forge.publicUrl)
+          fail(
+            'UNAVAILABLE',
+            'That Forge is not running with an address this app can reach.',
+          )
+        try {
+          return {
+            pairingUrl: await issueExistingForgeLink(driver, alias, {
+              dataDir,
+              publicUrl: forge.publicUrl,
+            }),
+          }
+        } catch (e) {
+          return fail(
+            'UNAVAILABLE',
+            e instanceof Error ? e.message : 'The host did not issue a pairing link.',
+          )
+        }
       }),
     status: (alias?: string) =>
       envelope(async () => {

@@ -132,6 +132,11 @@ async function bootstrap(): Promise<EnvironmentContextValue> {
         credentialRef: e.environmentId,
       })
     }
+    // A saved environment whose stored credential is gone stays listed (Needs re-pairing) with its
+    // name and settings; registering only the credential targets above would drop it from the catalog.
+    for (const e of saved)
+      if (!e.primary && !targets.value.some((t) => t.environmentId === e.environmentId))
+        await registry.register({ ...e, primary: false, credentialRef: e.environmentId })
   } else {
     const configured = new URL(resolveBackendWsUrl())
     configured.protocol = configured.protocol === 'wss:' ? 'https:' : 'http:'

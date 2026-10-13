@@ -63,6 +63,16 @@ export function normalizeHostUrl(value: string): string | null {
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 
+/** An address that only works on the machine itself, so a link naming it cannot pair another device. */
+export function isLoopbackBaseUrl(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname
+    return LOOPBACK_HOSTS.has(host) || /^127\.\d+\.\d+\.\d+$/.test(host)
+  } catch {
+    return false
+  }
+}
+
 /**
  * A browser page served over HTTPS cannot reach a plain-HTTP remote (loopback is exempt). Desktop
  * passes `null` because its main-process transport is not subject to mixed-content rules.

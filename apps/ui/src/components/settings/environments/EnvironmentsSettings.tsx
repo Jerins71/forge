@@ -36,8 +36,8 @@ function EnvironmentsSettingsContent() {
   return (
     <div className="space-y-7">
       <SettingsSection
-        label="Environments"
-        description="Each environment is a Forge backend on a machine you control. Sessions run on the environment you choose and never fall back to another one."
+        label="Machines in this app"
+        description="Each environment is a Forge backend on a machine you control. Sessions run on the one you choose and never fall back to another. Add a machine with a pairing link from it, or over SSH."
         cta={
           <div className="flex items-center gap-2">
             {managedHosts ? (
@@ -46,7 +46,7 @@ function EnvironmentsSettingsContent() {
               </Button>
             ) : null}
             <Button size="sm" className="gap-1.5" onClick={() => setPairOpen(true)}>
-              <Plus className="size-4" /> Add environment
+              <Plus className="size-4" /> Add a machine
             </Button>
           </div>
         }

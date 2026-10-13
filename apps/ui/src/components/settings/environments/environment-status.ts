@@ -24,16 +24,17 @@ export function describeEnvironmentStatus(connection: ConnectionState, now: numb
     case 'disabled':
       return { kind: 'disabled', label: 'Disabled', detail: 'Environment is disabled', blocksLaunch: true }
     case 'auth-blocked':
-      if (connection.blockedCause === 'revoked') {
-        return { kind: 'revoked', label: 'Revoked', detail: 'This device was revoked; pair again', blocksLaunch: true }
-      }
+      // The environment stays listed with its name and settings; Re-pair takes a new link.
       if (connection.blockedCause === 'https-required') {
         return { kind: 'needs-pairing', label: 'HTTPS required', detail: 'This page uses HTTPS, so the environment must too', blocksLaunch: true }
       }
+      if (connection.blockedCause === 'revoked') {
+        return { kind: 'revoked', label: 'Needs re-pairing', detail: 'This device was revoked on that machine; re-pair with a new link', blocksLaunch: true }
+      }
       return {
         kind: 'needs-pairing',
-        label: 'Needs pairing',
-        detail: connection.blockedCause === 'expired' ? 'Access expired; pair again' : 'Pair this environment again',
+        label: 'Needs re-pairing',
+        detail: connection.blockedCause === 'expired' ? 'Access expired; re-pair with a new link' : 'This device has no valid pairing; re-pair with a new link',
         blocksLaunch: true,
       }
     case 'version-blocked':

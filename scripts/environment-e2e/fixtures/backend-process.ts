@@ -57,7 +57,8 @@ catch (error) {
 await saveWorkerPresetSettings(config.paths.dataDir, { version: 2, presets: [
   { name: 'fixture-worker', provider: 'codex-native', modelId: 'gpt-6-sol', reasoningLevel: 'high', note: 'Synthetic E2E worker.' },
 ] }, () => true);
-lifecycle.server = await startServer({ config, environmentIdentity: { label: fixture.instanceId, ...(process.env.FORGE_E2E_LINEAGE === '1' && fixture.instanceId === 'env-c' ? { capabilities: { projectAgentMetadata: true, sessionState: true, shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, cliTransport: true, sessionLifecycle: true, projectPolicy: true, contextTransfers: false } } : {}) }, onReady: ({ port, environment }) => {
+// FORGE_E2E_DEFAULT_LABEL names the one environment that keeps its default (hostname) label.
+lifecycle.server = await startServer({ config, environmentIdentity: { ...(process.env.FORGE_E2E_DEFAULT_LABEL === fixture.instanceId ? {} : { label: fixture.instanceId }), ...(process.env.FORGE_E2E_LINEAGE === '1' && fixture.instanceId === 'env-c' ? { capabilities: { projectAgentMetadata: true, sessionState: true, shellResume: true, sessionDetail: true, durableCommands: true, newWorktree: true, artifactUpload: true, terminal: true, cliTransport: true, sessionLifecycle: true, projectPolicy: true, contextTransfers: false } } : {}) }, onReady: ({ port, environment }) => {
   if (process.connected) process.send?.({ type: 'ready', port, dataDir: config.paths.dataDir, environment }, () => {});
 } });
 installEnvironmentParentBootstrap({ authorizedPhysicalParent, createGrant: () => lifecycle.server!.createBootstrapGrant() });

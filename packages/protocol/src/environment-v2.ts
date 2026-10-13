@@ -371,7 +371,7 @@ export type DeviceSession = Static<typeof DeviceSessionSchema>
 export const CreatePairingGrantSchema = O({
   kind: E('link', 'code'), label: Type.String({ minLength: 1, maxLength: 80 }),
   scopes: ScopesSchema,
-  expiresInSeconds: Type.Integer({ minimum: 60, maximum: 600 }),
+  expiresInSeconds: Type.Integer({ minimum: 60, maximum: 3600 }),
   reachableBaseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
 })
 export const PairingGrantCreatedSchema = O({
@@ -379,6 +379,14 @@ export const PairingGrantCreatedSchema = O({
   pairingUrl: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
   code: Type.Union([Type.String({ maxLength: 32 }), Type.Null()]),
   // Secrets in this response only; excluded from events, read models, logs, and receipts.
+})
+// Where pairing links point. A loopback-only address works on that machine alone; the suggestions are
+// addresses the machine could be exposed on (Tailscale name, LAN IPv4), for the warning copy.
+export const PairingAddressSchema = O({
+  baseUrl: Type.String({ minLength: 1, maxLength: 2048 }),
+  loopbackOnly: Type.Boolean(),
+  tailscaleUrl: Type.Union([Type.String({ maxLength: 2048 }), Type.Null()]),
+  lanAddresses: Type.Array(Type.String({ maxLength: 64 }), { maxItems: 16 }),
 })
 export const PairingChallengeSchema = O({
   challengeId: V2Uuid, nonce: Type.String({ minLength: 43, maxLength: 43 }), expiresAt: V2Time,
@@ -485,6 +493,7 @@ export const rpcSchemas = {
   'workspace.directories.create': defineRpc(O({ commandId: V2Uuid, parentPath: DirectoryPath, name: Type.String({ minLength: 1, maxLength: 256 }) }), CommandReceiptSchema, { receipt: true }),
   'command.get': defineRpc(O({ commandId: V2Uuid }), CommandReceiptSchema),
   'access.grant.create': defineRpc(CreatePairingGrantSchema, PairingGrantCreatedSchema),
+  'access.pairing.address': defineRpc(V2Empty, PairingAddressSchema),
   'access.devices.list': defineRpc(V2Empty, Type.Array(DeviceSessionSchema, { maxItems: 256 })),
   'access.devices.revoke': defineRpc(RevokeDeviceSessionSchema, RevokeDeviceSessionResultSchema),
   'terminal.attach': defineRpc(O({ ...TerminalRef.properties, ticket: Type.String({ maxLength: 128 }) }),
@@ -534,7 +543,7 @@ export const rpcScopes = {
   'session.readState.set': 'session:operate', 'project.readState.clear': 'session:operate', 'session.attention.dismiss': 'session:operate',
   'session.configure': 'session:operate',
   'workspace.directories.list': 'workspace:read', 'workspace.directories.validate': 'workspace:read', 'workspace.directories.create': 'workspace:write',
-  'access.grant.create': 'access:admin', 'access.devices.list': 'access:admin',
+  'access.grant.create': 'access:admin', 'access.pairing.address': 'access:admin', 'access.devices.list': 'access:admin',
   'access.devices.revoke': 'access:admin',
   'terminal.attach': 'terminal:operate', 'terminal.input': 'terminal:operate', 'terminal.resize': 'terminal:operate',
   'browser.get': 'session:read', 'browser.subscribe': 'session:read',

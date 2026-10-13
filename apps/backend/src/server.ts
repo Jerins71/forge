@@ -376,6 +376,10 @@ export async function startServer(options: StartServerOptions = {}): Promise<Sta
 
     await wsServer.start();
     exposure.setLoopbackPort(wsServer.getPort());
+    // Optional: without it, pairing still works from Settings or `forge serve --pair`.
+    await environment.listenLocalPairing().catch((error: unknown) => {
+      console.warn(`[environment] Local pairing channel unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    });
     if (process.env.FORGE_TAILSCALE_SERVE === "1") {
       await enableTailscaleServe({ backendPort: wsServer.getPort(), publicBaseUrl: exposure.publicBaseUrl,
         ownershipFile: join(dirname(getEnvironmentDbPath(config.paths.dataDir)), "tailscale-serve.json"), environmentId: environment.descriptor().environmentId });
