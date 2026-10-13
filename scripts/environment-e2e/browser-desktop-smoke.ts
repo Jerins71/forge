@@ -4,7 +4,7 @@
  * with it, and survives a renderer reload. Window screenshots composite the native view over the
  * renderer (a renderer capture alone cannot see it) into .internal/browser-panel/.
  *   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build && pnpm --filter @forge/electron build
- *   pnpm --dir apps/backend exec tsx ../../scripts/environment-e2e/browser-desktop-smoke.ts
+ *   /tmp/forge-v2-gate.sh pnpm e2e:browser:desktop
  * Run pnpm --filter @forge/electron prepare:dev-native before this smoke. OS credential storage
  * is replaced by an ephemeral encrypted fixture; no login keychain access is needed. */
 import { _electron as electron, expect, type ElectronApplication, type Page } from '@playwright/test'
