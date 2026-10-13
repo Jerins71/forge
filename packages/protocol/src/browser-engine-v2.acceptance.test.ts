@@ -43,6 +43,9 @@ describe('environment browser engine wire contract', () => {
   it('bounds frames below the existing environment frame envelope and ignores future response fields', () => {
     const frame = { kind: 'frame', tabId: 't', frameId: 1, data: 'a'.repeat(500000), mimeType: 'image/jpeg', width: 1280, height: 720, timestamp: 2 }
     expect(Value.Check(BrowserScreencastItemSchema, frame)).toBe(true)
+    for (const [width, height] of [[360, 225], [1, 1]]) expect(Value.Check(BrowserScreencastItemSchema, { ...frame, width, height })).toBe(true)
+    for (const [width, height] of [[0, 1], [1, -1], [1.5, 1], [3841, 1]]) expect(Value.Check(BrowserScreencastItemSchema, { ...frame, width, height })).toBe(false)
+    expect(Value.Check(rpcSchemas['browser.tabs.resize'].input, { sessionId: 's', tabId: 't', viewport: { width: 360, height: 225 } })).toBe(false)
     expect(Value.Check(BrowserScreencastItemSchema, { ...frame, data: 'a'.repeat(800001) })).toBe(false)
     expect(decodeEnvironmentValue(BrowserScreencastItemSchema, { ...frame, future: true })).toEqual(frame)
     expect(Value.Check(rpcSchemas['browser.screencast.ack'].input, { subscriptionId: 'sub', frameId: 1, other: true })).toBe(false)

@@ -58,8 +58,8 @@ class ScreencastHub {
     if (this.stopped || frame.data.length > 800000) return
     const metadata = await sharp(Buffer.from(frame.data, 'base64')).metadata()
     if (this.stopped) return
-    if (!metadata.width || !metadata.height || metadata.width < 240 || metadata.height < 240) {
-      if (!this.invalidFrame) for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'error', message: 'Browser viewport is too small for live view. Resize it to at least 240 × 240.' })
+    if (!metadata.width || !metadata.height || metadata.width > 3840 || metadata.height > 3840) {
+      if (!this.invalidFrame) for (const viewer of this.viewers) viewer.send({ kind: 'state', tabId: this.tab.state.tabId, state: 'error', message: 'Live view received an invalid frame. Retry the view.' })
       this.invalidFrame = true; return
     }
     this.invalidFrame = false

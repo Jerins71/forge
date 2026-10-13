@@ -6,6 +6,8 @@ const E = <T extends string>(...v: T[]) => Type.Union(v.map(x => Type.Literal(x)
 const id = Type.String({ minLength: 1, maxLength: 128 })
 const url = Type.String({ minLength: 1, maxLength: 8192 })
 const dimension = Type.Integer({ minimum: 240, maximum: 3840 })
+// Encoded frames can be smaller than the page viewport after downsampling.
+const frameDimension = Type.Integer({ minimum: 1, maximum: 3840 })
 const sequence = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 const domain = Type.String({ minLength: 1, maxLength: 253 })
 const domains = Type.Array(domain, { minItems: 1, maxItems: 1000, uniqueItems: true })
@@ -51,7 +53,7 @@ export type BrowserEngineInput = Static<typeof BrowserEngineInputSchema>
 export const BrowserScreencastItemSchema = Type.Union([
   O({ kind: Type.Literal('frame'), tabId: id, frameId: sequence,
     data: Type.String({ maxLength: 800000 }), mimeType: Type.Literal('image/jpeg'),
-    width: dimension, height: dimension, timestamp: Type.Number({ minimum: 0 }) }),
+    width: frameDimension, height: frameDimension, timestamp: Type.Number({ minimum: 0 }) }),
   O({ kind: Type.Literal('state'), tabId: id, state: E('starting', 'ready', 'closed', 'error'), message: Type.Optional(Type.String({ maxLength: 1024 })) }),
 ])
 export type BrowserScreencastItem = Static<typeof BrowserScreencastItemSchema>

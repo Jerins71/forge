@@ -10,7 +10,8 @@ import { createRequire } from 'node:module'
 import { launchFleet, controlEnvironment, sanitizedEnvironment, type BootstrapSession } from './launch.js'
 import { seedUiEnvironment } from './fixtures/ui-fleet.js'
 import { openFixtureRpc, until } from './fixtures/rpc-client.js'
-import type { BrowserEngineSnapshot, BrowserEngineTab } from '@forge/protocol'
+import type { BrowserEngineSnapshot, BrowserEngineTab, BrowserScreencastItem } from '@forge/protocol'
+import { decodeEnvironmentValue, BrowserScreencastItemSchema } from '../../packages/protocol/src/environment-v2.js'
 import { randomUUID, createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -128,6 +129,30 @@ test('idle project contexts retire after the last tab and cookie operation, pres
     expect(cookieOnly!.browser()!.isConnected()).toBe(false)
     await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'idle-context-proof.json'), JSON.stringify({ passed: true, sharedProjectRetainedWhileBusy: true, cookieOperationFencedClose: true, closedAfterLastOperation: true, persistentCookieSurvived: true, archiveRetired: true, cookieOnlyRetired: true }, null, 2))
   } finally { release(); releaseRetirement(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
+})
+
+test('downsampled screencast frames have independent bounds and viewer budgets', async ({}, info) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-small-frame-'))
+  const engine = new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') })
+  const viewers: Array<Awaited<ReturnType<BrowserEngine['screencast']>>> = []
+  try {
+    const opened = await engine.open('session', {}), tabId = opened.activeTabId!
+    const slow: BrowserScreencastItem[] = [], fast: BrowserScreencastItem[] = []
+    viewers.push(await engine.screencast('session', tabId, { maxWidth: 360, maxHeight: 240 }, item => slow.push(item)))
+    viewers.push(await engine.screencast('session', tabId, {}, item => fast.push(item)))
+    const frames = (items: BrowserScreencastItem[]) => items.filter(item => item.kind === 'frame')
+    await expect.poll(() => frames(fast).length).toBe(1)
+    const first = frames(fast)[0]!
+    expect(first.width).toBe(360); expect(first.height).toBe(225)
+    expect(decodeEnvironmentValue(BrowserScreencastItemSchema, first)).toEqual(first)
+    await viewers[1]!.ack(first.frameId)
+    expect((await engine.invoke('session', 'project', 'evaluate', { tabId, expression: 'document.body.style.background="red"', awaitPromise: true, returnByValue: true })).ok).toBe(true)
+    await expect.poll(() => frames(fast).length).toBeGreaterThan(1)
+    expect(frames(slow)).toHaveLength(1)
+    expect([...slow, ...fast].some(item => item.kind === 'state' && item.state === 'error')).toBe(false)
+    await info.attach('360x225-frame', { body: Buffer.from(first.data, 'base64'), contentType: 'image/jpeg' })
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'small-frame-proof.json'), JSON.stringify({ passed: true, pageViewport: opened.tabs[0]!.viewport, encodedFrame: { width: first.width, height: first.height }, independentAckBudgets: true }, null, 2))
+  } finally { for (const viewer of viewers) await viewer.release(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
 })
 
 test('desktop smoke refuses real-home storage and escaping symlinks before launch', async ({}, info) => {
@@ -303,10 +328,11 @@ test('fleet local and env-b share real tools and independently acknowledged view
       const tabId = initial.activeTabId; expect(initial.tabs[0].host).toBe('headless')
       const second = await openFixtureRpc(environment.baseUrl, bootstrap); sockets.push(second)
       const listA = await rpc.call('browser.tabs.subscribe', { sessionId }); const listB = await second.call('browser.tabs.subscribe', { sessionId })
-      const slow = await rpc.call('browser.screencast.subscribe', { sessionId, tabId }); const fast = await second.call('browser.screencast.subscribe', { sessionId, tabId })
+      const slow = await rpc.call('browser.screencast.subscribe', { sessionId, tabId, maxWidth: 360, maxHeight: 240 }); const fast = await second.call('browser.screencast.subscribe', { sessionId, tabId })
       const frames = (connection: typeof rpc, subscriptionId: string) => connection.frames.filter(frame => frame.subscriptionId === subscriptionId && frame.item?.kind === 'frame')
       await until(() => frames(rpc, slow.subscriptionId), values => values.length === 1)
       const firstFast = await until(() => frames(second, fast.subscriptionId)[0], Boolean)
+      expect(firstFast.item).toMatchObject({ width: 360, height: 225 })
       await second.call('browser.screencast.ack', { subscriptionId: fast.subscriptionId, frameId: firstFast.item.frameId })
       await second.call('browser.tabs.input', { sessionId, tabId, input: { kind: 'wheel', x: 30, y: 100, deltaX: 0, deltaY: 300 } })
       const nextFast = await until(() => frames(second, fast.subscriptionId)[1], Boolean)
