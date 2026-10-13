@@ -196,6 +196,14 @@ test('an agent opening a page opens the panel, streams it, and marks the tab whi
   await expect.poll(() => hits.includes('agent'), { timeout: 30_000 }).toBe(true)
   await expect(panel(page).locator('[data-agent-tab="driving"]')).toHaveCount(0, { timeout: 15_000 })
   await expect(panel(page).locator('[data-browser-agent-strip]')).toHaveCount(0)
+  // Closed stays closed across a reload even though the session already has a tab: only a tab the
+  // panel has not seen before may open it.
+  await panel(page).getByRole('button', { name: 'Close browser panel' }).click()
+  await expect(panel(page)).toHaveCount(0)
+  await page.reload()
+  await expect(transcript(page)).toBeVisible()
+  await page.waitForTimeout(2_000)
+  await expect(panel(page)).toHaveCount(0)
 })
 
 test('a remote machine streams its tab into the panel and a click on the page reaches it', async ({ page }) => {

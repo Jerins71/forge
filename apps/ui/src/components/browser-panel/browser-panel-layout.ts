@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 const WIDTH_KEY = 'forge-browser-panel-width'
 const OPEN_KEY = 'forge-browser-panel-open'
@@ -30,26 +30,38 @@ export function storeBrowserPanelWidth(px: number | null): void {
   }
 }
 
+// Open state is shared by every reader: Settings can open a session's panel while that session's
+// chat stays mounted, and a write must reach it. Memory also covers storage that refuses writes.
+let openMap: Record<string, boolean> | null = null
+const openListeners = new Set<() => void>()
+function subscribeOpen(listener: () => void): () => void {
+  openListeners.add(listener)
+  return () => { openListeners.delete(listener) }
+}
+
 function readOpenMap(): Record<string, boolean> {
+  if (openMap) return openMap
   try {
     const value = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '{}') as unknown
-    return value && typeof value === 'object' ? value as Record<string, boolean> : {}
+    openMap = value && typeof value === 'object' ? value as Record<string, boolean> : {}
   } catch {
-    return {}
+    openMap = {}
   }
+  return openMap
 }
 
 function writeOpen(sessionKey: string, open: boolean): void {
+  const map = { ...readOpenMap() }
+  delete map[sessionKey]
+  if (open) map[sessionKey] = true
+  // Keep the newest entries; insertion order is recency.
+  openMap = Object.fromEntries(Object.entries(map).slice(-OPEN_ENTRIES_MAX))
   try {
-    const map = readOpenMap()
-    delete map[sessionKey]
-    if (open) map[sessionKey] = true
-    // Keep the newest entries; insertion order is recency.
-    const entries = Object.entries(map).slice(-OPEN_ENTRIES_MAX)
-    localStorage.setItem(OPEN_KEY, JSON.stringify(Object.fromEntries(entries)))
+    localStorage.setItem(OPEN_KEY, JSON.stringify(openMap))
   } catch {
-    // Ignore storage failures.
+    // Ignore storage failures; this window still remembers.
   }
+  for (const listener of openListeners) listener()
 }
 
 /** The key a session's open state is remembered under. */
@@ -64,17 +76,9 @@ export function rememberBrowserPanelOpen(sessionKey: string): void {
 
 /** Whether the browser panel is open for one session; remembered per session across reloads. */
 export function useBrowserPanelOpen(sessionKey: string | null): [boolean, (open: boolean) => void] {
-  // Storage is the source of truth: Settings can open a session's panel before showing it.
-  const [state, setState] = useState(() => ({ sessionKey, open: readOpen(sessionKey) }))
-  let open = state.open
-  if (state.sessionKey !== sessionKey) {
-    open = readOpen(sessionKey)
-    setState({ sessionKey, open })
-  }
+  const open = useSyncExternalStore(subscribeOpen, () => readOpen(sessionKey), () => false)
   const setOpen = useCallback((next: boolean) => {
-    if (!sessionKey) return
-    writeOpen(sessionKey, next)
-    setState({ sessionKey, open: next })
+    if (sessionKey) writeOpen(sessionKey, next)
   }, [sessionKey])
   return [open, setOpen]
 }

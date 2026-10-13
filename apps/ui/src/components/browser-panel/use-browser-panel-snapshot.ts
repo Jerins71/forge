@@ -14,10 +14,12 @@ export function useRevealOnAgentTab(snapshot: BrowserPanelSnapshot, sessionKey: 
   const seen = useRef<{ sessionKey: string | null; ids: Set<string> | null }>({ sessionKey, ids: null })
   useEffect(() => {
     if (seen.current.sessionKey !== sessionKey) seen.current = { sessionKey, ids: null }
+    // The connecting snapshot has no tabs yet; the first hydrated one is the baseline.
+    if (snapshot.availability.kind === 'connecting') return
     const ids = new Set(snapshot.tabs.map((tab) => tab.tabId))
     const previous = seen.current.ids
     seen.current.ids = ids
     if (!previous) return
     if (snapshot.tabs.some((tab) => !previous.has(tab.tabId))) reveal()
-  }, [reveal, sessionKey, snapshot.tabs])
+  }, [reveal, sessionKey, snapshot.availability.kind, snapshot.tabs])
 }
