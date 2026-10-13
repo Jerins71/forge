@@ -104,7 +104,7 @@ export function createEngineBrowserPanelPort({ client, sessionId, machineLabel, 
     async setup() {
       const result = await engine.request('browser.engine.setup', {})
       if (engineSnapshot) {
-        engineSnapshot = { ...engineSnapshot, browserEngineState: result.browserEngineState, ...(result.browserEngineMessage ? { browserEngineMessage: result.browserEngineMessage } : {}) }
+        engineSnapshot = { ...engineSnapshot, browserEngineState: result.browserEngineState, browserEngineMessage: result.browserEngineMessage, browserEngineSetupCommand: result.browserEngineSetupCommand }
         publish()
       }
     },
@@ -190,7 +190,7 @@ function availabilityOf(snapshot: BrowserEngineSnapshot | null, streamError: str
   if (!snapshot) return { kind: 'connecting' }
   const state = snapshot.browserEngineState ?? 'ready'
   if (state === 'ready') return { kind: 'ready' }
-  return { kind: 'setup', state, machineLabel, ...(snapshot.browserEngineMessage ? { message: snapshot.browserEngineMessage } : {}) }
+  return { kind: 'setup', state, machineLabel, ...(snapshot.browserEngineMessage ? { message: snapshot.browserEngineMessage } : {}), ...(snapshot.browserEngineSetupCommand ? { setupCommand: snapshot.browserEngineSetupCommand } : {}) }
 }
 
 function toPanelTab(tab: BrowserEngineTab): BrowserPanelTab {

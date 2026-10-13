@@ -4,7 +4,7 @@
  * distribution must retain the corresponding third-party notice.
  */
 
-import type { BrowserEngineTab } from "./browser-engine-v2.js"
+import type { BrowserEngineTab, BrowserEngineSetupState } from "./browser-engine-v2.js"
 
 export const BROWSER_AUTOMATION_OPERATIONS = [
   'status',
@@ -192,8 +192,9 @@ export interface BrowserRecordingStopInput extends BrowserTabTargetInput {
 
 export interface BrowserAutomationStatusResult {
   available: boolean
-  browserEngineState: 'ready' | 'missing' | 'installing' | 'failed'
+  browserEngineState: BrowserEngineSetupState
   browserEngineMessage?: string
+  browserEngineSetupCommand?: string
   selectedTab: BrowserEngineTab | null
   tabs: BrowserEngineTab[]
 }

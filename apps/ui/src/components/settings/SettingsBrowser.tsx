@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Download, Globe2, Loader2, TriangleAlert } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { BrowserHostSetupCommand } from '@/components/browser-panel/BrowserHostSetupCommand'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useEnvironmentLabel } from '@/components/chat/agent-sidebar/hooks/useEnvironmentStatus'
@@ -104,19 +105,20 @@ function MachineBrowserSection({ engine, machine }: { engine: BrowserSettingsEng
         <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-card">
           {state === 'ready' ? <CheckCircle2 className="size-4 text-[var(--status-success)]" />
             : state === 'installing' || !status ? <Loader2 className="size-4 animate-spin text-muted-foreground" />
-              : state === 'failed' ? <TriangleAlert className="size-4 text-[var(--status-attention)]" />
+              : state === 'failed' || state === 'needs-host-setup' ? <TriangleAlert className="size-4 text-[var(--status-attention)]" />
                 : <Download className="size-4 text-muted-foreground" />}
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[13px] font-medium">
-            {!status ? 'Checking…' : state === 'ready' ? 'Ready' : state === 'installing' ? 'Setting up…' : state === 'failed' ? 'Setup didn’t finish' : 'Not set up yet'}
+            {!status ? 'Checking…' : state === 'ready' ? 'Ready' : state === 'installing' ? 'Setting up…' : state === 'needs-host-setup' ? 'This machine needs a one-time setup' : state === 'failed' ? 'Setup didn’t finish' : 'Not set up yet'}
           </p>
           <p className="text-[12px] text-muted-foreground">
             {error ?? status?.message ?? (state === 'missing' ? 'Set it up now, or let Forge do it the first time an agent opens a page.' : state === 'ready' ? 'Pages open in the Browser panel beside the chat.' : '')}
           </p>
+          {state === 'needs-host-setup' ? <BrowserHostSetupCommand command={status?.setupCommand} /> : null}
         </div>
-        {state === 'missing' || state === 'failed' ? (
-          <Button size="sm" variant={state === 'failed' ? 'secondary' : 'default'} onClick={() => void setup()}>{state === 'failed' ? 'Try again' : 'Set up'}</Button>
+        {state === 'missing' || state === 'failed' || state === 'needs-host-setup' ? (
+          <Button size="sm" variant={state === 'missing' ? 'default' : 'secondary'} onClick={() => void setup()}>{state === 'needs-host-setup' ? 'Retry' : state === 'failed' ? 'Try again' : 'Set up'}</Button>
         ) : null}
       </div>
     </SettingsSection>

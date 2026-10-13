@@ -24,7 +24,7 @@ export function createBrowserEngineRpc(engine: BrowserEngine, cookies?: import("
       }
     }
     switch (method) {
-      case 'browser.engine.status': { const state = engine.setupState(); output = { state: state.browserEngineState, ...(state.browserEngineMessage ? { message: state.browserEngineMessage } : {}), version: engine.version }; break }
+      case 'browser.engine.status': { const state = engine.setupState(); output = { state: state.browserEngineState, ...(state.browserEngineMessage ? { message: state.browserEngineMessage } : {}), ...(state.browserEngineSetupCommand ? { setupCommand: state.browserEngineSetupCommand } : {}), version: engine.version }; break }
       case 'browser.engine.setup': output = await engine.setup(); break
       case 'browser.tabs.get': output = await engine.getSnapshot((raw as RpcInput<'browser.tabs.get'>).sessionId); break
       case 'browser.tabs.open': { const input = raw as RpcInput<'browser.tabs.open'>; output = await engine.open(input.sessionId, input); break }

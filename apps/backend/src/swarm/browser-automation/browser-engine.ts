@@ -91,7 +91,7 @@ export class BrowserEngine {
     this.desktop.onClosed = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) { tab.state.errorCode = 'crashed'; tab.state.error = 'Desktop browser page closed.'; this.publish(session) } }).catch(() => {}) }
   }
   setupState(): BrowserSetupState { return this.desktop.available ? { browserEngineState: 'ready' } : this.headless.state() }
-  async setup(): Promise<BrowserSetupState> { if (!this.desktop.available) void this.headless.ensureExecutable().catch(() => {}); return this.setupState() }
+  async setup(): Promise<BrowserSetupState> { if (!this.desktop.available) void this.headless.prepare().catch(() => {}); return this.setupState() }
   projectForSession(sessionId: string) { return this.project(sessionId) }
   private project(sessionId: string) { const project = this.options.resolveSession(sessionId); if (!project) throw new Error('Browser session is unavailable.'); return project }
   private session(sessionId: string): Promise<Session> {
@@ -215,7 +215,7 @@ export class BrowserEngine {
     } catch (error) { return { ok: false, operation, error: { code: error instanceof Error && /interrupt|abort/i.test(error.message) ? 'request-cancelled' : 'execution-failed', message: error instanceof Error ? error.message.slice(0, 1024) : 'Browser operation failed.', retryable: false } } }
   }
   private async perform(sessionId: string, operation: BrowserAutomationOperation, input: BrowserAutomationInputByOperation[BrowserAutomationOperation]): Promise<unknown> {
-    if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: snapshot.browserEngineState !== 'failed', ...this.setupState(), selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ?? null, tabs: snapshot.tabs } }
+    if (operation === 'status') { const snapshot = await this.getSnapshot(sessionId); return { available: snapshot.browserEngineState !== 'failed' && snapshot.browserEngineState !== 'needs-host-setup', ...this.setupState(), selectedTab: snapshot.tabs.find(tab => tab.tabId === snapshot.activeTabId) ?? null, tabs: snapshot.tabs } }
     if (operation === 'open') { const value = input as BrowserAutomationInputByOperation['open']; const current = await this.getSnapshot(sessionId); const existing = value.tabId ? current.tabs.find(tab => tab.tabId === value.tabId) : value.reuseExistingTab ? current.tabs.find(tab => tab.tabId === current.activeTabId) : undefined; if (value.tabId && !existing) throw new Error('The requested browser tab does not belong to this session.'); const snapshot = existing ? await this.activate(sessionId, existing.tabId) : await this.open(sessionId, {}); if (value.url) await this.perform(sessionId, 'navigate', { tabId: snapshot.activeTabId!, url: value.url, timeoutMs: 15000, readiness: 'domContentLoaded' }); return { tab: (await this.getSnapshot(sessionId)).tabs.find(tab => tab.tabId === snapshot.activeTabId)!, created: !existing, panelRevealRequested: value.show !== false } }
     const { session, tab } = await this.tab(sessionId, input.tabId)
     const actionEpoch = tab.actionEpoch

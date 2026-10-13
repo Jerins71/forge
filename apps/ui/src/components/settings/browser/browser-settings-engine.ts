@@ -1,11 +1,12 @@
-import type { BrowserCookieError, BrowserCookieSource, BrowserCookieTransfer } from '@forge/protocol'
+import type { BrowserCookieError, BrowserCookieSource, BrowserCookieTransfer, BrowserEngineSetupState } from '@forge/protocol'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { normalizeBrowserAddress } from '@/components/browser-panel/browser-address'
 
 /** One machine's browser setup. */
 export interface BrowserSetupStatus {
-  state: 'ready' | 'missing' | 'installing' | 'failed'
+  state: BrowserEngineSetupState
   message?: string
+  setupCommand?: string
 }
 
 /** A site a project's browser has sign-ins for. */
@@ -55,11 +56,11 @@ export function createBrowserSettingsEngine(client: EnvironmentClient): BrowserS
   return {
     async status() {
       const status = await engine.request('browser.engine.status', {})
-      return { state: status.state, ...(status.message ? { message: status.message } : {}) }
+      return { state: status.state, ...(status.message ? { message: status.message } : {}), ...(status.setupCommand ? { setupCommand: status.setupCommand } : {}) }
     },
     async setup() {
       const status = await engine.request('browser.engine.setup', {})
-      return { state: status.browserEngineState, ...(status.browserEngineMessage ? { message: status.browserEngineMessage } : {}) }
+      return { state: status.browserEngineState, ...(status.browserEngineMessage ? { message: status.browserEngineMessage } : {}), ...(status.browserEngineSetupCommand ? { setupCommand: status.browserEngineSetupCommand } : {}) }
     },
     audit: async (sessionId) => sortSites((await engine.request('browser.cookies.audit', { sessionId })).domains),
     forget: async (sessionId, domain) => sortSites((await engine.request('browser.cookies.forget', { sessionId, domain })).domains),

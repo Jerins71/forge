@@ -5,6 +5,7 @@ import { CLI_VERSION, EXIT_CODES } from '../version.js'
 import { handleServeCommand } from './serve.js'
 import { handlePairCommand, loadCliCredential, loadOsCliCredential, parsePairTarget } from './pair.js'
 import { handleEnvironmentCommand } from './environment.js'
+import { handleBrowserCommand } from './browser.js'
 import { handlePairLinkCommand } from './pair-link.js'
 import { handleConfigCommand } from './config.js'
 import { commandHelp, mainHelp } from './help.js'
@@ -71,6 +72,7 @@ export async function runCli(argv: string[], options: RunCliOptions = {}): Promi
       case 'pair': return await handlePairCommand(context)
       case 'pair-link': return await handlePairLinkCommand(context)
       case 'environment': return await handleEnvironmentCommand(context)
+      case 'browser': return await handleBrowserCommand(context)
       case 'status':
         return await handleStatusCommand(context)
       case 'doctor':

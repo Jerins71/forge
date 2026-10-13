@@ -15,6 +15,7 @@ Global options:
   -v, --version       Show version
 
 Commands:
+  browser setup
   serve [--backend-entry <absolute-file>] [--host <address>] [--port <n>] [--data-dir <absolute-directory>] [--pair --pair-output <absolute-file>]
   pair <url-or-host> [--credential-file <absolute-file>]
   pair-link [--data-dir <absolute-directory>] [--code] [--scopes <comma-separated>] [--label <name>] [--expires 10m]
@@ -48,6 +49,8 @@ Commands:
 
 export function commandHelp(command: string | undefined): string {
   switch (command) {
+    case 'browser':
+      return 'Usage: forge browser setup\n\nOn Linux hosts restricting unprivileged user namespaces with AppArmor, installs and loads a narrowly scoped Forge browser policy. Run sudo forge browser setup once on that machine. Other hosts need no setup. Chromium’s sandbox remains enabled.'
     case 'serve':
       return 'Usage: forge serve [--backend-entry <absolute-file>] [--host <address>] [--port <0..65535>] [--data-dir <absolute-directory>] [--public-url <https-origin>] [--tls-cert <absolute-file> --tls-key <absolute-file>] [--tailscale-serve] [--pair [--pair-output <absolute-file>]]\n\nRuns the ordinary installed Forge backend in the foreground. The standalone CLI does not include backend assets. Remote binding requires a public HTTPS URL and TLS plan. Noninteractive pairing requires a new protected output file.'
     case 'pair':

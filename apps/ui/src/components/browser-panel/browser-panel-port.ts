@@ -7,6 +7,7 @@
  */
 
 /** Who is driving a tab. Any input a person sends to a tab takes it from the agent. */
+import type { BrowserEngineSetupState } from '@forge/protocol'
 export type BrowserPanelController = 'agent' | 'human' | 'none'
 
 export interface BrowserPanelAgentCursor {
@@ -37,7 +38,7 @@ export type BrowserPanelAvailability =
   | { kind: 'ready' }
   | { kind: 'connecting' }
   /** A machine whose browser is not installed yet; it installs on first use and `setup` retries. */
-  | { kind: 'setup'; state: 'missing' | 'installing' | 'failed'; machineLabel: string; message?: string }
+  | { kind: 'setup'; state: Exclude<BrowserEngineSetupState, 'ready'>; machineLabel: string; message?: string; setupCommand?: string }
   | { kind: 'unavailable'; title: string; detail: string }
 
 /** How tab content reaches this window: a native view the desktop app places, or streamed frames. */

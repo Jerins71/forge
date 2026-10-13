@@ -3,6 +3,12 @@ import { Value } from '@sinclair/typebox/value'
 import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema, DeviceSessionSchema } from './environment-v2.js'
 
 describe('environment browser engine wire contract', () => {
+  it('carries a host setup command through status, setup and tab snapshots', () => {
+    const command = 'sudo forge browser setup'
+    expect(Value.Check(rpcSchemas['browser.engine.status'].output, { state: 'needs-host-setup', setupCommand: command })).toBe(true)
+    expect(Value.Check(rpcSchemas['browser.engine.setup'].output, { browserEngineState: 'needs-host-setup', browserEngineSetupCommand: command })).toBe(true)
+    expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [], activeTabId: null, revision: 0, browserEngineState: 'needs-host-setup', browserEngineSetupCommand: command })).toBe(true)
+  })
   it('already projects import authority in the current device session scopes', () => {
     const session = { deviceSessionId: '11111111-1111-1111-1111-111111111111', deviceName: 'test', kind: 'browser', createdAt: '2026-10-13T12:00:00.000Z', lastSeenAt: '2026-10-13T12:00:00.000Z', expiresAt: '2026-10-13T13:00:00.000Z', revokedAt: null, isCurrent: true }
     for (const scopes of [['session:operate'], ['settings:admin']]) {
