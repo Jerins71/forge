@@ -130,6 +130,9 @@ test('a streamed tab renders frames and a click on the page round-trips', async 
   const tabId = await mock<string>(page, 'engine.getSnapshot().activeTabId')
   const canvas = panel(page).locator('[data-browser-panel-content="screencast"] canvas')
   await expect(canvas).toHaveCSS('opacity', '1')
+  // The stream follows the panel's size once a resize settles; wait for a frame at this size.
+  await expect.poll(() => canvas.evaluate((element: HTMLCanvasElement) =>
+    Math.abs(element.width / devicePixelRatio - element.getBoundingClientRect().width) + Math.abs(element.height / devicePixelRatio - element.getBoundingClientRect().height))).toBeLessThan(2)
   const box = (await canvas.boundingBox())!
   const before = await mock<number>(page, 'engine.inputs.length')
   await page.mouse.click(box.x + 140, box.y + 200)

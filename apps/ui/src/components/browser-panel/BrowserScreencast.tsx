@@ -38,6 +38,8 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
   const viewportRef = useRef<BrowserScreencastViewport | null>(null)
   const lastClickRef = useRef<{ button: string; time: number; x: number; y: number; count: number } | null>(null)
   const moveRef = useRef<{ frame: number; event: { x: number; y: number; modifiers: BrowserInputModifiers; buttons: number } | null }>({ frame: 0, event: null })
+  /** The pointer that pressed on the page; only it releases there. */
+  const pressedRef = useRef<number | null>(null)
   const [hasFrame, setHasFrame] = useState(false)
   const [focused, setFocused] = useState(false)
   const [, setGeometryVersion] = useState(0)
@@ -132,6 +134,7 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
     event.preventDefault()
     inputRef.current?.focus({ preventScroll: true })
     event.currentTarget.setPointerCapture(event.pointerId)
+    pressedRef.current = event.pointerId
     const button = mouseButton(event.button)
     const now = performance.now()
     const last = lastClickRef.current
@@ -143,7 +146,8 @@ export function BrowserScreencast({ port, tabId, agentCursor, onFocusChange }: B
   }
 
   const onPointerUp = (event: PointerEvent<HTMLCanvasElement>) => {
-    if (!send) return
+    if (!send || pressedRef.current !== event.pointerId) return
+    pressedRef.current = null
     const point = pagePoint(event.clientX, event.clientY, true)
     if (!point) return
     flushMove()
