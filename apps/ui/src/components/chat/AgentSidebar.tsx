@@ -10,6 +10,7 @@ import {
 } from '@/lib/agent-hierarchy'
 import type { ProfileTreeRow } from '@/lib/agent-hierarchy'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import type { ProjectRef } from '@forge/protocol/environment-v2'
 import { useEnvironmentSettingsClient } from '@/hooks/use-environment-settings-client'
 import { profileSidebar } from '@/lib/origin-store/environment-e2e-fixture'
 import { useProviderUsage } from '@/hooks/use-provider-usage'
@@ -280,6 +281,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     profileLabel: string
     currentModel: AgentModelDescriptor | undefined
     currentReasoningLevel: ManagerReasoningLevel | undefined
+    copies: ProjectRef[]
   } | null>(null)
   const [sessionModelTarget, setSessionModelTarget] = useState<{
     sessionAgentId: string
@@ -533,13 +535,17 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     if (!profile) return
     const defaultModel = profile.defaultModel
     const currentReasoningLevel = defaultModel?.thinkingLevel as ManagerReasoningLevel | undefined
+    // The same project on other machines takes the change too: one project, one default.
+    const group = environmentContext && [...environmentContext.registry.logicalProjects.getSnapshot().values()].find((candidate) =>
+      candidate.members.some((member) => member.environmentId === primaryOriginId && member.projectId === profileId))
     setChangeModelTarget({
       profileId,
       profileLabel: profile.displayName || profileId,
       currentModel: defaultModel,
       currentReasoningLevel,
+      copies: group?.members.filter((member) => member.environmentId !== primaryOriginId) ?? [],
     })
-  }, [profilesRef])
+  }, [environmentContext, primaryOriginId, profilesRef])
 
   const handleConfirmChangeModel = useCallback((profileId: string, modelSelection: ManagerExactModelSelection, reasoningLevel?: ManagerReasoningLevel) => {
     onUpdateManagerModel?.(profileId, modelSelection, reasoningLevel)
@@ -1137,6 +1143,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           profileLabel={changeModelTarget.profileLabel}
           currentModel={changeModelTarget.currentModel}
           currentReasoningLevel={changeModelTarget.currentReasoningLevel}
+          copies={changeModelTarget.copies}
           onConfirm={handleConfirmChangeModel}
           onClose={() => setChangeModelTarget(null)}
         />

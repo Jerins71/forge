@@ -81,6 +81,14 @@ async function sendTargets(environment: UiEnvironment, text: string): Promise<st
     return (database.prepare("SELECT session_id FROM commands WHERE method='session.send' AND json_extract(normalized_json,'$.message.text')=?").all(text) as { session_id: string }[]).map(row => row.session_id)
   } finally { database.close() }
 }
+/** The model a session's launch command named, if any, from the environment's own command journal. */
+async function launchModel(environment: UiEnvironment, sessionId: string): Promise<unknown> {
+  const Constructor = await loadConfiguredSqliteDatabaseConstructor()
+  const database = new Constructor(getEnvironmentDbPath(fixture(environment).dataDir), { readonly: true })
+  try {
+    return (database.prepare("SELECT json_extract(normalized_json,'$.model') AS model FROM commands WHERE session_id=? AND method='session.launch'").get(sessionId) as { model: unknown }).model
+  } finally { database.close() }
+}
 async function logicalGroupKey(page: Page): Promise<string> {
   await page.goto(fleet.uiUrl)
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
@@ -913,5 +921,113 @@ test('Regenerate title names a thread again from its latest messages, live and a
   await page.reload()
   await expect(remoteRow()).toContainText(regenerated)
   assertions.regenerateTitle = { local, remote, title: regenerated }
+  expect(renderErrors).toEqual([])
+})
+
+test('Change Default Model sets the project\'s default on every machine; a new thread on the paired machine starts on it, after reload too; a machine without the model keeps its own', async ({ page }) => {
+  const { a, b } = fleet
+  type Model = { provider: string; modelId: string; thinkingLevel: string }
+  const projectOf = async (environment: UiEnvironment) => (await shellSession(environment, environment.sessionId))!.projectId
+  const defaultOf = async (environment: UiEnvironment, projectId: string): Promise<Model | undefined> => {
+    const rpc = await openFixtureRpc(environment.baseUrl, await bootstrap(environment))
+    try {
+      await rpc.call('shell.subscribe', {})
+      const snapshot = await until<{ projects: { projectId: string; defaultModel?: Model }[] } | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot!.projects.find(project => project.projectId === projectId)?.defaultModel
+    } finally { rpc.close() }
+  }
+  const aProject = await projectOf(a)
+  const bProject = await projectOf(b)
+  const sol = { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' }
+  const luna = { provider: 'codex-native', modelId: 'gpt-6-luna', thinkingLevel: 'medium' }
+  // As reported: the copies start on different defaults.
+  await fixtureRpcOnce(a.baseUrl, await bootstrap(a), 'project.update', { commandId: randomUUID(), projectId: aProject, patch: { modelDefault: sol } })
+  await fixtureRpcOnce(b.baseUrl, await bootstrap(b), 'project.update', { commandId: randomUUID(), projectId: bProject, patch: { modelDefault: { ...sol, modelId: 'gpt-6.1-sol' } } })
+
+  const openDialog = async () => {
+    // The project row's context menu, as the user opened it.
+    await page.getByRole('complementary').getByRole('button', { name: new RegExp(`^(Expand|Collapse)( or drag)? project ${a.projectTitle}$`) }).filter({ visible: true }).first().click({ button: 'right' })
+    await page.getByRole('menuitem', { name: 'Change Default Model', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Change Default Model' })
+    await expect(dialog).toBeVisible()
+    return dialog
+  }
+  const choose = async (dialog: ReturnType<Page['getByRole']>, label: 'Model' | 'Reasoning Level', option: string) => {
+    await dialog.getByRole('combobox', { name: label }).click()
+    // The same model can be offered by several providers; the project runs on Codex native.
+    await page.getByRole('option', { name: label === 'Model' ? `${option} (Codex native)` : option, exact: true }).click()
+  }
+
+  await page.goto(fleet.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
+  let dialog = await openDialog()
+  await choose(dialog, 'Model', 'GPT-6 Luna')
+  await choose(dialog, 'Reasoning Level', 'Medium')
+  await shot(page, 'change-default-model-all-machines')
+  await dialog.getByRole('button', { name: 'Update', exact: true }).click()
+  await expect(dialog).toBeHidden()
+  // Both machines' copies take it.
+  await expect.poll(() => defaultOf(a, aProject), { timeout: 15_000 }).toEqual(luna)
+  await expect.poll(() => defaultOf(b, bProject), { timeout: 15_000 }).toEqual(luna)
+
+  // A new thread on the paired machine offers and runs on the new default, and after reload.
+  const key = await logicalGroupKey(page)
+  await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(key)}`)
+  const runOn = page.getByTestId('run-on-picker')
+  // The picker remembers a machine only once a thread launches there; choose the paired one each time.
+  const runOnPaired = async () => {
+    await expect(runOn).toBeVisible()
+    if ((await runOn.innerText()).includes(b.label)) return
+    await runOn.focus()
+    await page.keyboard.press('Enter')
+    await page.getByRole('option').filter({ hasText: b.label }).first().click()
+    await expect(runOn).toContainText(b.label)
+    await expect(runOn).toBeFocused()
+  }
+  await runOnPaired()
+  const chip = page.getByTestId('launch-workspace').getByRole('button', { name: /^Session model: / })
+  await expect(chip).toHaveAccessibleName('Session model: GPT-6 Luna (Codex native), reasoning Medium. Change session model.')
+  await page.reload()
+  await runOnPaired()
+  await expect(chip).toHaveAccessibleName('Session model: GPT-6 Luna (Codex native), reasoning Medium. Change session model.')
+  const { sessionId } = await launchThread(page, b, 'Start on the project default')
+  // The launch names no model; the paired machine starts it on its project default.
+  expect(await launchModel(b, sessionId)).toBeNull()
+  expect((await shellSession(b, sessionId))?.model).toMatchObject(luna)
+  await page.reload()
+  await expect(transcript(page)).toContainText('assistant reply')
+  expect(await defaultOf(b, bProject)).toEqual(luna)
+
+  // The paired machine no longer offers GPT-6.1 Sol: the dialog says so, and only this machine changes.
+  const bearer = (await bootstrap(b)).bearer
+  const override = `${b.baseUrl}/api/settings/model-overrides/${encodeURIComponent('codex-native/gpt-6.1-sol')}`
+  expect((await fetch(override, { method: 'PUT', headers: { Authorization: `Bearer ${bearer}`, 'content-type': 'application/json' }, body: JSON.stringify({ enabled: false }) })).status).toBe(200)
+  try {
+    await page.goto(fleet.uiUrl)
+    dialog = await openDialog()
+    await expect(dialog.getByRole('paragraph').first()).toHaveText(`Update the default model and reasoning level for ${a.projectTitle} on This machine and ${b.label}. This applies to new conversations. Existing conversations keep their current model.`)
+    await choose(dialog, 'Model', 'GPT-6.1 Sol')
+    await expect(dialog.getByTestId('change-model-machines')).toHaveText(`${b.label} doesn't have GPT-6.1 Sol (Codex native); its default stays GPT-6 Luna (Codex native), Medium.`)
+    await shot(page, 'change-default-model-partial')
+    await dialog.getByRole('button', { name: 'Update', exact: true }).click()
+    await expect(dialog).toBeHidden()
+    await expect.poll(async () => (await defaultOf(a, aProject))?.modelId, { timeout: 15_000 }).toBe('gpt-6.1-sol')
+    expect(await defaultOf(b, bProject)).toEqual(luna)
+    await page.reload()
+    dialog = await openDialog()
+    await expect(dialog.getByRole('combobox', { name: 'Model' })).toContainText('GPT-6.1 Sol')
+    await expect(dialog.getByTestId('change-model-machines')).toHaveText(`${b.label} doesn't have GPT-6.1 Sol (Codex native); its default stays GPT-6 Luna (Codex native), Medium.`)
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  } finally {
+    expect((await fetch(override, { method: 'DELETE', headers: { Authorization: `Bearer ${bearer}` } })).status).toBe(200)
+  }
+  // Offered there again: reopened, the dialog shows this machine's default and says the paired machine's differs.
+  await page.reload()
+  dialog = await openDialog()
+  await expect(dialog.getByRole('combobox', { name: 'Model' })).toContainText('GPT-6.1 Sol')
+  await expect(dialog.getByTestId('change-model-machines')).toHaveText(`${b.label} uses GPT-6 Luna (Codex native), Medium.`)
+  await shot(page, 'change-default-model-differs')
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+  assertions.changeDefaultModelAllMachines = { aProject, bProject, launched: sessionId, model: luna, partial: { here: 'gpt-6.1-sol', paired: 'gpt-6-luna' } }
   expect(renderErrors).toEqual([])
 })
