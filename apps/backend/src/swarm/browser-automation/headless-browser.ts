@@ -8,9 +8,10 @@ export { HEADLESS_CHROME_VERSION } from './browser-runtime.js'
 export const LINUX_BROWSER_PACKAGES = 'libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libdbus-1-3 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2'
 export interface BrowserSetupState { browserEngineState: BrowserEngineSetupState; browserEngineMessage?: string; browserEngineSetupCommand?: string }
 interface ProjectContext { work: Promise<BrowserContext>; live?: BrowserContext; operations: number; rememberSessionCookies: boolean; retiring?: Promise<void> }
-function browserEnvironment() {
-  // Provider credentials and private bootstrap capabilities must not be inherited.
-  const allowed = /^(PATH|HOME|USER|LOGNAME|TMPDIR|TMP|TEMP|LANG|LC_.*|SYSTEMROOT|WINDIR|LOCALAPPDATA|APPDATA|DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR|LD_LIBRARY_PATH)$/i
+export function browserEnvironment() {
+  // Provider credentials and private bootstrap capabilities must not be inherited, nor dynamic-loader
+  // overrides (LD_*): with Linux's AppArmor userns exception they would steer what that binary loads.
+  const allowed = /^(PATH|HOME|USER|LOGNAME|TMPDIR|TMP|TEMP|LANG|LC_.*|SYSTEMROOT|WINDIR|LOCALAPPDATA|APPDATA|DISPLAY|WAYLAND_DISPLAY|XDG_RUNTIME_DIR)$/i
   return Object.fromEntries(Object.entries(process.env).filter(([key, value]) => allowed.test(key) && value !== undefined)) as Record<string, string>
 }
 export class HeadlessBrowser {
