@@ -26,21 +26,6 @@ export function resolveSourceControlDeepLinkPresentation(
     : 'modal'
 }
 
-export function shouldRevealBrowserPanel(options: {
-  electronHostAvailable: boolean
-  selectedSessionAgentId: string | null
-  request: { sessionAgentId: string; hostGeneration: number; sequence: number } | null
-  currentHostGeneration: number | null
-}): boolean {
-  const { request } = options
-  return Boolean(
-    options.electronHostAvailable &&
-    request &&
-    options.selectedSessionAgentId === request.sessionAgentId &&
-    options.currentHostGeneration === request.hostGeneration,
-  )
-}
-
 export function resolveChatRailTargetAgentId(
   activeAgentId: string | null,
   activeAgent: { agentId: string; role: 'manager' | 'worker'; managerId?: string } | null,

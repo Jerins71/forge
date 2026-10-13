@@ -6,7 +6,6 @@ import {
   useNavigate,
 } from '@tanstack/react-router'
 import { BuilderSurface } from '@/components/index-page/BuilderSurface'
-import { BrowserPopoutSurface } from '@/components/browser/BrowserPopoutSurface'
 import { useRouteState } from '@/hooks/index-page/use-route-state'
 import { useElectronRendererReady } from '@/hooks/use-electron-renderer-ready'
 
@@ -25,12 +24,6 @@ type RouteSearch = {
 }
 
 export function IndexPage() {
-  return typeof window !== 'undefined' && window.electronBridge?.windowRole === 'managed-browser-popout'
-    ? <BrowserPopoutSurface />
-    : <MainIndexPage />
-}
-
-function MainIndexPage() {
   useElectronRendererReady()
   const navigate = useOptionalNavigate()
   const location = useOptionalLocation()

@@ -28,7 +28,7 @@ import {
 } from 'react'
 import type { EnvironmentClient } from '@forge/client-runtime'
 import { createEnvironmentPanelContext, type EnvironmentPanels } from '@/lib/environment-panel-context'
-import { Clock3, FolderOpen, GitBranch, Globe2, MessageSquare, Package, SquareTerminal } from 'lucide-react'
+import { Clock3, FolderOpen, GitBranch, MessageSquare, Package, SquareTerminal } from 'lucide-react'
 import type { AgentDescriptor, GitWorktreeSummary } from '@forge/protocol'
 import type { DiffViewerInitialState } from '@/components/diff-viewer/DiffViewerDialog'
 import type { ManagerWsClient } from '@/lib/ws-client'
@@ -73,7 +73,6 @@ export interface UseWorkspacePanelsOptions {
   terminalSessionAgentId: string | null
   terminalPanel: TerminalPanel
   terminalCount: number
-  browserTabCount: number
   clientRef: MutableRefObject<ManagerWsClient | null>
   messageInputRef: MutableRefObject<MessageInputHandle | null>
   navigateToRoute: (nextRouteState: BuilderNavigationState, replace?: boolean) => void
@@ -87,7 +86,6 @@ export function useWorkspacePanels({
   terminalSessionAgentId,
   terminalPanel,
   terminalCount,
-  browserTabCount,
   clientRef,
   messageInputRef,
   navigateToRoute,
@@ -134,9 +132,6 @@ export function useWorkspacePanels({
     openDiffViewer,
     openDiffViewerDeepLink,
     isFileBrowserOpen,
-    isBrowserOpen,
-    openBrowser: handleOpenBrowser,
-    toggleBrowser: handleToggleBrowser,
     openFileBrowser: handleOpenFileBrowser,
     toggleFileBrowser: handleToggleFileBrowser,
     selectedFileBrowserFile,
@@ -486,20 +481,6 @@ export function useWorkspacePanels({
     })
   }, [fileEditorCoordinator, handleGuardedToggleFileBrowser, handleOpenFileBrowser, isFileBrowserOpen, isInlineDiffViewerOpen, setIsDiffViewerOpen])
 
-  const handleToggleBrowserFromRail = useCallback(() => {
-    fileEditorCoordinator.requestFileEditorTransition({ type: 'open-workspace-panel', panel: 'chat' }, () => {
-      setIsDiffViewerOpen(false)
-      setDiffViewerPresentation('modal')
-      handleToggleBrowser()
-    })
-  }, [fileEditorCoordinator, handleToggleBrowser, setIsDiffViewerOpen])
-
-  const handleOpenBrowserFromReveal = useCallback(() => {
-    setIsDiffViewerOpen(false)
-    setDiffViewerPresentation('modal')
-    handleOpenBrowser()
-  }, [handleOpenBrowser, setIsDiffViewerOpen])
-
   const handleOpenDiffViewerInline = useCallback(() => {
     fileEditorCoordinator.requestFileEditorTransition({ type: 'open-source-control-inline' }, () => {
       if (isInlineDiffViewerOpen) {
@@ -613,7 +594,7 @@ export function useWorkspacePanels({
     const artifactsActive = isArtifactsPanelOpen && artifactsPanelTab === 'artifacts'
     const schedulesActive = isArtifactsPanelOpen && artifactsPanelTab === 'schedules'
 
-    const chatActive = !isInlineDiffViewerOpen && !isFileBrowserOpen && !isArtifactsPanelOpen && !isBrowserOpen
+    const chatActive = !isInlineDiffViewerOpen && !isFileBrowserOpen && !isArtifactsPanelOpen
 
     return [
       {
@@ -623,15 +604,6 @@ export function useWorkspacePanels({
         active: chatActive,
         disabled: !activeAgentId,
         onClick: handleReturnToChatWorkspace,
-      },
-      {
-        id: 'browser' as const,
-        label: isBrowserOpen ? 'Close Browser' : 'Browser',
-        icon: Globe2,
-        active: isBrowserOpen && !isInlineDiffViewerOpen,
-        disabled: workspaceDisabled,
-        badge: browserTabCount > 0 ? browserTabCount : undefined,
-        onClick: handleToggleBrowserFromRail,
       },
       {
         id: 'files' as const,
@@ -686,16 +658,13 @@ export function useWorkspacePanels({
     activeAgentId,
     activeManagerAgent,
     artifactsPanelTab,
-    browserTabCount,
     handleOpenArtifactsFromRail,
     handleOpenDiffViewerInline,
     handleReturnToChatWorkspace,
-    handleToggleBrowserFromRail,
     handleToggleFileBrowserFromRail,
     isArtifactsPanelOpen,
     isInlineDiffViewerOpen,
     isFileBrowserOpen,
-    isBrowserOpen,
     terminalCount,
     terminalPanel,
     terminalSessionAgentId,
@@ -719,7 +688,6 @@ export function useWorkspacePanels({
     diffViewerInitialState,
     diffViewerNavigationRequest,
     isFileBrowserOpen,
-    isBrowserOpen,
     selectedFileBrowserFile,
     fileBrowserTabs,
     activeFileBrowserTabId,
@@ -758,8 +726,6 @@ export function useWorkspacePanels({
     handleOpenDiffViewerModal,
     handleOpenDiffViewerDeepLink,
     handleReturnToChatWorkspace,
-    handleToggleBrowserFromRail,
-    handleOpenBrowserFromReveal,
     handleToggleFileBrowserFromRail,
     handleOpenDiffViewerInline,
     handleGuardedToggleArtifactsPanel,

@@ -63,7 +63,6 @@ export function usePanelState({
   const diffViewerNavigationRequestIdRef = useRef(0)
   const scopedDiffViewerTarget = diffViewerTarget?.contextKey === activeContextKey ? diffViewerTarget : null
   const [isFileBrowserOpen, setIsFileBrowserOpen] = useState(false)
-  const [isBrowserOpen, setIsBrowserOpen] = useState(false)
   const [fileBrowserWorktreeContext, setFileBrowserWorktreeContext] =
     useState<FileBrowserWorktreeSelection | null>(null)
   const fileBrowserWorkspace = useFileBrowserWorkspaceState({
@@ -78,7 +77,6 @@ export function usePanelState({
     setIsArtifactsPanelOpen(false)
     setArtifactsPanelTab('artifacts')
     setIsFileBrowserOpen(false)
-    setIsBrowserOpen(false)
     setIsMobileSidebarOpen(false)
   }, [activeAgentId, activeEnvironmentId])
 
@@ -93,7 +91,6 @@ export function usePanelState({
   const closeWorkspacePanels = useCallback(() => {
     setIsArtifactsPanelOpen(false)
     closeFileBrowserForWorkspacePanel()
-    setIsBrowserOpen(false)
   }, [closeFileBrowserForWorkspacePanel])
 
   useEffect(() => {
@@ -118,8 +115,7 @@ export function usePanelState({
   const openArtifactsPanel = useCallback(
     (tab: ArtifactsPanelTab = 'artifacts') => {
       closeFileBrowserForWorkspacePanel()
-      setIsBrowserOpen(false)
-      setArtifactsPanelTab(tab)
+        setArtifactsPanelTab(tab)
       setIsArtifactsPanelOpen(true)
     },
     [closeFileBrowserForWorkspacePanel],
@@ -140,7 +136,6 @@ export function usePanelState({
 
   const openFileBrowser = useCallback(() => {
     setIsArtifactsPanelOpen(false)
-    setIsBrowserOpen(false)
     setFileBrowserWorktreeContext(null)
     setIsFileBrowserOpen(true)
   }, [])
@@ -149,7 +144,6 @@ export function usePanelState({
     setIsFileBrowserOpen((previous) => {
       if (!previous) {
         setIsArtifactsPanelOpen(false)
-        setIsBrowserOpen(false)
         setFileBrowserWorktreeContext(null)
       }
       return !previous
@@ -159,25 +153,8 @@ export function usePanelState({
   const browseWorktreeFiles = useCallback((context: FileBrowserWorktreeSelection) => {
     setFileBrowserWorktreeContext(context)
     setIsArtifactsPanelOpen(false)
-    setIsBrowserOpen(false)
     setIsFileBrowserOpen(true)
   }, [])
-
-  const openBrowser = useCallback(() => {
-    setIsArtifactsPanelOpen(false)
-    closeFileBrowserForWorkspacePanel()
-    setIsBrowserOpen(true)
-  }, [closeFileBrowserForWorkspacePanel])
-
-  const toggleBrowser = useCallback(() => {
-    setIsBrowserOpen((previous) => {
-      if (!previous) {
-        setIsArtifactsPanelOpen(false)
-        closeFileBrowserForWorkspacePanel()
-      }
-      return !previous
-    })
-  }, [closeFileBrowserForWorkspacePanel])
 
   const clearFileBrowserWorktreeContext = useCallback(() => {
     setFileBrowserWorktreeContext(null)
@@ -263,9 +240,6 @@ export function usePanelState({
     openDiffViewer,
     openDiffViewerDeepLink,
     isFileBrowserOpen,
-    isBrowserOpen,
-    openBrowser,
-    toggleBrowser,
     openFileBrowser,
     toggleFileBrowser,
     selectedFileBrowserFile,
