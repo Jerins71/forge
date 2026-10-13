@@ -438,6 +438,8 @@ test('fleet local and env-b share real tools and independently acknowledged view
       await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: `[fixture:browser-open ${url}] [fixture:browser-click #sign-in]`, artifactIds: [] } })
       const initial = await until(() => rpc.call('browser.tabs.get', { sessionId }), value => value.tabs.length === 1 && value.tabs[0].url.startsWith(url) && !value.tabs[0].agentAction)
       const tabId = initial.activeTabId; expect(initial.tabs[0].host).toBe('headless')
+      // The next command is its own turn: wait for this one to answer rather than steer into its end.
+      await until(() => rpc.call('session.history', { sessionId, turns: 20 }), value => JSON.stringify(value).includes('real browser clicked'))
       await rpc.call('browser.tabs.resize', { sessionId, tabId, source: 'view', viewport: { width: 560, height: 600 } })
       const typedBefore = typed.length
       await rpc.call('session.send', { commandId: randomUUID(), sessionId, message: { text: '[fixture:browser-type #searchInput real-desktop-search]', artifactIds: [] } })
