@@ -2,7 +2,7 @@
 
 exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:archetype 1`] = `
 {
-  "promptSha256": "317535b81f013a3ae2cfae7c515c0b42868da7c50c9befca1e8bffecb39b1120",
+  "promptSha256": "487c7f2fdaa58a90e2875a061e0047e11a50afd06ce74342a102dfdcc4cb04e1",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -33,13 +33,13 @@ exports[`production prompt and tool boundary baseline > retains claude request b
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
+  "toolSchemasSha256": "fa3d7a05cb4fc3f74d4f5356f62c458ebbb2da804068a83571fc3e4a0b2aa44e",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:project-agent 1`] = `
 {
-  "promptSha256": "7ea34a619cdc4a3ee8539cdefb414e76b04e7b9b963d2f6dd485e286639a883a",
+  "promptSha256": "dddef2f06d386b3140465984b422c1dac16b07de2795330974590b21985d2964",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -70,13 +70,13 @@ exports[`production prompt and tool boundary baseline > retains claude request b
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
+  "toolSchemasSha256": "fa3d7a05cb4fc3f74d4f5356f62c458ebbb2da804068a83571fc3e4a0b2aa44e",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains claude request bytes for archetype, specialist and project agent sources > claude:specialist 1`] = `
 {
-  "promptSha256": "59fdfa330f08028f4360c96cb99dbcbf697da4e32f617633857f5f6cc8596aaf",
+  "promptSha256": "9e7fffead4bb82ba5df7412fdf7c79512467eafaa990a66c2baeb2673a2f7d2b",
   "toolNames": [
     "send_message_to_agent",
     "secure_bash",
@@ -87,7 +87,7 @@ exports[`production prompt and tool boundary baseline > retains claude request b
 
 exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:archetype 1`] = `
 {
-  "promptSha256": "af3d72543ffb479237f74c3fb8a118289464dea6eabb6bc6551ac4dfc84e8864",
+  "promptSha256": "879bac3df5e82a0dde26fac5d0873fbb9f7192754cbf125fd4944d1c7fafd672",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -118,13 +118,13 @@ exports[`production prompt and tool boundary baseline > retains codex request by
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
+  "toolSchemasSha256": "fa3d7a05cb4fc3f74d4f5356f62c458ebbb2da804068a83571fc3e4a0b2aa44e",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:project-agent 1`] = `
 {
-  "promptSha256": "85354cd14a6d88f6de4714338f5fbaa52f2c4c7986687d22300b7cdf6959230f",
+  "promptSha256": "9a40e084c1dceb2f7ce9d4f91144c97c8e8de56bcc93ee7b5608d8ea924ded76",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -155,13 +155,13 @@ exports[`production prompt and tool boundary baseline > retains codex request by
     "browser_recording_stop",
     "secure_bash",
   ],
-  "toolSchemasSha256": "581ca64af02fea3c4093f7dc6f6cccbd96d6a0251e41d46f53f416ef12d8419c",
+  "toolSchemasSha256": "fa3d7a05cb4fc3f74d4f5356f62c458ebbb2da804068a83571fc3e4a0b2aa44e",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains codex request bytes for archetype, specialist and project agent sources > codex:specialist 1`] = `
 {
-  "promptSha256": "3a82075997e3914c0d6d80676caa9ccd09d5ba007072483ea37b8b0713a742a3",
+  "promptSha256": "1034a68a2a95a9cdf7852996b06d0e9ae8ac83d1f03d6f8fe93a4344427bdda2",
   "toolNames": [
     "send_message_to_agent",
     "secure_bash",
@@ -172,7 +172,7 @@ exports[`production prompt and tool boundary baseline > retains codex request by
 
 exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:archetype 1`] = `
 {
-  "promptSha256": "1327955b42532cc35aa6760423c504a1f221d9770703c08dff3874e7c36ca78d",
+  "promptSha256": "4ee482c5e5f996a9a8de28badc195748ed51a905943934855eaec493fee4dd45",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -202,13 +202,13 @@ exports[`production prompt and tool boundary baseline > retains cursor-sdk reque
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
+  "toolSchemasSha256": "cbdac9d7d6aa3f450a6504722596d62622b5b263ae8e760596ec821a6075b7ba",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:project-agent 1`] = `
 {
-  "promptSha256": "d416b3665beb4fd98c398b401d3989dc9c9f9e15f62462e362fbfc4723697b52",
+  "promptSha256": "1aa4247dada2137b7ab74a40afe3738401fbdf473a3bd4247c02f9fc150f2b50",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -238,13 +238,13 @@ exports[`production prompt and tool boundary baseline > retains cursor-sdk reque
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
+  "toolSchemasSha256": "cbdac9d7d6aa3f450a6504722596d62622b5b263ae8e760596ec821a6075b7ba",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains cursor-sdk request bytes for archetype, specialist and project agent sources > cursor-sdk:specialist 1`] = `
 {
-  "promptSha256": "6dc466a71ca958d284fe398522045b1219419f1121ec8674700ecdf4b07a0810",
+  "promptSha256": "2ac0bf7fb87eec446db48c4cff2aefe8a1dcb32ed48eb78a442d4c3dfbf126b3",
   "toolNames": [
     "send_message_to_agent",
   ],
@@ -254,7 +254,7 @@ exports[`production prompt and tool boundary baseline > retains cursor-sdk reque
 
 exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:archetype 1`] = `
 {
-  "promptSha256": "6804ab3e2e0c8a7a67f7b5349d656785746b0f2621fd0ce045f399512e69bf87",
+  "promptSha256": "654426d4f9634eb22a83202456017eab8bef92af6255d0aa09a1b00dc35061ae",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -284,13 +284,13 @@ exports[`production prompt and tool boundary baseline > retains pi request bytes
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
+  "toolSchemasSha256": "cbdac9d7d6aa3f450a6504722596d62622b5b263ae8e760596ec821a6075b7ba",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:project-agent 1`] = `
 {
-  "promptSha256": "6015190464aae0743ab9b94b437e76c1a38d27cfb00fa34d35a62a5f42bd0a35",
+  "promptSha256": "84e54b73180d700d01cbcf6bdf708452de257dfd07142d3013478ad2c8b8ee11",
   "toolNames": [
     "list_agents",
     "send_message_to_agent",
@@ -320,13 +320,13 @@ exports[`production prompt and tool boundary baseline > retains pi request bytes
     "browser_recording_start",
     "browser_recording_stop",
   ],
-  "toolSchemasSha256": "af4dda722f85010cdce86822edbf4f4c637d915ab4b668584c7048ca8a53f8ef",
+  "toolSchemasSha256": "cbdac9d7d6aa3f450a6504722596d62622b5b263ae8e760596ec821a6075b7ba",
 }
 `;
 
 exports[`production prompt and tool boundary baseline > retains pi request bytes for archetype, specialist and project agent sources > pi:specialist 1`] = `
 {
-  "promptSha256": "3e9534daed11332a4d844f38f5d27ebabdc9e22379a2420f8473ec1c7c089c53",
+  "promptSha256": "44e9baa6ee5aacd98b19f155ce9be5ce3af8116816f546fce868c10c448eaead",
   "toolNames": [
     "send_message_to_agent",
   ],

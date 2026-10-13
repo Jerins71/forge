@@ -106,7 +106,7 @@ test('turning sync on settles the first sync without conflicts', async ({ page }
   await page.goto(`${fleet.uiUrl}/?view=settings&settingsTab=environments`)
   for (const environment of [fleet.b, fleet.c]) {
     const link = await fleet.mintGrant(environment, 'link')
-    await page.getByRole('button', { name: 'Add environment' }).click()
+    await page.getByRole('button', { name: 'Add a machine' }).click()
     await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
     await page.getByRole('button', { name: 'Pair', exact: true }).click()
     await expect(page.getByTestId('pairing-success')).toContainText(environment.label)
