@@ -1,6 +1,6 @@
 import {
   constants, closeSync, fchmodSync, fstatSync, fsyncSync, linkSync, lstatSync, mkdirSync,
-  openSync, readFileSync, readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync,
+  openSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync, unlinkSync, writeFileSync,
   type Stats,
 } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -112,6 +112,19 @@ export class SyncFilesystem {
     this.syncDirectory(dst);
   }
   unlink(rel: string) { const dir = this.parent(rel); this.regular(dir, basename(rel)); this.verify(dir); unlinkSync(join(dir.path, basename(rel))); this.verify(dir); this.syncDirectory(dir); }
+  removeEmptyDirectory(rel: string): boolean {
+    try {
+      const parent = this.parent(rel), dir = this.directory(rel);
+      // Non-recursive rmdir checks emptiness atomically, including ignored files and later saves.
+      this.verify(parent); this.verify(dir); rmdirSync(dir.path);
+      this.verify(parent); this.syncDirectory(parent); return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT') return true;
+      if (['ENOTEMPTY', 'EEXIST', 'EACCES', 'EPERM', 'EBUSY'].includes(code ?? '')) return false;
+      throw error;
+    }
+  }
   syncFile(rel: string) {
     const dir = this.parent(rel); const named = this.regular(dir, basename(rel)); const fd = openSync(join(dir.path, basename(rel)), (process.platform === 'win32' ? constants.O_RDWR : constants.O_RDONLY) | nofollow);
     try { if (!sameFile(named, fstatSync(fd))) throw new SyncBoundaryError('Preserved file identity changed'); fsyncSync(fd); this.verify(dir); } finally { closeSync(fd); }

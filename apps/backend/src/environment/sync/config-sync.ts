@@ -174,6 +174,16 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
     entry.counter = Math.max(entry.counter, ...heads.map(head => head.version.vector[state.environmentId] ?? 0));
     entry.heads = configSyncFrontier([...versions(state, entry), ...heads.map(h => h.version)]).map(v => v.id);
   }
+  function pruneParents(fs: SyncFilesystem, key: string) {
+    const target = resolveConfigSyncKey(key), profile = /^profile\/([^/]+)\//.exec(key);
+    const roots = key.startsWith('global/') ? Object.values(GLOBAL_TREES) : profile ? Object.values(PROFILE_TREES).map(fn => fn(profile[1]!)) : [];
+    const root = roots.find(dir => target.startsWith(`${dir}/`));
+    if (!root) return;
+    // Reuse the allowlist's tree roots; direct-file parents and the tree root itself stay intact.
+    for (let dir = dirname(target).split(sep).join('/'); dir !== root; dir = dirname(dir).split(sep).join('/')) {
+      if (!fs.removeEmptyDirectory(dir)) break;
+    }
+  }
   function recover(fs: SyncFilesystem, state: SyncState) {
     if (!state.pending.length) return;
     const remaining: Pending[] = [];
@@ -184,7 +194,7 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       if (actual?.hash === desired.hash && (process.platform === 'win32' || (actual.mode & 0o111) === (desired.mode & 0o111))) { state.entries[pending.key]!.current = desired.id; if (pending.publish) publish(state, state.entries[pending.key]!, desired); }
       else if (!actual) {
         let displaced: Buffer | null = null; try { const value = fs.read(kept); displaced = value.bytes; const index = `${sync}/history/${pending.historyId}/entries.json`; const items = fs.json<ConfigSyncHistoryEntry[]>(index) ?? []; for (const item of items) if (!item.hash) bindHistory(fs, item, value); fs.saveJson(index, items); } catch (error) { if (!missing(error)) throw error; }
-        if (desired.hash === null && displaced && hash(displaced) === pending.expectedHash) { state.entries[pending.key]!.current = desired.id; if (pending.publish) publish(state, state.entries[pending.key]!, desired); }
+        if (desired.hash === null && displaced && hash(displaced) === pending.expectedHash) { state.entries[pending.key]!.current = desired.id; if (pending.publish) publish(state, state.entries[pending.key]!, desired); pruneParents(fs, pending.key); }
         else if (displaced) { try { installCopy(fs, kept, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
       }
       if (pending.staged) { try { fs.unlink(pending.staged); } catch (error) { if (!missing(error)) throw error; } }
@@ -217,6 +227,7 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       try { fs.link(staged, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; return stale(); }
     } else if (snapshot(fs, key)) return stale();
     if (bytes !== null) fs.unlink(staged);
+    if (desired.hash === null) pruneParents(fs, key); // Keep the journal until cleanup can recover after interruption.
     state.entries[key]!.current = desired.id; if (publishOnCommit) publish(state, state.entries[key]!, desired); state.pending = state.pending.filter(p => p !== pending); save(fs, state); return true;
     function stale() {
       if (expected) { try { installCopy(fs, kept, target); } catch (error) { if (!missing(error) && (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
