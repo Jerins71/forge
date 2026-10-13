@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, lstat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -490,5 +490,53 @@ describe('independent re-review schedules', () => {
       if (divergent) expect(m.entries[K]!.heads.some(v => v.id === cm.entries[K]!.current)).toBe(true);
       else expect(await env.read()).toBe('old');
     }
+  });
+});
+
+describe('synced deletion prunes empty parents within its allowlisted tree', () => {
+  it.each([
+    ['global/skills/probe/deep/file.md', 'skills/probe/deep/file.md', 'skills'],
+    ['profile/p/skills/probe/deep/file.md', 'profiles/p/pi/skills/probe/deep/file.md', 'profiles/p/pi/skills'],
+    ['profile/p/prompts/archetypes/probe/deep/file.md', 'profiles/p/prompts/archetypes/probe/deep/file.md', 'profiles/p/prompts/archetypes'],
+    ['profile/p/prompts/operational/probe/deep/file.md', 'profiles/p/prompts/operational/probe/deep/file.md', 'profiles/p/prompts/operational'],
+  ])('removes nested empty parents for %s but preserves the root and history', async (key, rel, root) => {
+    const a = await fixture('a'), b = await fixture('b'); await a.put('preserved', rel);
+    await b.store.apply(await writeRequest(a, b, key));
+    await rm(join(a.root, rel)); expect((await b.store.apply(await writeRequest(a, b, key))).applied).toEqual([key]);
+    await expect(stat(join(b.root, root, 'probe'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await stat(join(b.root, root))).isDirectory()).toBe(true);
+    const kept = (await b.store.history()).entries.find(e => e.key === key)!;
+    expect(await readFile(join(b.root, 'shared/state/sync/history', kept.id, key), 'utf8')).toBe('preserved');
+    b.restart(); expect((await b.store.manifest()).entries[key]!.heads.every(v => v.hash === null)).toBe(true);
+  });
+
+  it('keeps non-empty parents, including ignored files and symlink entries, without following links', async () => {
+    const a = await fixture('a', 'base'), b = await fixture('b'), outside = await fixture('outside');
+    await runConfigSync([a.participant, b.participant]);
+    await b.put('ignored data', 'skills/test/.venv/keep'); await mkdir(join(outside.root, 'empty'));
+    await symlink(join(outside.root, 'empty'), join(b.root, 'skills/test/link'));
+    await rm(join(a.root, REL)); await b.store.apply(await writeRequest(a, b));
+    expect(await b.read()).toBeNull(); expect(await readFile(join(b.root, 'skills/test/.venv/keep'), 'utf8')).toBe('ignored data');
+    expect((await lstat(join(b.root, 'skills/test/link'))).isSymbolicLink()).toBe(true);
+    expect((await stat(join(outside.root, 'empty'))).isDirectory()).toBe(true);
+  });
+
+  it('preserves a new sibling saved during deletion and keeps direct-file roots', async () => {
+    const a = await fixture('a', 'base'), b = await fixture('b'); await runConfigSync([a.participant, b.participant]);
+    await rm(join(a.root, REL)); const request = await writeRequest(a, b);
+    const racing = createConfigSyncStore(b.root, { environmentId: 'b', afterDisplace: async () => { await b.put('new sibling', 'skills/test/new.md'); } });
+    expect((await racing.apply(request)).applied).toEqual([K]); expect(await readFile(join(b.root, 'skills/test/new.md'), 'utf8')).toBe('new sibling');
+    const key = 'global/worker-presets.json', rel = 'shared/config/worker-presets.json'; await a.put('{}', rel);
+    await b.store.apply(await writeRequest(a, b, key)); await rm(join(a.root, rel)); await b.store.apply(await writeRequest(a, b, key));
+    expect((await stat(join(b.root, 'shared/config'))).isDirectory()).toBe(true);
+  });
+
+  it('prunes empty parents when an interrupted deletion rolls forward after restart', async () => {
+    const a = await fixture('a', 'base'), b = await fixture('b'); await runConfigSync([a.participant, b.participant]);
+    await rm(join(a.root, REL)); const request = await writeRequest(a, b);
+    const interrupted = createConfigSyncStore(b.root, { environmentId: 'b', afterDisplace: async () => { throw new Error('power loss'); } });
+    await expect(interrupted.apply(request)).rejects.toThrow('power loss'); b.restart(); await b.store.manifest();
+    await expect(stat(join(b.root, 'skills/test'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await stat(join(b.root, 'skills'))).isDirectory()).toBe(true); expect((await b.store.history()).entries).toHaveLength(1);
   });
 });
