@@ -1,4 +1,6 @@
 import '../../../../scripts/test-installation-state.mjs';
+import { restrictChromeCookieImportsToFixtures } from '../swarm/browser-automation/chrome-cookies.js';
+restrictChromeCookieImportsToFixtures();
 /**
  * Backend unit/integration tests run as ordinary Node processes, never as the
  * Electron main process. Do not inherit Electron development's ABI-specific

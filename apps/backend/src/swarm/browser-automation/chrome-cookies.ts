@@ -17,10 +17,14 @@ export function chromeUserDataDir(platform = process.platform) {
   if (platform === 'win32') return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Google', 'Chrome', 'User Data')
   return join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'google-chrome')
 }
-function fixtureMode() { return !!(process.env.FORGE_E2E || process.env.FORGE_E2E_CHECKOUT || process.env.FORGE_E2E_MANIFEST || process.env.FORGE_E2E_RUN_ID || process.env.FORGE_BROWSER_FIXTURE_REPO || process.env.VITEST) }
+// Fixture entrypoints explicitly set this policy before any browser work. Capture
+// inherited test mode as well for Electron's bundled main and standalone test hosts.
+// Once enabled it cannot be undone by suite teardown or environment sanitization.
+let fixtureOnly = !!(process.env.FORGE_E2E || process.env.FORGE_E2E_CHECKOUT || process.env.FORGE_E2E_MANIFEST || process.env.FORGE_E2E_RUN_ID || process.env.FORGE_BROWSER_FIXTURE_REPO || process.env.VITEST)
+export function restrictChromeCookieImportsToFixtures(): void { fixtureOnly = true }
 async function sourceProfile(explicit: string | undefined, platform = process.platform) {
   const configured = explicit ?? process.env.FORGE_BROWSER_TEST_CHROME_PROFILE
-  if (!fixtureMode()) return configured ?? chromeUserDataDir(platform)
+  if (!fixtureOnly) return configured ?? chromeUserDataDir(platform)
   if (!configured) return fail('source-unavailable', 'Chrome import in a test fleet requires an explicit isolated test profile. Real Chrome and Keychain access are disabled.')
   const selected = await realpath(resolve(configured)).catch(() => resolve(configured))
   const realDefault = resolve(chromeUserDataDir(platform)), rel = relative(realDefault, selected)
@@ -106,7 +110,7 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
     const rows = database.prepare(`SELECT ${partition} AS partition_key,${crossSite} AS cross_site,${lastUsed} AS last_used,host_key,name,value,encrypted_value,path,CASE WHEN expires_utc > 0 THEN expires_utc/1000000.0 - 11644473600 ELSE -1 END AS expires,is_secure,is_httponly,samesite FROM cookies LIMIT 20001`).all() as unknown as Array<{ host_key: string; name: string; value: string; encrypted_value: Uint8Array; path: string; expires: number; is_secure: number; is_httponly: number; samesite: number; last_used: number | null; partition_key: string; cross_site: number }>
     if (rows.length > 20000) return fail('source-unavailable', 'Chrome has too many cookies for one import. Use its inspect toggle or remove unused sites first.')
     const needsKey = rows.some(row => row.encrypted_value.length > 0 && (platform === 'darwin' || Buffer.from(row.encrypted_value).subarray(0, 3).toString() === 'v11'))
-    if (needsKey && fixtureMode() && !options.passphrase) return fail('source-unavailable', 'Native Keychain and secret-service reads are disabled in test fleets. Inject a synthetic fixture key provider.')
+    if (needsKey && fixtureOnly && !options.passphrase) return fail('source-unavailable', 'Native Keychain and secret-service reads are disabled in test fleets. Inject a synthetic fixture key provider.')
     const passphrase = needsKey ? await (options.passphrase ?? (platform === 'darwin' ? macPassphrase : linuxPassphrase))() : ''
     const key = pbkdf2Sync(platform === 'darwin' ? passphrase : 'peanuts', 'saltysalt', platform === 'darwin' ? 1003 : 1, 16, 'sha1')
     const v11 = platform === 'linux' && needsKey ? pbkdf2Sync(passphrase, 'saltysalt', 1, 16, 'sha1') : undefined

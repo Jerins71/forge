@@ -209,8 +209,18 @@ test('cookie imports stage site counts, read real CDP and decrypt only an owned 
   database.close()
   let shell: ReturnType<typeof spawn> | undefined
   try {
-    await expect(readRunningChrome()).rejects.toThrow('explicit isolated test profile')
-    await expect(readChromeDatabase()).rejects.toThrow('explicit isolated test profile')
+    // A worker can outlive a fleet whose teardown removed its environment markers.
+    // Cookie isolation must be a process invariant, including when no E2E config ran.
+    const markerNames = ['FORGE_E2E', 'FORGE_E2E_CHECKOUT', 'FORGE_E2E_MANIFEST', 'FORGE_E2E_RUN_ID', 'FORGE_BROWSER_FIXTURE_REPO', 'VITEST', 'FORGE_BROWSER_TEST_CHROME_PROFILE']
+    const savedMarkers = markerNames.map(name => [name, process.env[name]] as const)
+    for (const name of markerNames) delete process.env[name]
+    try {
+      await expect(readRunningChrome()).rejects.toThrow('explicit isolated test profile')
+      await expect(readChromeDatabase()).rejects.toThrow('explicit isolated test profile')
+      await expect(readChromeDatabase({ userDataDir: chromeRoot, platform: 'darwin' })).rejects.toThrow('Native Keychain and secret-service reads are disabled')
+    } finally {
+      for (const [name, value] of savedMarkers) { if (value === undefined) delete process.env[name]; else process.env[name] = value }
+    }
     const decoded = await readChromeDatabase({ userDataDir: chromeRoot, platform: 'darwin', passphrase: async () => 'synthetic-cookie-proof' }); expect(decoded).toHaveLength(3)
     expect(decoded[0]!.lastUsedAt).toBeTruthy(); expect(decoded.find(cookie => cookie.name === 'fixture-b')!.partitionKey).toBe('https://partition.test')
     await expect(readChromeDatabase({ userDataDir: chromeRoot, platform: 'win32' })).rejects.toBeInstanceOf(ChromeCookieReadError)
@@ -233,6 +243,6 @@ test('cookie imports stage site counts, read real CDP and decrypt only an owned 
     await (await source.newBrowserCDPSession()).send('Storage.setCookies', { cookies: [{ name: 'running-fixture', value: 'synthetic-source', domain: 'running.example.test', path: '/', secure: true, httpOnly: true, partitionKey: { topLevelSite: 'https://partition.test', hasCrossSiteAncestor: true }, expires: Date.now() / 1000 + 3600 }] }); await source.close()
     const running = await readRunningChrome(sourceRoot); expect(running.map(cookie => cookie.name)).toContain('running-fixture'); expect(running.find(cookie => cookie.name === 'running-fixture')!.partitionKey).toBe('https://partition.test')
     await expect(readRunningChrome(join(root, 'missing-source'))).rejects.toBeInstanceOf(ChromeCookieReadError)
-    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'cookie-proof.json'), JSON.stringify({ passed: true, sourceA: 'real Chrome headless-shell CDP using DevToolsActivePort', sourceB: 'real encrypted throwaway SQLite database with fixture key provider', domainSelection: true, noValuesInPreviewOrAudit: true, oneTimeTransfer: true, forgetSite: true, windowsFallbackRejected: true, keychainPrompt: 'not exercised; no user keychain access' }, null, 2))
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'cookie-proof.json'), JSON.stringify({ passed: true, sourceA: 'real Chrome headless-shell CDP using DevToolsActivePort', sourceB: 'real encrypted throwaway SQLite database with fixture key provider', domainSelection: true, noValuesInPreviewOrAudit: true, oneTimeTransfer: true, forgetSite: true, windowsFallbackRejected: true, guardSurvivesFleetTeardown: true, nativeKeysDisabledWithoutEnvMarkers: true, keychainPrompt: 'not exercised; no user keychain access' }, null, 2))
   } finally { shell?.kill(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
 })
