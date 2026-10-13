@@ -3,6 +3,7 @@ import { mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type Database from "better-sqlite3";
 import type { EnvironmentCapabilities, EnvironmentDescriptor } from "@forge/protocol/environment-v2";
+import { CONFIG_SYNC_VERSION } from "@forge/protocol";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import { EnvironmentDescriptorSchema, ENVIRONMENT_PROTOCOL_VERSION } from "@forge/protocol/environment-v2";
 import { writeJsonFileAtomic } from "../utils/atomic-files.js";
@@ -42,7 +43,7 @@ export class EnvironmentIdentityMismatch extends Error {
 const descriptorValidator = TypeCompiler.Compile(EnvironmentDescriptorSchema);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const capabilities: EnvironmentCapabilities = {
-  configSync: 2,
+  configSync: CONFIG_SYNC_VERSION,
   projectAgentMetadata: true,
   sessionState: true,
   shellResume: true,

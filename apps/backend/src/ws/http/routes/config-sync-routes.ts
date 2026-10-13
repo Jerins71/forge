@@ -1,5 +1,5 @@
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
-import type { ConfigSyncApplyRequest, ConfigSyncLeaseRequest, ConfigSyncResolvePromptRequest, ConfigSyncRestoreRequest } from "@forge/protocol";
+import type { ConfigSyncApplyRequest, ConfigSyncLeaseRequest, ConfigSyncResolvePromptRequest, ConfigSyncRestoreRequest, ConfigSyncResolutionCommitRequest } from "@forge/protocol";
 import { createConfigSyncStore, isConfigSyncKeyError, type ConfigSyncStore } from "../../../environment/sync/config-sync.js";
 import { isEnoentError } from "../../../utils/fs-errors.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
@@ -40,6 +40,9 @@ export function createConfigSyncRoutes(options: { dataDir: string }): HttpRoute[
     }),
     route("lease", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.lease(await readJsonBody(request) as ConfigSyncLeaseRequest) });
+    }),
+    route("resolve-commit", "POST", async (request, response) => {
+      sendJson(response, 200, { ...await store.commitResolution(await readJsonBody(request) as ConfigSyncResolutionCommitRequest) });
     }),
     route("resolve-prompt", "POST", async (request, response) => {
       sendJson(response, 200, { ...await store.resolvePrompt(await readJsonBody(request, 8 * 1024 * 1024) as ConfigSyncResolvePromptRequest) });

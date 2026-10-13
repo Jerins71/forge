@@ -435,8 +435,8 @@ Key persistent and regenerable paths use this canonical layout (most files are c
 │   ├── state/
 │   │   ├── mobile-devices.json
 │   │   ├── project-agent-shares.json
-│   │   ├── sync/state.json                # Configuration sync: agreed versions, open conflicts, hub lease
-│   │   ├── sync/history/<batch>/          # Every file sync replaced or deleted (entries.json + copies), for Restore
+│   │   ├── sync/state.json                # Configuration sync: causal versions, retained heads, mutation journal
+│   │   ├── sync/history/<operation>/      # Displaced inodes plus hash-bound history entries, for Restore
 │   │   └── .*-done                        # One-time migration/reconciliation sentinels
 │   ├── knowledge/
 │   │   ├── common.md                      # Global memory (user-editable)
@@ -568,12 +568,20 @@ never held a file has no version. Legacy agreement timestamps are not treated as
 extends the component-wise maximum of those heads and increments its own durable counter. A third
 independent offline edit remains a conflict. An ordinary edit during a conflict advances only the
 copy it was based on. Agent resolution requires complete, hash-verified inputs and gives the agent
-paths to immutable retained files, including large inputs, without truncation.
+paths to immutable retained files, including large inputs, without truncation. Each agent operation
+owns its immutable input ids, displayed version precondition and separate output file. After a
+successful launch, the app explicitly commits the completed output verified against its completion
+hash. Saving the live file never implicitly resolves a conflict. A stale operation keeps its output
+for recovery and requires a new comparison; another agent operation cannot replace its inputs.
+Keep also carries the displayed precondition. The backend refuses any resolution whose next local
+counter would consume a head outside the acknowledged ancestry.
 
 Before replacement or deletion, sync durably indexes a unique history entry and moves the actual
 file inode to `shared/state/sync/history/`. It checks the displaced contents and installs a staged
 file exclusively, refusing an intervening save instead of overwriting it. A journal recovers an
-interrupted mutation without hiding history. **Restore** requires the current version it is replacing,
+interrupted mutation without hiding history. Rollback installs a distinct live inode; listed history
+remains bound to immutable bytes even if an editor later saves through the displaced inode.
+**Restore** requires the current version it is replacing,
 uses the same mutation primitive and creates an ordinary local version. File modes and skill
 executable bits are preserved.
 

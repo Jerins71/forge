@@ -9,6 +9,7 @@
 //   - nothing outside the allowlist (secrets, auth) is ever copied.
 //   VITE_FORGE_E2E_PLATFORM=1 pnpm --filter @forge/ui build
 //   pnpm exec playwright test scripts/environment-e2e/sync.spec.ts --config scripts/environment-e2e/playwright.config.ts
+import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
@@ -43,6 +44,15 @@ async function shot(page: Page, name: string, focus?: Locator) {
   if (focus) { await focus.scrollIntoViewIfNeeded(); await focus.screenshot({ path }) }
   else await page.screenshot({ path })
   assertions[`screenshot:${name}`] = path
+}
+async function latestResolution(index: number) {
+  const dir = join(dataDir(index), 'shared/state/sync/resolutions')
+  return (await Promise.all((await readdir(dir)).map(id => readFile(join(dir, id, 'operation.json'), 'utf8').then(JSON.parse)))).sort((a, b) => b.at.localeCompare(a.at))[0]
+}
+async function completeResolution(index: number, operation: { id: string }, content: string) {
+  const dir = `shared/state/sync/resolutions/${operation.id}`
+  await write(index, `${dir}/result`, content)
+  await write(index, `${dir}/complete.json`, JSON.stringify({ hash: createHash('sha256').update(content).digest('hex') }))
 }
 const syncNow = (page: Page) => page.getByRole('button', { name: 'Sync now' }).click()
 
@@ -155,7 +165,7 @@ test('"Ask an agent to resolve" starts a session here, and its merge resolves th
   } finally { rpc.close() }
   // The scripted provider cannot edit files, so the agent's merge is written as it would be.
   const merged = presets(['fixture-worker', 'reviewer', 'from-a', 'second-a', 'second-b'])
-  await write(0, PRESETS, merged)
+  await completeResolution(0, await latestResolution(0), merged)
   await syncNow(page)
   await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })
   await expect.poll(() => read(1, PRESETS), { timeout: 30_000 }).toBe(merged)
@@ -215,7 +225,7 @@ test('with two windows open only one syncs, and Sync now in the other takes over
 })
 
 
-test('a late C edit survives a merge that acknowledged only A and B', async ({ page }) => {
+test('two agent operations on A keep their own inputs when C rejoins', async ({ page }) => {
   await fleet.stop(fleet.c); await fleet.stop(fleet.b)
   await write(0, PRESETS, presets(['fixture-worker', 'merge-a']))
   await syncNow(page)
@@ -224,16 +234,25 @@ test('a late C edit survives a merge that acknowledged only A and B', async ({ p
   await expect.poll(async () => { await syncNow(page); return page.getByTestId('sync-conflict').count() }, { timeout: 60_000, intervals: [2_000] }).toBe(1)
   await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
   await expect(page.getByTestId('sync-conflict').getByRole('status')).toContainText('An agent is merging')
+  const ab = await latestResolution(0)
   await write(2, PRESETS, presets(['fixture-worker', 'offline-c']))
   await fleet.start(fleet.c)
   await syncNow(page)
   await expect(page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.c.label}` })).toBeVisible({ timeout: 30_000 })
-  await write(0, PRESETS, presets(['fixture-worker', 'merge-a', 'merge-b']))
+  await page.getByTestId('sync-conflict').getByRole('button', { name: 'Ask an agent to resolve' }).click()
+  await expect.poll(async () => (await latestResolution(0)).id).not.toBe(ab.id)
+  const abc = await latestResolution(0)
+  await completeResolution(0, ab, presets(['fixture-worker', 'merge-a', 'merge-b']))
   await syncNow(page)
   await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
   expect(await read(2, PRESETS)).toContain('offline-c')
   await page.getByTestId('sync-conflict').getByRole('button', { name: 'Compare' }).click()
   await expect(page.getByTestId('sync-conflict-version')).toHaveCount(2)
+  await completeResolution(0, abc, presets(['fixture-worker', 'stale-abc-result']))
+  await syncNow(page)
+  await expect(page.getByTestId('sync-conflict')).toHaveCount(1)
+  expect(await read(2, PRESETS)).toContain('offline-c')
+  assertions.overlappingResolutionOperations = { ab: ab.id, abc: abc.id, staleResultRefused: true }
   await shot(page, '09-late-c-preserved')
   await page.getByTestId('sync-conflict').getByRole('button', { name: `Keep ${fleet.a.label}` }).click()
   await expect(page.getByTestId('sync-conflict')).toHaveCount(0, { timeout: 30_000 })

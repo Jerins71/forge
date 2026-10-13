@@ -1,5 +1,5 @@
-/** Configuration sync v2: backends own causality and CAS; clients relay complete retained heads. */
-export const CONFIG_SYNC_VERSION = 2 as const
+/** Configuration sync v3: backends own causality and CAS; clients relay complete retained heads. */
+export const CONFIG_SYNC_VERSION = 3 as const
 export const CONFIG_SYNC_MAX_FILE_BYTES = 2 * 1024 * 1024
 export const CONFIG_SYNC_MAX_REQUEST_BYTES = 8 * 1024 * 1024
 export type ConfigSyncHash = string | null
@@ -60,6 +60,9 @@ export interface ConfigSyncHistoryEntry {
   at: string
   size: number
   versionId?: string
+  /** Listed history is bound to immutable content, separately from the displaced inode. */
+  hash?: string
+  mode?: number
 }
 export interface ConfigSyncHistoryResponse { entries: ConfigSyncHistoryEntry[] }
 export interface ConfigSyncRestoreRequest { id: string; key: string; expectedVersionId: string | null }
@@ -73,7 +76,23 @@ export interface ConfigSyncResolvePromptRequest {
   acknowledgedVersionIds: string[]
   versions: { label: string; version: ConfigSyncVersion; contentBase64?: string | null }[]
 }
-export interface ConfigSyncResolvePromptResponse { title: string; text: string }
+export interface ConfigSyncResolutionOperation {
+  id: string
+  key: string
+  expectedVersionId: string | null
+  expectHash: ConfigSyncHash
+  acknowledgedVersionIds: string[]
+}
+export interface ConfigSyncResolvePromptResponse {
+  title: string
+  text: string
+  operation: ConfigSyncResolutionOperation
+  outputPath: string
+  completionPath: string
+}
+/** Explicit commit of the completed, hash-verified staged result for these immutable inputs. */
+export type ConfigSyncResolutionCommitRequest = ConfigSyncResolutionOperation
+export interface ConfigSyncResolutionCommitResponse { status: 'waiting' | 'committed' | 'stale' }
 
 /** Component-wise causal order. Equality is not strict dominance. */
 export function configSyncDominates(a: ConfigSyncVector, b: ConfigSyncVector): boolean {

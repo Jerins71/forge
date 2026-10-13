@@ -1,5 +1,5 @@
-import { configSyncLogicalKey, runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup } from '@forge/client-runtime'
-import type { ConfigSyncHistoryEntry, ConfigSyncHistoryResponse, ConfigSyncManifest } from '@forge/protocol'
+import { configSyncLogicalKey, runConfigSync, type ConfigSyncParticipant, type ConfigSyncReport, type EnvironmentRegistry, type LogicalProjectGroup, type ConfigSyncOptions } from '@forge/client-runtime'
+import { CONFIG_SYNC_VERSION, type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse, type ConfigSyncManifest, type ConfigSyncResolutionOperation, type ConfigSyncResolutionCommitResponse } from '@forge/protocol'
 
 /**
  * Configuration sync hub. This app reaches every paired environment, so it compares their
@@ -7,6 +7,7 @@ import type { ConfigSyncHistoryEntry, ConfigSyncHistoryResponse, ConfigSyncManif
  * part is a choice of this device, kept in local storage.
  */
 const STORAGE_KEY = 'forge.configSync.v1'
+const RESOLUTIONS_KEY = 'forge.configSync.resolutions.v2'
 const INTERVAL_MS = 10_000
 
 export interface ConfigSyncSettings {
@@ -72,11 +73,13 @@ export class ConfigSyncHub {
   private state: ConfigSyncState
   private readonly listeners = new Set<() => void>()
   private timer: ReturnType<typeof setInterval> | null = null
+  private resolutions: { environmentId: string; operation: ConfigSyncResolutionOperation }[] = []
   private inflight: Promise<void> | null = null
   /** This client's hub lease id. Another open client defers to whichever holds the lease. */
   private readonly holder = crypto.randomUUID()
 
   constructor(private readonly registry: EnvironmentRegistry) {
+    try { const saved: unknown = JSON.parse(localStorage.getItem(RESOLUTIONS_KEY) ?? '[]'); if (Array.isArray(saved)) this.resolutions = saved } catch { /* Ignore invalid device-local state. */ }
     this.state = { settings: loadSettings(), running: false, report: null, error: null, activity: [] }
   }
 
@@ -108,7 +111,7 @@ export class ConfigSyncHub {
     // Hand the hub role over now rather than when the lease expires. Only the holder's release counts.
     let participants: ConfigSyncParticipant[] = []
     try { participants = this.participants() } catch { /* The registry is already gone; the lease expires on its own. */ }
-    for (const participant of participants.filter(participant => participant.capability === 2)) {
+    for (const participant of participants.filter(participant => participant.capability === CONFIG_SYNC_VERSION)) {
       void participant.fetchJson('/api/settings/sync/lease', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ holder: this.holder, ttlMs: 0 }),
       }).catch(() => {})
@@ -142,15 +145,31 @@ export class ConfigSyncHub {
    * Runs one pass now, or joins the pass already running. A pass the user asked for (`manual`, or
    * `keep` to settle a conflict) takes the hub role from another open client; a timed pass defers.
    */
-  syncNow(options: { keep?: { key: string; environmentId: string; versionId: string; acknowledgedVersionIds: string[] }; manual?: boolean } = {}): Promise<void> {
+  syncNow(options: { keep?: ConfigSyncOptions['force']; manual?: boolean } = {}): Promise<void> {
     const explicit = options.manual === true || options.keep !== undefined
     if (this.inflight && !explicit) return this.inflight
     const run = (this.inflight ?? Promise.resolve()).then(async () => {
       this.set({ running: true })
       try {
-        const report = await runConfigSync(this.participants(), { holder: this.holder, takeover: explicit, ...(options.keep ? { force: options.keep } : {}) })
+        const participants = this.participants()
+        let resolutionError: string | null = null
+        for (const pending of [...this.resolutions]) {
+          const participant = participants.find(p => p.environmentId === pending.environmentId && p.capability === CONFIG_SYNC_VERSION)
+          if (!participant) continue
+          try {
+            const response = await participant.fetchJson<ConfigSyncResolutionCommitResponse>('/api/settings/sync/resolve-commit', {
+              method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(pending.operation),
+            })
+            if (response.status !== 'waiting') {
+              this.resolutions = this.resolutions.filter(item => item !== pending)
+              localStorage.setItem(RESOLUTIONS_KEY, JSON.stringify(this.resolutions))
+              if (response.status === 'stale') resolutionError = 'The conflict changed before the agent result was committed. Its result is kept; compare the current versions.'
+            }
+          } catch (error) { resolutionError = error instanceof Error ? error.message : String(error) }
+        }
+        const report = await runConfigSync(participants, { holder: this.holder, takeover: explicit, ...(options.keep ? { force: options.keep } : {}) })
         const pushed = report.pushed.map((p) => ({ at: report.finishedAt, ...p }))
-        this.set({ report, error: null, activity: [...pushed.reverse(), ...this.state.activity].slice(0, 50) })
+        this.set({ report, error: resolutionError, activity: [...pushed.reverse(), ...this.state.activity].slice(0, 50) })
       } catch (error) {
         this.set({ error: error instanceof Error ? error.message : String(error) })
       } finally {
@@ -162,9 +181,15 @@ export class ConfigSyncHub {
     return run
   }
 
+  /** Register only after session.launch succeeds. Each agent owns a separate staged result. */
+  trackResolution(environmentId: string, operation: ConfigSyncResolutionOperation) {
+    this.resolutions.push({ environmentId, operation })
+    localStorage.setItem(RESOLUTIONS_KEY, JSON.stringify(this.resolutions))
+  }
+
   /** Recent replaced and deleted versions on every participant, newest first. */
   async history(): Promise<(ConfigSyncHistoryEntry & { environmentId: string; label: string; logicalKey: string | null })[]> {
-    const lists = await Promise.all(this.participants().filter(participant => participant.capability === 2).map(async (participant) => {
+    const lists = await Promise.all(this.participants().filter(participant => participant.capability === CONFIG_SYNC_VERSION).map(async (participant) => {
       try {
         const { entries } = await participant.fetchJson<ConfigSyncHistoryResponse>('/api/settings/sync/history')
         return entries.map((entry) => ({ ...entry, environmentId: participant.environmentId, label: participant.label, logicalKey: configSyncLogicalKey(entry.key, participant.projects) }))

@@ -7,7 +7,7 @@ import {
   type ConfigSyncHistoryEntry, type ConfigSyncHistoryResponse,
   type ConfigSyncLeaseRequest, type ConfigSyncLeaseResponse, type ConfigSyncManifest,
   type ConfigSyncManifestEntry, type ConfigSyncResolvePromptRequest, type ConfigSyncResolvePromptResponse,
-  type ConfigSyncRestoreRequest, type ConfigSyncSkipped, type ConfigSyncVersion,
+  type ConfigSyncResolutionOperation, type ConfigSyncResolutionCommitRequest, type ConfigSyncResolutionCommitResponse, type ConfigSyncRestoreRequest, type ConfigSyncSkipped, type ConfigSyncVersion,
 } from '@forge/protocol';
 import { getConfigSyncDir, getEnvironmentIdentityPath, sanitizePathSegment } from '../../swarm/storage/data-paths.js';
 import { SyncAliasError, SyncBoundaryError, SyncFilesystem, syncFilenameIdentity } from './filesystem-boundary.js';
@@ -41,8 +41,8 @@ function exact(value: unknown, fields: string[], subject: string): asserts value
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !fields.includes(key))) throw new NotSyncedError(`Unknown or invalid ${subject} fields`);
 }
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
-interface LocalKey { current: string | null; heads: string[]; retained: string[]; counter: number; legacy?: boolean; resolution?: { current: string | null; acknowledged: string[] } }
-interface Pending { key: string; historyId: string; expectedHash: string | null; desired: string; staged?: string }
+interface LocalKey { current: string | null; heads: string[]; retained: string[]; counter: number; legacy?: boolean }
+interface Pending { key: string; historyId: string; expectedHash: string | null; desired: string; staged?: string; publish?: boolean }
 interface SyncState {
   version: 2; environmentId: string; entries: Record<string, LocalKey>; versions: Record<string, ConfigSyncVersion>;
   pending: Pending[];
@@ -75,6 +75,8 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
     const environmentId = options.environmentId ?? identity?.environmentId ?? raw?.environmentId ?? randomUUID();
     if (raw?.version === 2) {
       if (raw.environmentId !== environmentId) throw new Error('Config sync environment identity changed');
+      // Older prepared prompts are not authority for subsequent filesystem writes.
+      for (const entry of Object.values(raw.entries)) delete (entry as LocalKey & { resolution?: unknown }).resolution;
       return raw;
     }
     const state: SyncState = { version: 2, environmentId, entries: {}, versions: {}, pending: [] };
@@ -124,13 +126,37 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
     const before = entry.current ? state.versions[entry.current] : undefined;
     if (process.platform === 'win32' && before && current) current.mode = (current.mode & ~0o111) | (before.mode & 0o111);
     if (before && before.hash === (current?.hash ?? null) && (before.mode & 0o111) === ((current?.mode ?? 0) & 0o111)) return entry;
-    let parents = before ? [before] : [];
-    if (entry.resolution?.current === entry.current) parents = entry.resolution.acknowledged.map(id => state.versions[id]!);
-    else if (before) parents = versions(state, entry).filter(v => configSyncContentIdentity(v) === configSyncContentIdentity(before));
-    if (!parents.length && before) parents = [before];
+    const parents = editParents(state, entry);
     const version = localVersion(state, entry, parents, current); retain(fs, state, version, current?.bytes ?? null);
-    delete entry.legacy; entry.retained.push(version.id); entry.current = version.id; entry.heads = configSyncFrontier([...versions(state, entry), version]).map(v => v.id); delete entry.resolution;
+    delete entry.legacy; entry.retained.push(version.id); entry.current = version.id; entry.heads = configSyncFrontier([...versions(state, entry), version]).map(v => v.id);
     return entry;
+  }
+  function editParents(state: SyncState, entry: LocalKey): ConfigSyncVersion[] {
+    const before = entry.current ? state.versions[entry.current] : undefined;
+    if (!before) return [];
+    const equal = versions(state, entry).filter(v => configSyncContentIdentity(v) === configSyncContentIdentity(before));
+    return equal.length ? equal : [before];
+  }
+  function resolutionAllowed(state: SyncState, entry: LocalKey, parents: ConfigSyncVersion[]): boolean {
+    const acknowledged = configSyncMaxVector(parents), candidate = { ...acknowledged };
+    candidate[state.environmentId] = Math.max(entry.counter, acknowledged[state.environmentId] ?? 0) + 1;
+    // Adding the resolver's dot must not silently consume a local head the user never saw.
+    return versions(state, entry).every(head => !configSyncDominates(candidate, head.vector) ||
+      Object.entries(head.vector).every(([id, n]) => (acknowledged[id] ?? 0) >= n));
+  }
+  function publish(state: SyncState, entry: LocalKey, version: ConfigSyncVersion) {
+    entry.heads = configSyncFrontier([...versions(state, entry), version]).map(v => v.id);
+  }
+  function installCopy(fs: SyncFilesystem, source: string, target: string) {
+    const kept = fs.read(source), staged = `${dirname(target).split(sep).join('/')}/.forge-sync-${randomUUID()}.tmp`;
+    fs.writeExclusive(staged, kept.bytes, kept.mode);
+    try { fs.link(staged, target); } finally { fs.unlink(staged); }
+  }
+  function bindHistory(fs: SyncFilesystem, item: ConfigSyncHistoryEntry, kept: ReturnType<SyncFilesystem['read']>) {
+    item.hash = hash(kept.bytes); item.mode = kept.mode; item.size = kept.bytes.length;
+    const path = `${sync}/blobs/${item.hash}`;
+    try { fs.writeExclusive(path, kept.bytes, 0o444); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    if (hash(fs.read(path).bytes) !== item.hash) throw new Error('History content hash mismatch');
   }
   function validateHead(head: ConfigSyncHead): Buffer | null {
     exact(head, ['version', 'contentBase64'], 'head');
@@ -155,18 +181,18 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       try {
       const target = resolveConfigSyncKey(pending.key), kept = `${sync}/history/${pending.historyId}/${pending.key}`;
       const desired = state.versions[pending.desired]!; const actual = snapshot(fs, pending.key);
-      if (actual?.hash === desired.hash && (process.platform === 'win32' || (actual.mode & 0o111) === (desired.mode & 0o111))) state.entries[pending.key]!.current = desired.id;
+      if (actual?.hash === desired.hash && (process.platform === 'win32' || (actual.mode & 0o111) === (desired.mode & 0o111))) { state.entries[pending.key]!.current = desired.id; if (pending.publish) publish(state, state.entries[pending.key]!, desired); }
       else if (!actual) {
-        let displaced: Buffer | null = null; try { displaced = fs.read(kept).bytes; } catch (error) { if (!missing(error)) throw error; }
-        if (desired.hash === null && displaced && hash(displaced) === pending.expectedHash) state.entries[pending.key]!.current = desired.id;
-        else if (displaced) { try { fs.link(kept, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
+        let displaced: Buffer | null = null; try { const value = fs.read(kept); displaced = value.bytes; const index = `${sync}/history/${pending.historyId}/entries.json`; const items = fs.json<ConfigSyncHistoryEntry[]>(index) ?? []; for (const item of items) if (!item.hash) bindHistory(fs, item, value); fs.saveJson(index, items); } catch (error) { if (!missing(error)) throw error; }
+        if (desired.hash === null && displaced && hash(displaced) === pending.expectedHash) { state.entries[pending.key]!.current = desired.id; if (pending.publish) publish(state, state.entries[pending.key]!, desired); }
+        else if (displaced) { try { installCopy(fs, kept, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
       }
       if (pending.staged) { try { fs.unlink(pending.staged); } catch (error) { if (!missing(error)) throw error; } }
       } catch (error) { if (error instanceof SyncBoundaryError || (error as { reason?: string }).reason === 'too-large' || ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) remaining.push(pending); else throw error; }
     }
     state.pending = remaining; save(fs, state);
   }
-  async function mutate(fs: SyncFilesystem, state: SyncState, key: string, expected: Snapshot | null, desired: ConfigSyncVersion, action: ConfigSyncHistoryEntry['action']): Promise<boolean> {
+  async function mutate(fs: SyncFilesystem, state: SyncState, key: string, expected: Snapshot | null, desired: ConfigSyncVersion, action: ConfigSyncHistoryEntry['action'], publishOnCommit = false): Promise<boolean> {
     const target = resolveConfigSyncKey(key), id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`;
     const dir = `${sync}/history/${id}`, kept = `${dir}/${key}`, staged = `${dirname(target).split(sep).join('/')}/.forge-sync-${randomUUID()}.tmp`;
     const bytes = desired.hash === null ? null : fs.read(blob(desired)).bytes;
@@ -175,7 +201,7 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
     // Index and causal state are fsynced BEFORE displacement. A partial batch or crash cannot hide
     // the preserved inode, and every operation gets its own id (never a shared key backup).
     fs.saveJson(`${dir}/entries.json`, expected ? [history] : []);
-    const pending: Pending = { key, historyId: id, expectedHash: expected?.hash ?? null, desired: desired.id, ...(bytes !== null ? { staged } : {}) };
+    const pending: Pending = { key, historyId: id, expectedHash: expected?.hash ?? null, desired: desired.id, ...(publishOnCommit ? { publish: true } : {}), ...(bytes !== null ? { staged } : {}) };
     state.pending.push(pending); save(fs, state);
     await options.beforeDisplace?.(); fs.revalidate();
     if (expected) {
@@ -184,16 +210,16 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       // eslint-disable-next-line no-restricted-syntax -- Move the actual displaced inode; atomic overwrite would lose intervening saves.
       try { fs.rename(target, kept); } catch (error) { if (!missing(error)) throw error; return stale(); }
       await options.afterDisplace?.();
-      fs.syncFile(kept); const displaced = fs.read(kept); history.size = displaced.bytes.length; fs.saveJson(`${dir}/entries.json`, [history]);
+      fs.syncFile(kept); const displaced = fs.read(kept); bindHistory(fs, history, displaced); fs.saveJson(`${dir}/entries.json`, [history]);
       if (hash(displaced.bytes) !== expected.hash || process.platform !== 'win32' && (displaced.mode & 0o111) !== (expected.mode & 0o111)) return stale();
     } else if (snapshot(fs, key)) return stale();
     if (bytes !== null) {
       try { fs.link(staged, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; return stale(); }
     } else if (snapshot(fs, key)) return stale();
     if (bytes !== null) fs.unlink(staged);
-    state.entries[key]!.current = desired.id; state.pending = state.pending.filter(p => p !== pending); save(fs, state); return true;
+    state.entries[key]!.current = desired.id; if (publishOnCommit) publish(state, state.entries[key]!, desired); state.pending = state.pending.filter(p => p !== pending); save(fs, state); return true;
     function stale() {
-      if (expected) { try { fs.link(kept, target); } catch (error) { if (!missing(error) && (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
+      if (expected) { try { installCopy(fs, kept, target); } catch (error) { if (!missing(error) && (error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; } }
       if (bytes !== null) { try { fs.unlink(staged); } catch (error) { if (!missing(error)) throw error; } }
       state.pending = state.pending.filter(p => p !== pending); observe(fs, state, key, snapshot(fs, key)); save(fs, state); return false;
     }
@@ -227,7 +253,7 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       }
       for (const key of Object.keys(state.entries)) if (!skipped.some(item => key === item.key || item.subtree && key.startsWith(`${item.key}/`))) inspect(key);
       save(fs, state);
-      return { version: 2, environmentId: state.environmentId, files, entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, { current: entry.current, heads: versions(state, entry) }])), skipped };
+      return { version: CONFIG_SYNC_VERSION, environmentId: state.environmentId, files, entries: Object.fromEntries(Object.entries(state.entries).map(([key, entry]) => [key, { current: entry.current, heads: versions(state, entry) }])), skipped };
     });
   }
   async function readSyncFile(key: string, versionId?: string): Promise<ConfigSyncFile> {
@@ -243,7 +269,7 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
   }
   async function apply(request: ConfigSyncApplyRequest): Promise<ConfigSyncApplyResponse> {
     exact(request, ['version', 'writes'], 'apply request');
-    if (request?.version !== CONFIG_SYNC_VERSION || !Array.isArray(request.writes)) throw new Error('Update required: config sync version 2');
+    if (request?.version !== CONFIG_SYNC_VERSION || !Array.isArray(request.writes)) throw new Error(`Update required: config sync version ${CONFIG_SYNC_VERSION}`);
     const targets = new Set<string>();
     for (const write of request.writes) {
       exact(write, ['key', 'expectedVersionId', 'expectHash', 'heads', 'resolution'], 'write');
@@ -264,9 +290,11 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
           const ids = write.resolution.acknowledgedVersionIds;
           if (!Array.isArray(ids) || new Set(ids).size !== ids.length || ids.length < 2 || !ids.includes(write.resolution.chosenVersionId) || ids.some(id => !local.retained.includes(id))) throw new Error('Missing exact resolution heads');
           const selected = state.versions[write.resolution.chosenVersionId]!;
-          const chosen = selected.hash === null ? null : { ...fs.read(blob(selected)), hash: selected.hash };
-          const resolved = localVersion(state, local, ids.map(id => state.versions[id]!), chosen);
-          retain(fs, state, resolved, chosen?.bytes ?? null); local.retained.push(resolved.id); resolutionVersion = resolved; local.heads = configSyncFrontier([...versions(state, local), resolved]).map(v => v.id);
+          const chosen = selected.hash === null ? null : { ...fs.read(blob(selected)), hash: selected.hash, mode: selected.mode };
+          const parents = ids.map(id => state.versions[id]!);
+          if (!resolutionAllowed(state, local, parents)) { save(fs, state); stale.push(write.key); continue; }
+          const resolved = localVersion(state, local, parents, chosen);
+          retain(fs, state, resolved, chosen?.bytes ?? null); local.retained.push(resolved.id); resolutionVersion = resolved;
         }
         save(fs, state);
         const heads = versions(state, local);
@@ -275,8 +303,8 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
         if (!resolutionVersion && new Set(heads.map(configSyncContentIdentity)).size > 1) continue;
         const currentVersion = local.current ? state.versions[local.current] : undefined;
         const desired = resolutionVersion ?? heads.find(head => !currentVersion || configSyncDominates(head.vector, currentVersion.vector)) ?? heads[0]!;
-        if ((current?.hash ?? null) === desired.hash && ((current?.mode ?? 0) & 0o111) === (desired.mode & 0o111)) { local.current = desired.id; save(fs, state); continue; }
-        if (await mutate(fs, state, write.key, current, desired, desired.hash === null ? 'delete' : 'overwrite')) applied.push(write.key); else stale.push(write.key);
+        if (!resolutionVersion && (current?.hash ?? null) === desired.hash && ((current?.mode ?? 0) & 0o111) === (desired.mode & 0o111)) { local.current = desired.id; save(fs, state); continue; }
+        if (await mutate(fs, state, write.key, current, desired, desired.hash === null ? 'delete' : 'overwrite', !!resolutionVersion)) applied.push(write.key); else stale.push(write.key);
       }
       return { applied, stale };
     });
@@ -311,17 +339,39 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
         }
         for (const item of [...batch].reverse()) {
           resolveConfigSyncKey(item.key);
-          try { const info = fs.stat(`${sync}/history/${id}/${item.key}`); if (info.isFile()) entries.push({ ...item, id, size: info.size }); } catch (error) { if (!missing(error)) throw error; }
+          try {
+            const kept = fs.read(`${sync}/history/${id}/${item.key}`);
+            if (!item.hash) { bindHistory(fs, item, kept); fs.saveJson(index, batch); }
+            if (hash(fs.read(`${sync}/blobs/${item.hash}`).bytes) !== item.hash) throw new Error('History content hash mismatch');
+            entries.push({ ...item, id });
+            // An editor may still hold the displaced inode open. Preserve later saves as another
+            // stable, uniquely addressable history entry without changing the original listing.
+            if (hash(kept.bytes) !== item.hash || process.platform !== 'win32' && (kept.mode & 0o111) !== ((item.mode ?? 0) & 0o111)) {
+              const lateId = `${id}-late-${hash(`${hash(kept.bytes)}:${kept.mode & 0o111}`)}`;
+              const late: ConfigSyncHistoryEntry = { id: lateId, key: item.key, action: item.action, at: new Date(kept.mtimeMs).toISOString(), size: kept.bytes.length };
+              bindHistory(fs, late, kept);
+              try { fs.writeExclusive(`${sync}/history/${lateId}/${item.key}`, kept.bytes, kept.mode); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+              fs.saveJson(`${sync}/history/${lateId}/entries.json`, [late]); entries.push(late);
+            }
+          } catch (error) { if (!missing(error)) throw error; }
         }
       }
-      return { entries: entries.slice(0, 50) };
+      return { entries: [...new Map(entries.map(item => [`${item.id}:${item.key}`, item])).values()].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50) };
     });
   }
   async function restore(request: ConfigSyncRestoreRequest): Promise<void> {
     exact(request, ['id', 'key', 'expectedVersionId'], 'restore request');
     resolveConfigSyncKey(request.key); if (!validSegment(request.id) || !('expectedVersionId' in request)) throw new NotSyncedError('history version');
     return serialized(async (fs, state) => {
-      const kept = fs.read(`${sync}/history/${request.id}/${request.key}`);
+      let kept = fs.read(`${sync}/history/${request.id}/${request.key}`);
+      const historyIndex = `${sync}/history/${request.id}/entries.json`;
+      const items = fs.json<ConfigSyncHistoryEntry[]>(historyIndex) ?? [];
+      const record = items.find(item => item.key === request.key);
+      if (record) {
+        if (!record.hash) { bindHistory(fs, record, kept); fs.saveJson(historyIndex, items); }
+        kept = { ...fs.read(`${sync}/blobs/${record.hash}`), mode: record.mode ?? kept.mode };
+        if (hash(kept.bytes) !== record.hash || kept.bytes.length !== record.size) throw new Error('History content hash mismatch');
+      }
       if (process.platform === 'win32') {
         const record = fs.json<ConfigSyncHistoryEntry[]>(`${sync}/history/${request.id}/entries.json`)?.find(item => item.key === request.key);
         const keptVersion = record?.versionId ? state.versions[record.versionId] : undefined;
@@ -331,9 +381,9 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       const entry = observe(fs, state, request.key, current); save(fs, state);
       if ((entry?.current ?? null) !== request.expectedVersionId) throw new Error('File changed since restore was requested');
       const local = entry ?? (state.entries[request.key] = { current: null, heads: [], retained: [], counter: 0 });
-      const desired = localVersion(state, local, local.current ? [state.versions[local.current]!] : [], { ...kept, hash: hash(kept.bytes) });
-      retain(fs, state, desired, kept.bytes); local.retained.push(desired.id); local.heads = configSyncFrontier([...versions(state, local), desired]).map(v => v.id);
-      if (!await mutate(fs, state, request.key, current, desired, 'restore')) throw new Error('File changed during restore');
+      const desired = localVersion(state, local, editParents(state, local), { ...kept, hash: hash(kept.bytes) });
+      retain(fs, state, desired, kept.bytes); local.retained.push(desired.id);
+      if (!await mutate(fs, state, request.key, current, desired, 'restore', true)) throw new Error('File changed during restore');
     });
   }
   async function lease(request: ConfigSyncLeaseRequest): Promise<ConfigSyncLeaseResponse> {
@@ -357,16 +407,51 @@ export function createConfigSyncStore(dataDir: string, options: ConfigSyncStoreO
       const ids = request.acknowledgedVersionIds;
       if (!Array.isArray(ids) || ids.length < 2 || new Set(ids).size !== ids.length || !Array.isArray(request.versions) || request.versions.length !== ids.length || request.versions.some(v => !ids.includes(v.version.id)) || new Set(request.versions.map(v => v.version.id)).size !== ids.length) throw new Error('Complete exact conflict versions required');
       for (const input of request.versions) { exact(input, ['label', 'version', 'contentBase64'], 'resolution input'); const retained = state.versions[input.version.id]; if (!retained || !entry.retained.includes(retained.id)) throw new Error('Missing complete conflict version'); const contentBase64 = input.contentBase64 === undefined ? retained.hash === null ? null : fs.read(blob(retained)).bytes.toString('base64') : input.contentBase64; const bytes = validateHead({ version: input.version, contentBase64 }); if (!entry.heads.includes(input.version.id)) throw new Error('Missing conflict version'); retain(fs, state, input.version, bytes); }
-      entry.resolution = { current: entry.current, acknowledged: [...ids] }; save(fs, state);
+      const operation: ConfigSyncResolutionOperation = { id: randomUUID(), key: request.key, expectedVersionId: entry.current, expectHash: current?.hash ?? null, acknowledgedVersionIds: [...ids] };
+      const dir = `${sync}/resolutions/${operation.id}`;
+      fs.writeExclusive(`${dir}/operation.json`, Buffer.from(JSON.stringify({ ...operation, at: new Date().toISOString(), mode: current?.mode ?? 0o644 })), 0o444);
+      const outputPath = join(fs.path, `${dir}/result`), completionPath = join(fs.path, `${dir}/complete.json`);
       const subject = String(request.subject).slice(0, 200);
-      return { title: `Resolve sync conflict: ${subject}`.slice(0, 120), text: [
+      return { operation, outputPath, completionPath, title: `Resolve sync conflict: ${subject}`.slice(0, 120), text: [
         `Resolve a Forge configuration sync conflict for "${subject}".`, '',
-        'Read every complete immutable input listed below. Merge the intended changes, then write only the merged file to:', join(fs.path, resolveConfigSyncKey(request.key)), '',
+        'Read every complete immutable input listed below. Write the complete merged file to this operation’s dedicated output:', outputPath, '',
+        `After finishing that file, calculate its SHA-256 and write {"hash":"<sha256>"} to ${completionPath}. Write the completion marker last.`,
+        'Forge explicitly commits this completed output against the displayed version. Do not edit the live config file or another operation’s files.', '',
         'This resolution acknowledges only these exact version ids. New concurrent edits stay unresolved. Sync keeps the displaced file in history.',
         ...request.versions.map(v => `\n--- Version from ${v.label} (${v.version.id}) ---\n${v.version.hash === null ? '(deleted)' : join(fs.path, blob(v.version))}`),
       ].join('\n') };
     });
   }
-  return { manifest, readFile: readSyncFile, apply, history, restore, lease, resolvePrompt };
+  async function commitResolution(request: ConfigSyncResolutionCommitRequest): Promise<ConfigSyncResolutionCommitResponse> {
+    exact(request, ['id', 'key', 'expectedVersionId', 'expectHash', 'acknowledgedVersionIds'], 'resolution commit');
+    resolveConfigSyncKey(request.key);
+    if (!validSegment(request.id)) throw new NotSyncedError('resolution operation');
+    return serialized(async (fs, state) => {
+      const dir = `${sync}/resolutions/${request.id}`;
+      const operation = fs.json<ConfigSyncResolutionOperation & { mode: number }>(`${dir}/operation.json`);
+      if (!operation || operation.key !== request.key || operation.expectedVersionId !== request.expectedVersionId || operation.expectHash !== request.expectHash || JSON.stringify(operation.acknowledgedVersionIds) !== JSON.stringify(request.acknowledgedVersionIds)) throw new Error('Resolution operation inputs or precondition changed');
+      if (fs.json<{ versionId: string }>(`${dir}/committed.json`)) return { status: 'committed' };
+      const current = snapshot(fs, request.key), entry = observe(fs, state, request.key, current); save(fs, state);
+      const intent = fs.json<{ versionId: string }>(`${dir}/commit.json`);
+      // A restart after publication but before the receipt can acknowledge that exact commit.
+      if (intent && entry?.current === intent.versionId) { fs.saveJson(`${dir}/committed.json`, intent); return { status: 'committed' }; }
+      if (!entry || entry.current !== request.expectedVersionId || (current?.hash ?? null) !== request.expectHash) return { status: 'stale' };
+      const parents = request.acknowledgedVersionIds.map(id => state.versions[id]);
+      if (parents.some(v => !v) || request.acknowledgedVersionIds.some(id => !entry.retained.includes(id))) throw new Error('Missing exact resolution inputs');
+      if (!resolutionAllowed(state, entry, parents as ConfigSyncVersion[])) return { status: 'stale' };
+      const complete = fs.json<{ hash: string }>(`${dir}/complete.json`);
+      if (!complete) return { status: 'waiting' };
+      exact(complete, ['hash'], 'resolution completion');
+      const result = fs.read(`${dir}/result`);
+      if (typeof complete.hash !== 'string' || hash(result.bytes) !== complete.hash || result.bytes.length > CONFIG_SYNC_MAX_FILE_BYTES) throw new Error('Resolution requires complete hash-verified content within the size limit');
+      const desired = localVersion(state, entry, parents as ConfigSyncVersion[], { ...result, mode: operation.mode, hash: complete.hash });
+      retain(fs, state, desired, result.bytes); entry.retained.push(desired.id);
+      fs.saveJson(`${dir}/commit.json`, { versionId: desired.id });
+      if (!await mutate(fs, state, request.key, current, desired, 'overwrite', true)) return { status: 'stale' };
+      fs.saveJson(`${dir}/committed.json`, { versionId: desired.id });
+      return { status: 'committed' };
+    });
+  }
+  return { manifest, readFile: readSyncFile, apply, history, restore, lease, resolvePrompt, commitResolution };
 }
 export type ConfigSyncStore = ReturnType<typeof createConfigSyncStore>;

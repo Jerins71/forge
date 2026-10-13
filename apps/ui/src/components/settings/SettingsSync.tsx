@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { AlertTriangle, Bot, Check, ChevronDown, History, Loader2, RefreshCw, RotateCcw } from 'lucide-react'
 import type { ConfigSyncConflictItem, ConfigSyncParticipant } from '@forge/client-runtime'
 import { configSyncLogicalKey, readConfigSyncFile, readConfigSyncText } from '@forge/client-runtime'
-import type { ConfigSyncManifest, ConfigSyncResolvePromptResponse } from '@forge/protocol'
+import { CONFIG_SYNC_VERSION, type ConfigSyncResolvePromptResponse } from '@forge/protocol'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -75,7 +75,7 @@ function SettingsSyncContent() {
             const status = statusFor(entry.environmentId)
             const label = environmentDisplayLabel(registry, entry.environmentId)
             const descriptor = registry.get(entry.environmentId).descriptor()
-            const updateRequired = descriptor !== null && descriptor.capabilities.configSync !== 2
+            const updateRequired = descriptor !== null && descriptor.capabilities.configSync !== CONFIG_SYNC_VERSION
             return (
               <li key={entry.environmentId} className="flex items-center gap-3">
                 <Checkbox
@@ -122,7 +122,7 @@ function SettingsSyncContent() {
           description="These files changed differently on more than one environment. Every concurrent version is retained. Keep one or ask an agent to merge the versions shown. New concurrent edits stay unresolved."
         >
           {report.conflicts.map((conflict) => (
-            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(environmentId, versionId) => hub.syncNow({ keep: { key: conflict.key, environmentId, versionId, acknowledgedVersionIds: conflict.sides.map(side => side.versionId) } })} />
+            <ConflictRow key={conflict.key} conflict={conflict} describe={describeSyncKey(conflict.key, groups)} participants={hub.participants()} onKeep={(side) => hub.syncNow({ keep: { key: conflict.key, environmentId: side.environmentId, versionId: side.versionId, acknowledgedVersionIds: conflict.sides.map(input => input.versionId), expectedVersionId: side.expectedVersionId, expectHash: side.expectHash } })} />
           ))}
         </SettingsSection>
       ) : null}
@@ -188,7 +188,7 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
   conflict: ConfigSyncConflictItem
   describe: { title: string; detail?: string }
   participants: ConfigSyncParticipant[]
-  onKeep: (environmentId: string, versionId: string) => Promise<void>
+  onKeep: (side: ConfigSyncConflictItem['sides'][number]) => Promise<void>
 }) {
   const registry = useEnvironmentRegistry()
   const [open, setOpen] = useState(false)
@@ -242,19 +242,25 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
         if (!file) throw new Error(`Could not read the complete version from ${side.label}. Try again when it is reachable.`)
         return { label: side.label, version: side.version, contentBase64: file.contentBase64 }
       }))
-      const manifest = await client.features.settings.fetchJson<ConfigSyncManifest>('/api/settings/sync/manifest')
       const prompt = await client.features.settings.fetchJson<ConfigSyncResolvePromptResponse>('/api/settings/sync/resolve-prompt', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ key: target.localKey, subject: describe.detail ? `${describe.title} (${describe.detail})` : describe.title, expectedVersionId: manifest.entries[target.localKey]?.current ?? null, acknowledgedVersionIds: conflict.sides.map(side => side.versionId), versions: versions.map(({ label, version }) => ({ label, version })) }),
+        body: JSON.stringify({ key: target.localKey, subject: describe.detail ? `${describe.title} (${describe.detail})` : describe.title, expectedVersionId: target.expectedVersionId, acknowledgedVersionIds: conflict.sides.map(side => side.versionId), versions: versions.map(({ label, version }) => ({ label, version })) }),
       })
-      const receipt = await client.request('session.launch', {
+      let receipt = await client.request('session.launch', {
         commandId: crypto.randomUUID(),
         projectId,
         title: prompt.title,
         workspaceStrategy: { kind: 'current_checkout' },
         initialMessage: { text: prompt.text, artifactIds: [] },
       })
-      setMessage(receipt.state === 'failed' ? receipt.error?.message ?? 'The agent could not start.' : `An agent is merging this on ${target.label}. The conflict clears when it saves the file.`)
+      const deadline = performance.now() + 10_000
+      while ((receipt.state === 'accepted' || receipt.state === 'running') && performance.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+        receipt = await client.request('command.get', { commandId: receipt.commandId })
+      }
+      if (receipt.state !== 'succeeded' || receipt.delivery === 'unknown') throw new Error(receipt.error?.message ?? 'The agent launch did not complete. Its staged operation is kept for recovery.')
+      getConfigSyncHub(registry).trackResolution(target.environmentId, prompt.operation)
+      setMessage(`An agent is merging this on ${target.label}. Forge checks and commits its completed result.`)
     } catch (error) {
       setMessage(error instanceof Error ? error.message : String(error))
     } finally {
@@ -293,7 +299,7 @@ function ConflictRow({ conflict, describe, participants, onKeep }: {
       <div className="flex flex-wrap items-center gap-2">
         {conflict.sides.map((side) => (
           <Button key={side.versionId} size="sm" variant="outline" disabled={busy !== null}
-            onClick={async () => { setBusy(side.environmentId); try { await onKeep(side.environmentId, side.versionId) } finally { setBusy(null) } }}>
+            onClick={async () => { setBusy(side.environmentId); try { await onKeep(side) } finally { setBusy(null) } }}>
             {busy === side.environmentId ? <Loader2 className="size-3.5 animate-spin" /> : null}
             Keep {side.label}{side.hash === null ? ' (deleted)' : ''}
           </Button>

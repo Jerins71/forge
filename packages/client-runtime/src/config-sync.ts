@@ -24,7 +24,7 @@ export interface ConfigSyncParticipant {
 export interface ConfigSyncConflictItem {
   key: string
   /** One side per distinct causal head, even when retained on multiple environments. */
-  sides: { environmentId: string; label: string; labels: string[]; hash: string | null; localKey: string; versionId: string; version: ConfigSyncVersion }[]
+  sides: { environmentId: string; label: string; labels: string[]; hash: string | null; localKey: string; expectedVersionId: string | null; expectHash: string | null; versionId: string; version: ConfigSyncVersion }[]
 }
 export interface ConfigSyncReport {
   finishedAt: string
@@ -36,7 +36,7 @@ export interface ConfigSyncReport {
   activeHub?: string
 }
 export interface ConfigSyncOptions {
-  force?: { key: string; environmentId: string; versionId: string; acknowledgedVersionIds: string[] }
+  force?: { key: string; environmentId: string; versionId: string; acknowledgedVersionIds: string[]; expectedVersionId: string | null; expectHash: string | null }
   holder?: string; takeover?: boolean
 }
 interface Loaded { participant: ConfigSyncParticipant; manifest: ConfigSyncManifest; local: Map<string, string> }
@@ -93,7 +93,7 @@ export async function runConfigSync(participants: readonly ConfigSyncParticipant
       if (!lease.granted) { report.activeHub = lease.holder ?? 'another client'; return finish() }
     } catch { /* A lease failure may duplicate work, but cannot affect correctness. */ }
   }
-  const requests = new Map<Loaded, ConfigSyncApplyRequest>(loaded.map(side => [side, { version: 2, writes: [] }]))
+  const requests = new Map<Loaded, ConfigSyncApplyRequest>(loaded.map(side => [side, { version: CONFIG_SYNC_VERSION, writes: [] }]))
   const keys = [...new Set(loaded.flatMap(side => [...side.local.keys()]))].sort()
   const aliases = new Map<string, string[]>()
   for (const key of keys) aliases.set(filenameIdentity(key), [...(aliases.get(filenameIdentity(key)) ?? []), key])
@@ -109,7 +109,7 @@ export async function runConfigSync(participants: readonly ConfigSyncParticipant
     const sourceFor = (v: ConfigSyncVersion) => members.find(member => member.side.manifest.entries[member.localKey]?.heads.some(head => head.id === v.id))!
     const conflict = (): ConfigSyncConflictItem => ({ key, sides: plan.heads.map(version => {
       const author = members.find(member => member.side.participant.environmentId === version.author && member.side.manifest.entries[member.localKey]?.heads.some(head => head.id === version.id)) ?? sourceFor(version)
-      return { environmentId: author.side.participant.environmentId, label: participants.find(p => p.environmentId === version.author)?.label ?? author.side.participant.label, labels: members.filter(member => member.side.manifest.files.some(file => file.key === member.localKey && file.hash === version.hash && (file.mode & 0o111) === (version.mode & 0o111))).map(member => member.side.participant.label), localKey: author.localKey, hash: version.hash, versionId: version.id, version }
+      return { environmentId: author.side.participant.environmentId, label: participants.find(p => p.environmentId === version.author)?.label ?? author.side.participant.label, labels: members.filter(member => member.side.manifest.files.some(file => file.key === member.localKey && file.hash === version.hash && (file.mode & 0o111) === (version.mode & 0o111))).map(member => member.side.participant.label), localKey: author.localKey, expectedVersionId: author.side.manifest.entries[author.localKey]?.current ?? null, expectHash: author.side.manifest.files.find(file => file.key === author.localKey)?.hash ?? null, hash: version.hash, versionId: version.id, version }
     }).sort((a, b) => participants.findIndex(p => p.environmentId === a.environmentId) - participants.findIndex(p => p.environmentId === b.environmentId) || a.versionId.localeCompare(b.versionId)) })
     if (plan.kind === 'conflict') report.conflicts.push(conflict())
     try {
@@ -124,8 +124,7 @@ export async function runConfigSync(participants: readonly ConfigSyncParticipant
         if (!force.acknowledgedVersionIds.includes(force.versionId) || force.acknowledgedVersionIds.some(id => !plan.heads.some(v => v.id === id))) throw new Error('Conflict changed; compare its current versions before keeping one')
         const target = members.find(member => member.side.participant.environmentId === force.environmentId)!
         if (!target) throw new Error('Resolution environment is unavailable')
-        const current = target.side.manifest.entries[target.localKey]?.current ?? null
-        const response = await target.side.participant.fetchJson<ConfigSyncApplyResponse>('/api/settings/sync/apply', post({ version: 2, writes: [{ key: target.localKey, expectedVersionId: current, expectHash: target.side.manifest.files.find(f => f.key === target.localKey)?.hash ?? null, heads: heads.filter(head => !target.side.manifest.entries[target.localKey]?.heads.some(local => local.id === head.version.id)), resolution: { chosenVersionId: force.versionId, acknowledgedVersionIds: force.acknowledgedVersionIds } }] }))
+        const response = await target.side.participant.fetchJson<ConfigSyncApplyResponse>('/api/settings/sync/apply', post({ version: CONFIG_SYNC_VERSION, writes: [{ key: target.localKey, expectedVersionId: force.expectedVersionId, expectHash: force.expectHash, heads: heads.filter(head => !target.side.manifest.entries[target.localKey]?.heads.some(local => local.id === head.version.id)), resolution: { chosenVersionId: force.versionId, acknowledgedVersionIds: force.acknowledgedVersionIds } }] }))
         if (response.stale.length) throw new Error('File changed during resolution; compare its current versions')
         // A second pass relays the newly authored version. It still preserves a late third head.
         return runConfigSync(participants, { ...(options.holder ? { holder: options.holder } : {}), takeover: options.takeover })
@@ -166,9 +165,9 @@ export async function runConfigSync(participants: readonly ConfigSyncParticipant
 }
 export function splitApply(request: ConfigSyncApplyRequest): ConfigSyncApplyRequest[] {
   const keys = new Set<string>(), batches: ConfigSyncApplyRequest[] = []
-  let batch: ConfigSyncApplyRequest = { version: 2, writes: [] }, size = 0
+  let batch: ConfigSyncApplyRequest = { version: CONFIG_SYNC_VERSION, writes: [] }, size = 0
   const cap = Math.ceil(CONFIG_SYNC_MAX_REQUEST_BYTES * 4 / 3)
-  const flush = () => { if (batch.writes.length) batches.push(batch); batch = { version: 2, writes: [] }; size = 0 }
+  const flush = () => { if (batch.writes.length) batches.push(batch); batch = { version: CONFIG_SYNC_VERSION, writes: [] }; size = 0 }
   for (const write of request.writes) {
     if (keys.has(filenameIdentity(write.key))) throw new Error('Duplicate sync target')
     keys.add(filenameIdentity(write.key))

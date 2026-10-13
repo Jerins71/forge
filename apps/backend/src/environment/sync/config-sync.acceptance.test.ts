@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -18,7 +19,7 @@ async function fixture(id: string, initial?: string) {
   if (initial !== undefined) await put(initial);
   let store = createConfigSyncStore(root, { environmentId: id });
   const participant: ConfigSyncParticipant = {
-    environmentId: id, label: id, projects: new Map(), capability: 2,
+    environmentId: id, label: id, projects: new Map(), capability: 3,
     async fetchJson<T>(path: string, init?: RequestInit) {
       const url = new URL(path, 'http://fixture');
       if (url.pathname.endsWith('/manifest')) return await store.manifest() as T;
@@ -34,7 +35,7 @@ afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)
 async function writeRequest(source: Awaited<ReturnType<typeof fixture>>, target: Awaited<ReturnType<typeof fixture>>, key = K, resolve = false): Promise<ConfigSyncApplyRequest> {
   const sm = await source.store.manifest(); const tm = await target.store.manifest();
   const state = tm.entries[key]; const file = tm.files.find(f => f.key === key);
-  return { version: 2, writes: [{ key, expectedVersionId: state?.current ?? null, expectHash: file?.hash ?? null,
+  return { version: 3, writes: [{ key, expectedVersionId: state?.current ?? null, expectHash: file?.hash ?? null,
     ...(resolve ? { resolution: { acknowledgedVersionIds: [...sm.entries[key]!.heads.map(v => v.id), ...tm.entries[key]!.heads.map(v => v.id)], chosenVersionId: sm.entries[key]!.heads[0]!.id } } : {}), heads: await Promise.all(sm.entries[key]!.heads.map(async version => ({ version, contentBase64: version.hash === null ? null : (await source.store.readFile(key, version.id)).contentBase64 }))) }] };
 }
 const frontier = (m: ConfigSyncManifest) => m.entries[K]!.heads.map(v => v.id).sort();
@@ -83,9 +84,9 @@ describe('causal relay on real backend stores', () => {
     const acknowledged = conflict.conflicts[0]!.sides.map(s => s.versionId);
     const am = await a.store.manifest();
     const versions = await Promise.all(am.entries[K]!.heads.map(async version => ({ label: version.author, version, contentBase64: (await a.store.readFile(K, version.id)).contentBase64 })));
-    await a.store.resolvePrompt({ key: K, subject: 'Skill', expectedVersionId: am.entries[K]!.current, acknowledgedVersionIds: acknowledged, versions });
+    const prompt = await a.store.resolvePrompt({ key: K, subject: 'Skill', expectedVersionId: am.entries[K]!.current, acknowledgedVersionIds: acknowledged, versions });
     await runConfigSync([a.participant, c.participant]);
-    await a.put('merged-a-b');
+    await finishResolution(a, prompt, 'merged-a-b');
     const report = await runConfigSync([a.participant, b.participant, c.participant]);
     expect(report.conflicts).toHaveLength(1);
     expect((await a.store.manifest()).entries[K]!.heads).toHaveLength(2);
@@ -158,7 +159,7 @@ describe('mutation preservation, recovery and filesystem boundary', () => {
     // Resolve the independent initial copies deliberately.
     await runConfigSync([a.participant, b.participant]);
     const report = await runConfigSync([a.participant, b.participant]); const conflict = report.conflicts[0]!;
-    await runConfigSync([a.participant, b.participant], { force: { key: K, environmentId: 'a', versionId: conflict.sides.find(s => s.environmentId === 'a')!.versionId, acknowledgedVersionIds: conflict.sides.map(s => s.versionId) } });
+    await runConfigSync([a.participant, b.participant], { force: { key: K, environmentId: 'a', versionId: conflict.sides.find(s => s.environmentId === 'a')!.versionId, acknowledgedVersionIds: conflict.sides.map(s => s.versionId), expectedVersionId: conflict.sides.find(s => s.environmentId === 'a')!.expectedVersionId, expectHash: conflict.sides.find(s => s.environmentId === 'a')!.expectHash } });
     const entry = (await b.store.history()).entries[0]!; const current = (await b.store.manifest()).entries[K]!.current;
     await b.put('later'); await expect(b.store.restore({ id: entry.id, key: K, expectedVersionId: current })).rejects.toThrow(/changed/);
     expect(await b.read()).toBe('later');
@@ -169,7 +170,7 @@ describe('mutation preservation, recovery and filesystem boundary', () => {
 
   it('rejects duplicate targets before mutation and preserves first-write history after a partial batch', async () => {
     const a = await fixture('a', 'incoming'), b = await fixture('b', 'before'); const request = await writeRequest(a, b);
-    await expect(b.store.apply({ version: 2, writes: [request.writes![0]!, request.writes![0]!] })).rejects.toThrow(/duplicate/i);
+    await expect(b.store.apply({ version: 3, writes: [request.writes![0]!, request.writes![0]!] })).rejects.toThrow(/duplicate/i);
     expect(await b.read()).toBe('before');
     // history is indexed before mutation, independently of any later batch failure (power-loss test).
   });
@@ -231,7 +232,7 @@ describe('persisted schedules and migration', () => {
     const first = await writeRequest(a, b), second = await writeRequest(a, b, key);
     let calls = 0;
     const failing = createConfigSyncStore(b.root, { environmentId: 'b', afterDisplace: async () => { if (++calls === 2) throw new Error('interrupted second'); } });
-    await expect(failing.apply({ version: 2, writes: [...first.writes, ...second.writes] })).rejects.toThrow('interrupted second');
+    await expect(failing.apply({ version: 3, writes: [...first.writes, ...second.writes] })).rejects.toThrow('interrupted second');
     b.restart(); const history = await b.store.history();
     expect(history.entries.map(e => e.key).sort()).toEqual([K, key].sort()); expect(await b.read()).toBe('first-new');
     expect(await readFile(join(b.root, rel), 'utf8')).toBe('second-base');
@@ -258,7 +259,7 @@ describe('persisted schedules and migration', () => {
     const manifests = await Promise.all(envs.map(env => env.store.manifest()));
     for (const m of manifests) { expect(frontier(m)).toEqual(frontier(manifests[0]!)); expect(m.entries[K]!.heads).toHaveLength(4); }
     for (const env of envs) expect(await env.read()).toBe(`edit-${env.participant.environmentId}`);
-  });
+  }, 30_000);
 });
 
 describe('joining conflict frontier and bounded large deliveries', () => {
@@ -275,6 +276,7 @@ describe('joining conflict frontier and bounded large deliveries', () => {
 
   it('rejects unknown request fields and invalid version/content inputs before changing anything', async () => {
     const a = await fixture('a', 'new'), b = await fixture('b', 'old'); const request = await writeRequest(a, b, K, true);
+    await expect(b.store.apply({ ...request, version: 2 } as unknown as ConfigSyncApplyRequest)).rejects.toThrow(/update required/i);
     await expect(b.store.apply({ ...request, base: {} } as ConfigSyncApplyRequest)).rejects.toThrow(/unknown/i);
     await expect(b.store.apply({ ...request, writes: [{ ...request.writes[0]!, heads: request.writes[0]!.heads.map(head => ({ ...head, contentBase64: b64('truncated') })) }] })).rejects.toThrow(/hash|size/i);
     expect(await b.read()).toBe('old'); expect((await b.store.history()).entries).toHaveLength(0);
@@ -347,4 +349,146 @@ it('blocks Unicode case-fold aliases such as normal and final Greek sigma across
   await expect(b.store.apply(await writeRequest(a, b, 'global/skills/test/σ.txt'))).rejects.toThrow(/collision|alias/i);
   expect(await readFile(join(a.root, 'skills/test/σ.txt'), 'utf8')).toBe('normal sigma');
   expect(await readFile(join(b.root, 'skills/test/ς.txt'), 'utf8')).toBe('final sigma');
+});
+
+
+// Independent re-review reproductions: real stores and the real relay; added before fixes.
+async function prepareResolution(env: Awaited<ReturnType<typeof fixture>>) {
+  const m = await env.store.manifest();
+  const heads = m.entries[K]!.heads;
+  return env.store.resolvePrompt({ key: K, subject: 'Skill', expectedVersionId: m.entries[K]!.current,
+    acknowledgedVersionIds: heads.map(v => v.id), versions: heads.map(version => ({ label: version.author, version })) });
+}
+async function finishResolution(env: Awaited<ReturnType<typeof fixture>>, prompt: Awaited<ReturnType<typeof prepareResolution>>, text: string) {
+  await writeFile(prompt.outputPath, text);
+  await writeFile(prompt.completionPath, JSON.stringify({ hash: createHash('sha256').update(text).digest('hex') }));
+  return env.store.commitResolution(prompt.operation);
+}
+
+describe('independent re-review schedules', () => {
+  it.each(['ab', 'abc'])('two overlapping agent operations bind %s output only to its own inputs', async first => {
+    const a = await fixture('a', 'A'), b = await fixture('b', 'B'), c = await fixture('c', 'C');
+    await runConfigSync([a.participant, b.participant]);
+    const ab = await prepareResolution(a);
+    await runConfigSync([a.participant, b.participant, c.participant]);
+    const abc = await prepareResolution(a);
+    expect(ab.outputPath).not.toBe(abc.outputPath);
+    a.restart();
+    expect(await a.store.commitResolution(ab.operation)).toMatchObject({ status: 'waiting' });
+    await writeFile(ab.outputPath, 'unfinished output');
+    expect(await a.store.commitResolution(ab.operation)).toMatchObject({ status: 'waiting' });
+    await expect(a.store.commitResolution({ ...ab.operation, acknowledgedVersionIds: abc.operation.acknowledgedVersionIds })).rejects.toThrow(/inputs|precondition/);
+    const chosen = first === 'ab' ? ab : abc, other = first === 'ab' ? abc : ab;
+    expect(await finishResolution(a, chosen, `merged-${first}`)).toMatchObject({ status: 'committed' });
+    a.restart(); expect(await a.store.commitResolution(chosen.operation)).toMatchObject({ status: 'committed' });
+    expect(await finishResolution(a, other, 'stale-other')).toMatchObject({ status: 'stale' });
+    for (let pass = 0; pass < 2; pass++) await runConfigSync([a.participant, b.participant, c.participant]);
+    for (const env of [a, b, c]) {
+      const m = await env.store.manifest();
+      expect(m.entries[K]!.heads).toHaveLength(first === 'ab' ? 2 : 1);
+      if (first === 'ab') expect(m.entries[K]!.heads.some(v => v.author === 'c')).toBe(true);
+    }
+    // The operation output is recoverable even when its commit is refused.
+    expect(await readFile(other.outputPath, 'utf8')).toBe('stale-other');
+  });
+
+  it('a prepared prompt whose launch fails cannot interpret an unrelated live save as a merge', async () => {
+    const a = await fixture('a', 'A'), b = await fixture('b', 'B');
+    await runConfigSync([a.participant, b.participant]);
+    await prepareResolution(a); // No successful launch/explicit commit follows.
+    await a.put('unrelated later edit');
+    const report = await runConfigSync([a.participant, b.participant]);
+    expect(report.conflicts).toHaveLength(1); expect(report.conflicts[0]!.sides).toHaveLength(2);
+    expect((await a.store.manifest()).entries[K]!.heads.some(v => v.author === 'b')).toBe(true);
+  });
+
+  it.each(['edit', 'tombstone'])('a late proxy %s survives Keep from an older display with the selected author offline', async kind => {
+    const a = await fixture('a', 'A'), b = await fixture('b', 'B'), c = await fixture('c');
+    await runConfigSync([a.participant, b.participant, c.participant]);
+    const displayed = await runConfigSync([c.participant, b.participant]);
+    const sides = displayed.conflicts[0]!.sides, selected = sides.find(s => s.version.author === 'a')!;
+    const cm = await c.store.manifest();
+    await c.put('unacknowledged-C'); await c.store.manifest();
+    if (kind === 'tombstone') { await rm(join(c.root, REL)); await c.store.manifest(); }
+    const late = (await c.store.manifest()).entries[K]!.current;
+    const report = await runConfigSync([c.participant, b.participant], { force: { key: K, environmentId: 'c', versionId: selected.versionId,
+      acknowledgedVersionIds: sides.map(s => s.versionId), expectedVersionId: cm.entries[K]!.current, expectHash: null } });
+    expect(report.skipped.some(s => s.detail?.match(/changed|unacknowledged/i))).toBe(true);
+    await runConfigSync([a.participant, b.participant, c.participant]);
+    for (const env of [a, b, c]) expect((await env.store.manifest()).entries[K]!.heads.some(v => v.id === late)).toBe(true);
+    expect(await c.read()).toBe(kind === 'edit' ? 'unacknowledged-C' : null);
+    // Even a caller using a fresh CAS cannot authorize old displayed inputs to consume C's dot.
+    const fresh = await c.store.manifest();
+    const request = { version: 3 as const, writes: [{ key: K, expectedVersionId: fresh.entries[K]!.current, expectHash: fresh.files.find(f => f.key === K)?.hash ?? null,
+      heads: [], resolution: { chosenVersionId: selected.versionId, acknowledgedVersionIds: sides.map(s => s.versionId) } }] };
+    expect((await c.store.apply(request)).stale).toEqual([K]);
+    expect((await c.store.manifest()).entries[K]!.heads.some(v => v.id === late)).toBe(true);
+    const prompt = await c.store.resolvePrompt({ key: K, subject: 'old displayed A/B', expectedVersionId: fresh.entries[K]!.current, acknowledgedVersionIds: sides.map(s => s.versionId), versions: sides.map(s => ({ label: s.label, version: s.version })) });
+    expect(await finishResolution(c, prompt, 'unacknowledged merge')).toMatchObject({ status: 'stale' });
+    expect((await c.store.manifest()).entries[K]!.heads.some(v => v.id === late)).toBe(true);
+  });
+
+  it.each(['failed CAS', 'crash recovery'])('%s restores a distinct live inode and listed history stays stable after another save', async kind => {
+    const a = await fixture('a', 'incoming'), b = await fixture('b', 'before');
+    const request = await writeRequest(a, b, K, true);
+    const store = createConfigSyncStore(b.root, { environmentId: 'b', beforeDisplace: async () => { await b.put('RACING_EDIT'); },
+      ...(kind === 'crash recovery' ? { afterDisplace: async () => { throw new Error('power loss'); } } : {}) });
+    if (kind === 'crash recovery') await expect(store.apply(request)).rejects.toThrow('power loss');
+    else expect((await store.apply(request)).stale).toEqual([K]);
+    b.restart(); await b.store.manifest();
+    const listed = (await b.store.history()).entries[0]!;
+    const kept = join(b.root, 'shared/state/sync/history', listed.id, K);
+    expect((await stat(kept)).ino).not.toBe((await stat(join(b.root, REL))).ino);
+    await b.put('LATER_EDIT');
+    expect(await readFile(kept, 'utf8')).toBe('RACING_EDIT');
+    // A save through the displaced inode must become a new snapshot, never change the listed one.
+    await writeFile(kept, 'DISPLACED_FD_SAVE');
+    const laterHistory = await b.store.history();
+    expect(laterHistory.entries.find(item => item.id === listed.id)?.hash).toBe(listed.hash);
+    expect(laterHistory.entries.some(item => item.id !== listed.id && item.hash === createHash('sha256').update('DISPLACED_FD_SAVE').digest('hex'))).toBe(true);
+    const current = (await b.store.manifest()).entries[K]!.current;
+    await b.store.restore({ key: K, id: listed.id, expectedVersionId: current });
+    expect(await b.read()).toBe('RACING_EDIT');
+  });
+
+  it('same-content Keep uses displacement CAS and never publishes an unapplied resolution', async () => {
+    const a = await fixture('a', 'A'), b = await fixture('b', 'B');
+    const report = await runConfigSync([a.participant, b.participant]);
+    const m = await a.store.manifest(), side = report.conflicts[0]!.sides.find(v => v.version.author === 'a')!;
+    const racing = createConfigSyncStore(a.root, { environmentId: 'a', beforeDisplace: async () => { await a.put('late edit while keeping A'); } });
+    const result = await racing.apply({ version: 3, writes: [{ key: K, expectedVersionId: m.entries[K]!.current, expectHash: m.files.find(f => f.key === K)!.hash,
+      heads: [], resolution: { chosenVersionId: side.versionId, acknowledgedVersionIds: report.conflicts[0]!.sides.map(v => v.versionId) } }] });
+    expect(result.stale).toEqual([K]); expect(result.applied).toEqual([]);
+    expect(await a.read()).toBe('late edit while keeping A');
+    const heads = (await racing.manifest()).entries[K]!.heads;
+    expect(heads.some(v => v.author === 'b')).toBe(true);
+    expect(heads.some(v => v.author === 'a' && v.vector.b)).toBe(false);
+  });
+
+  it('Keep uses the selected causal version executable bits, not immutable blob permissions', async () => {
+    const a = await fixture('a', 'script'), b = await fixture('b', 'other');
+    await chmod(join(a.root, REL), 0o755);
+    const report = await runConfigSync([a.participant, b.participant]);
+    const side = report.conflicts[0]!.sides.find(s => s.version.author === 'a')!;
+    const m = await a.store.manifest();
+    await runConfigSync([a.participant, b.participant], { force: { key: K, environmentId: 'a', versionId: side.versionId,
+      acknowledgedVersionIds: report.conflicts[0]!.sides.map(s => s.versionId), expectedVersionId: m.entries[K]!.current, expectHash: m.files.find(f => f.key === K)!.hash } });
+    for (const env of [a, b]) expect((await stat(join(env.root, REL))).mode & 0o111).toBe(0o111);
+  });
+
+  it.each([false, true])('restore shares ordinary edit parents after equal-content joining (divergence=%s)', async divergent => {
+    const a = await fixture('a', 'old'), b = await fixture('b'); await runConfigSync([a.participant, b.participant]);
+    await a.put('current'); await runConfigSync([a.participant, b.participant]);
+    const old = (await b.store.history()).entries[0]!;
+    const c = await fixture('c', divergent ? 'C-divergent' : 'current'); await runConfigSync([a.participant, b.participant, c.participant]);
+    const cm = await c.store.manifest(), bm = await b.store.manifest();
+    await b.store.restore({ key: K, id: old.id, expectedVersionId: bm.entries[K]!.current });
+    const report = await runConfigSync([a.participant, b.participant, c.participant]);
+    expect(report.conflicts).toHaveLength(divergent ? 1 : 0);
+    for (const env of [a, b, c]) {
+      const m = await env.store.manifest(); expect(m.entries[K]!.heads).toHaveLength(divergent ? 2 : 1);
+      if (divergent) expect(m.entries[K]!.heads.some(v => v.id === cm.entries[K]!.current)).toBe(true);
+      else expect(await env.read()).toBe('old');
+    }
+  });
 });

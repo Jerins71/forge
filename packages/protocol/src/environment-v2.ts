@@ -89,7 +89,7 @@ export const ScopesSchema = Type.Array(ScopeSchema, { uniqueItems: true, minItem
 
 export const EnvironmentCapabilitiesSchema = O({
   /** Causal configuration sync; absent capabilities never receive sync requests. */
-  configSync: Type.Optional(Type.Literal(2)),
+  configSync: Type.Optional(Type.Integer({ minimum: 1 })),
   shellResume: Type.Boolean(),
   sessionDetail: Type.Boolean(),
   durableCommands: Type.Boolean(),
