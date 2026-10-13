@@ -22,6 +22,8 @@ export interface MockBrowserPanelPort extends BrowserPanelPort {
   setAvailability(availability: BrowserPanelAvailability): void
   setSurface(surface: BrowserPanelSurface): void
   crash(tabId: string): void
+  /** The next open() fails with this message, as a refused engine request would. */
+  failNextOpen: string | null
   /** Every input the panel sent, oldest first. */
   inputs: Array<{ tabId: string; input: BrowserPanelInput }>
   nativeBounds: Array<{ tabId: string; bounds: { x: number; y: number; width: number; height: number } | null }>
@@ -106,12 +108,16 @@ export function createMockBrowserPanelPort(options: { surface?: BrowserPanelSurf
   const port: MockBrowserPanelPort = {
     inputs: [],
     nativeBounds: [],
+    failNextOpen: null,
     getSnapshot: () => snapshot,
     subscribe(listener) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
     },
-    async open(url) { createTab(url ? normalizeBrowserAddress(url) : 'about:blank', 'human', null) },
+    async open(url) {
+      if (port.failNextOpen) { const message = port.failNextOpen; port.failNextOpen = null; throw new Error(message) }
+      createTab(url ? normalizeBrowserAddress(url) : 'about:blank', 'human', null)
+    },
     async activate(tabId) {
       if (!tabs.has(tabId)) return
       snapshot = { ...snapshot, activeTabId: tabId }
