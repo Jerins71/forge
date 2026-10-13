@@ -408,5 +408,10 @@ test('cookie imports stage site counts, read real CDP and decrypt only an owned 
     const running = await readRunningChrome(sourceRoot); expect(running.map(cookie => cookie.name)).toContain('running-fixture'); expect(running.find(cookie => cookie.name === 'running-fixture')!.partitionKey).toBe('https://partition.test')
     await expect(readRunningChrome(join(root, 'missing-source'))).rejects.toBeInstanceOf(ChromeCookieReadError)
     await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'cookie-proof.json'), JSON.stringify({ passed: true, sourceA: 'real Chrome headless-shell CDP using DevToolsActivePort', sourceB: 'real encrypted throwaway SQLite database with fixture key provider', domainSelection: true, noValuesInPreviewOrAudit: true, oneTimeTransfer: true, forgetSite: true, windowsFallbackRejected: true, guardSurvivesFleetTeardown: true, nativeKeysDisabledWithoutEnvMarkers: true, keychainPrompt: 'not exercised; no user keychain access' }, null, 2))
-  } finally { shell?.kill(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
+  } finally {
+    if (shell && shell.exitCode === null && shell.signalCode === null) {
+      const stopped = once(shell, 'close'); shell.kill(); await stopped
+    }
+    await engine.shutdown(); await rm(root, { recursive: true, force: true })
+  }
 })
