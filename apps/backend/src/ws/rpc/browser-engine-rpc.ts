@@ -1,12 +1,12 @@
 import { Value } from '@sinclair/typebox/value'
-import { rpcSchemas, rpcScopes, type Method, type RpcInput, type RpcOutput, type BrowserEngineSnapshot, type BrowserScreencastItem } from '@forge/protocol/environment-v2'
+import { rpcSchemas, rpcScopes, type Method, type Scope, type RpcInput, type RpcOutput, type BrowserEngineSnapshot, type BrowserScreencastItem } from '@forge/protocol/environment-v2'
 import type { Principal } from '../../environment/control/control-types.js'
 import type { BrowserEngine } from '../../swarm/browser-automation/browser-engine.js'
 import { StreamFault, StreamQueue } from '../../environment/streams/stream-budget.js'
 export type BrowserEngineMethod = Extract<Method, `browser.tabs.${string}` | `browser.cookies.${string}` | `browser.screencast.${string}` | `browser.engine.${string}`>
 export function createBrowserEngineRpc(engine: BrowserEngine, cookies?: import("../../swarm/browser-automation/browser-cookie-import.js").BrowserCookieImport) {
   const casts = new Map<string, { principal: Principal; ack(frameId: number): Promise<void> }>()
-  function authorize(principal: Principal, scope: string) { if (!principal.scopes.has(scope as 'session:read')) throw new StreamFault('FORBIDDEN', 'Missing browser scope.') }
+  function authorize(principal: Principal, scope: Scope) { if (!principal.scopes.has(scope)) throw new StreamFault('FORBIDDEN', 'Missing browser scope.') }
   async function execute<M extends BrowserEngineMethod>(principal: Principal, method: M, raw: RpcInput<M>): Promise<RpcOutput<M>> {
     authorize(principal, rpcScopes[method]); if (!Value.Check(rpcSchemas[method].input, raw)) throw new StreamFault('INVALID_INPUT', 'Invalid browser input.')
     let output: unknown
@@ -15,6 +15,7 @@ export function createBrowserEngineRpc(engine: BrowserEngine, cookies?: import("
       const owner = principal.deviceSessionId
       switch (method) {
         case 'browser.cookies.preview': { const input = raw as RpcInput<'browser.cookies.preview'>; return await cookies.preview(owner, input.sessionId, input.source) as RpcOutput<M> }
+        case 'browser.cookies.cancel': { const input = raw as RpcInput<'browser.cookies.cancel'>; cookies.cancel(owner, input.sessionId, input.importId); return {} as RpcOutput<M> }
         case 'browser.cookies.apply': { const input = raw as RpcInput<'browser.cookies.apply'>; return await cookies.apply(owner, input.sessionId, input.importId, input.domains) as RpcOutput<M> }
         case 'browser.cookies.prepareSend': { const input = raw as RpcInput<'browser.cookies.prepareSend'>; return cookies.prepareSend(owner, input.sessionId, input.importId, input.domains) as RpcOutput<M> }
         case 'browser.cookies.receive': { const input = raw as RpcInput<'browser.cookies.receive'>; return await cookies.receive(input.sessionId, input.transfer) as RpcOutput<M> }

@@ -70,6 +70,8 @@ async function pairB(page: Page) {
   const link = await fleet.mintGrant(fleet.b, 'link')
   await page.getByRole('button', { name: 'Add a machine' }).click()
   await page.getByRole('textbox', { name: 'Pairing link', exact: true }).fill(link.pairingUrl!)
+  // Receiving selected Chrome cookies changes the project's authenticated identity.
+  await page.getByRole('dialog').getByRole('checkbox', { name: 'Change settings' }).check()
   await page.getByRole('button', { name: 'Pair', exact: true }).click()
   await expect(page.getByTestId('pairing-success')).toContainText(fleet.b.label)
   await page.getByRole('button', { name: 'Done' }).click()

@@ -8,42 +8,58 @@ import { getBrowserCookieAuditPath } from '../storage/data-paths.js'
 import { ChromeCookieReadError, readChromeDatabase, readRunningChrome, type ImportCookie } from './chrome-cookies.js'
 import type { BrowserEngine } from './browser-engine.js'
 const TTL = 5 * 60 * 1000
-interface Preview { sessionId: string; owner: string; expires: number; cookies: ImportCookie[] }
+interface Preview { sessionId: string; owner: string; expires: number; cookies: ImportCookie[]; timer: ReturnType<typeof setTimeout> }
 type Audit = { domains: Array<{ domain: string; importedAt: string; count: number }>; skipped?: Array<{ domain: string; reason: 'expired' | 'unsupported' | 'conflict' | 'failed'; count?: number }> }
 /** The only import staging owner. Values live in expiring memory until explicitly
  * selected. The file-backed audit records sites and counts, never values. */
 export class BrowserCookieImport {
+  private closed = false
   private readonly previews = new Map<string, Preview>()
   private readonly received = new Map<string, number>()
   private readonly auditWrites = new Map<string, Promise<unknown>>()
   constructor(private readonly options: { engine: BrowserEngine; dataDir: string; running?: () => Promise<ImportCookie[]>; database?: () => Promise<ImportCookie[]> }) {}
-  private prune() { const now = Date.now(); for (const [id, value] of this.previews) if (value.expires <= now) this.previews.delete(id); for (const [id, expires] of this.received) if (expires <= now) this.received.delete(id) }
+  private release(importId: string) {
+    const preview = this.previews.get(importId)
+    if (preview) { clearTimeout(preview.timer); preview.cookies = []; this.previews.delete(importId) }
+  }
+  private prune() { const now = Date.now(); for (const [id, expires] of this.received) if (expires <= now) this.received.delete(id) }
   async preview(owner: string, sessionId: string, source: BrowserCookieSource): Promise<BrowserCookiePreview> {
     this.options.engine.projectForSession(sessionId); this.prune()
     if (this.previews.size >= 32) return { ok: false, error: { code: 'source-unavailable', message: 'Too many cookie imports are pending. Finish an import or retry after five minutes.' } }
     try {
+      if (this.closed) throw new Error('Cookie import is closed.')
       const cookies = await (source === 'chrome-running' ? (this.options.running ?? readRunningChrome)() : (this.options.database ?? (() => this.options.engine.desktop.available ? this.options.engine.desktop.readCookies() : readChromeDatabase()))())
+      this.options.engine.projectForSession(sessionId)
+      if (this.closed || this.previews.size >= 32) throw new Error('Cookie import is unavailable.')
       if (Buffer.byteLength(JSON.stringify(cookies)) > 8 * 1024 * 1024) throw new Error('Cookie read exceeds its memory budget.')
       const grouped = new Map<string, { domain: string; count: number; lastUsedAt?: string }>()
       for (const cookie of cookies) { const domain = site(cookie.domain); const entry = grouped.get(domain) ?? { domain, count: 0 }; entry.count++; if (cookie.lastUsedAt && (!entry.lastUsedAt || cookie.lastUsedAt > entry.lastUsedAt)) entry.lastUsedAt = cookie.lastUsedAt; grouped.set(domain, entry) }
-      const importId = randomUUID(), expires = Date.now() + TTL; this.previews.set(importId, { sessionId, owner, expires, cookies })
+      const importId = randomUUID(), expires = Date.now() + TTL
+      const timer = setTimeout(() => this.release(importId), TTL); timer.unref()
+      this.previews.set(importId, { sessionId, owner, expires, cookies, timer })
       return { ok: true, importId, source, domains: [...grouped.values()].sort((a, b) => a.domain.localeCompare(b.domain)), expiresAt: new Date(expires).toISOString() }
     } catch (error) { return { ok: false, error: error instanceof ChromeCookieReadError ? error.detail : { code: 'source-unavailable', message: 'Chrome cookies could not be read. Use the inspect toggle, or retry after granting access.' } } }
   }
   private selection(owner: string, sessionId: string, importId: string, domains: string[]) {
     this.options.engine.projectForSession(sessionId); this.prune(); const preview = this.previews.get(importId)
-    if (!preview || preview.owner !== owner || preview.sessionId !== sessionId) throw new ChromeCookieReadError({ code: 'import-expired', message: 'This cookie preview expired or belongs to another device. Read Chrome again.' })
+    if (preview && preview.expires <= Date.now()) this.release(importId)
+    if (!preview || preview.expires <= Date.now() || preview.owner !== owner || preview.sessionId !== sessionId) throw new ChromeCookieReadError({ code: 'import-expired', message: 'This cookie preview expired or belongs to another device. Read Chrome again.' })
     const selected = new Set(domains.map(site)); if (selected.size !== domains.length || domains.some(domain => site(domain) !== domain)) throw new Error('Select exact sites from the cookie preview.')
     const available = new Set(preview.cookies.map(cookie => site(cookie.domain))); if ([...selected].some(domain => !available.has(domain))) throw new Error('A selected site was not in the cookie preview.')
     return preview.cookies.filter(cookie => selected.has(site(cookie.domain)))
   }
-  async apply(owner: string, sessionId: string, importId: string, domains: string[]): Promise<Audit> { const cookies = this.selection(owner, sessionId, importId, domains); const result = await this.write(sessionId, cookies); this.previews.delete(importId); return result }
+  cancel(owner: string, sessionId: string, importId: string): void {
+    const preview = this.previews.get(importId)
+    if (preview && (preview.owner !== owner || preview.sessionId !== sessionId)) throw new ChromeCookieReadError({ code: 'import-expired', message: 'This cookie preview expired or belongs to another device.' })
+    this.release(importId)
+  }
+  async apply(owner: string, sessionId: string, importId: string, domains: string[]): Promise<Audit> { const cookies = this.selection(owner, sessionId, importId, domains); const result = await this.write(sessionId, cookies); this.release(importId); return result }
   prepareSend(owner: string, sessionId: string, importId: string, domains: string[]): BrowserCookieTransfer {
     const selected = this.selection(owner, sessionId, importId, domains)
     const cookies = selected.map(({ lastUsedAt: _lastUsedAt, ...cookie }) => cookie)
     const transfer = { transferId: randomUUID(), expiresAt: new Date(Date.now() + TTL).toISOString(), domains, cookies }
     if (cookies.length > 2000 || Buffer.byteLength(JSON.stringify(transfer)) > 800000) throw new Error('Selected cookies exceed the one-time transfer budget. Send fewer sites at once.')
-    this.previews.delete(importId); return transfer
+    this.release(importId); return transfer
   }
   async receive(sessionId: string, transfer: BrowserCookieTransfer): Promise<Audit> {
     this.options.engine.projectForSession(sessionId); this.prune(); const expires = Date.parse(transfer.expiresAt)
@@ -78,7 +94,7 @@ export class BrowserCookieImport {
     const audit = await this.audit(sessionId); audit.domains = audit.domains.filter(entry => entry.domain !== domain)
     await writeJsonFileAtomic(getBrowserCookieAuditPath(this.options.dataDir, this.options.engine.projectForSession(sessionId)), audit, { mode: 0o600 }); return audit
   }
-  releaseSession(sessionId: string) { for (const [id, preview] of this.previews) if (preview.sessionId === sessionId) this.previews.delete(id) }
-  shutdown() { this.previews.clear(); this.received.clear() }
+  releaseSession(sessionId: string) { for (const [id, preview] of this.previews) if (preview.sessionId === sessionId) this.release(id) }
+  shutdown() { this.closed = true; for (const id of this.previews.keys()) this.release(id); this.received.clear() }
 }
 function site(domain: string) { const host = domainToASCII(domain.replace(/^\./, '').toLowerCase()); if (!host || host.includes('/') || host.includes(':') || host.length > 253) throw new Error('Cookie domain is invalid.'); return getDomain(host, { allowPrivateDomains: true }) ?? host }

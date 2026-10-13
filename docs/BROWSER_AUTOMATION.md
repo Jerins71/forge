@@ -26,7 +26,7 @@ Remote tabs use `Page.startScreencast` over the existing authenticated environme
 
 ## Import from Chrome
 
-Import is an explicit user operation. Forge reads Chrome cookies into bounded, expiring memory and previews domains grouped by eTLD+1 with counts and last-used timestamps when available. No cookies are written until the user selects sites and applies the import. The profile receives only those sites. The audit lists site domains, counts, and import times, never cookie values. **Forget site** removes that site’s cookies from the target profile.
+Import is an explicit administrator operation: `browser.cookies.preview`, `apply`, `prepareSend`, `receive`, and `cancel` require `settings:admin`. The current device's `DeviceSession.scopes` (available as `EnvironmentClient.deviceSession()?.scopes`) projects this authority for UI gating. Metadata audit requires `session:read`; forgetting a site requires `session:operate`. Forge reads Chrome cookies into bounded, expiring memory and previews domains grouped by eTLD+1 with counts and last-used timestamps when available. No cookies are written until the user selects sites and applies the import. The dialog can release its device/session-owned preview with `browser.cookies.cancel({ sessionId, importId })`, which returns `{}` and is idempotent after release or expiry. The staging owner automatically releases previews after five minutes even if no further request arrives. The profile receives only those sites. The audit lists site domains, counts, and import times, never cookie values. **Forget site** removes that site’s cookies from the target profile.
 
 Source A works across supported operating systems with Chrome 144 or later: enable the remote-debugging toggle at `chrome://inspect/#remote-debugging`, keep Chrome open, and allow Forge in Chrome’s consent dialog. Forge reads `DevToolsActivePort`, connects solely to read `Storage.getCookies`, and disconnects. Agents never drive the user’s Chrome.
 
@@ -36,7 +36,7 @@ Forge never copies Login Data, a whole Chrome profile, or decrypted cookie value
 
 ## Persistence and lifecycle
 
-Session `browser.json` stores the tab list, active tab, viewport, and revision metadata. Browser contexts and cookie audits use the canonical paths in `data-paths.ts`. Desktop project partitions are held in Electron’s own user-data directory. Restarting Forge restores logical tabs; closing or archiving a session closes its physical tabs while preserving its project profile. Deleting a session removes its session metadata and artifacts, without deleting shared project logins.
+Session `browser.json` stores the tab list, active tab, viewport, and revision metadata. Browser contexts and cookie audits use the canonical paths in `data-paths.ts`. Desktop project partitions are held in Electron’s own user-data directory. Browser admission rejects archived sessions and archived projects, including reads and subscriptions. Explicit restore re-enables loading their saved tabs. Restarting Forge restores logical tabs; closing or archiving a session closes its physical tabs while preserving its project profile. Deleting a session removes its session metadata and artifacts, without deleting shared project logins.
 
 The former Chrome extension, native-messaging host, External Chrome relay, setup page, leases, and journals have been removed. There is no mode for agents to control everyday Chrome. Existing old integration files are not read or automatically removed from users’ machines.
 

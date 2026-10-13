@@ -102,6 +102,7 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
     return fail('source-unavailable', 'Chrome’s cookie database could not be read. Open Chrome or use the inspect toggle.')
   }
   const database = new DatabaseSync(databasePath, { readOnly: true })
+  let key: Buffer | undefined, v11: Buffer | undefined, empty: Buffer | undefined
   try {
     const schema = Number((database.prepare("SELECT value FROM meta WHERE key='version'").get() as { value?: string } | undefined)?.value ?? 0)
     const columns = new Set((database.prepare('PRAGMA table_info(cookies)').all() as Array<{ name: string }>).map(column => column.name))
@@ -112,9 +113,9 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
     const needsKey = rows.some(row => row.encrypted_value.length > 0 && (platform === 'darwin' || Buffer.from(row.encrypted_value).subarray(0, 3).toString() === 'v11'))
     if (needsKey && fixtureOnly && !options.passphrase) return fail('source-unavailable', 'Native Keychain and secret-service reads are disabled in test fleets. Inject a synthetic fixture key provider.')
     const passphrase = needsKey ? await (options.passphrase ?? (platform === 'darwin' ? macPassphrase : linuxPassphrase))() : ''
-    const key = pbkdf2Sync(platform === 'darwin' ? passphrase : 'peanuts', 'saltysalt', platform === 'darwin' ? 1003 : 1, 16, 'sha1')
-    const v11 = platform === 'linux' && needsKey ? pbkdf2Sync(passphrase, 'saltysalt', 1, 16, 'sha1') : undefined
-    const empty = pbkdf2Sync('', 'saltysalt', 1, 16, 'sha1')
+    key = pbkdf2Sync(platform === 'darwin' ? passphrase : 'peanuts', 'saltysalt', platform === 'darwin' ? 1003 : 1, 16, 'sha1')
+    v11 = platform === 'linux' && needsKey ? pbkdf2Sync(passphrase, 'saltysalt', 1, 16, 'sha1') : undefined
+    empty = pbkdf2Sync('', 'saltysalt', 1, 16, 'sha1')
     const cookies: ImportCookie[] = []
     for (const row of rows) {
       if (row.expires > 0 && row.expires <= Date.now() / 1000) continue
@@ -124,15 +125,21 @@ export async function readChromeDatabase(options: { userDataDir?: string; platfo
         if (prefix !== 'v10' && prefix !== 'v11') return fail('source-unavailable', 'Chrome’s cookie encryption format is not supported. Use its inspect toggle to import these cookies.')
         const selectedKey = prefix === 'v11' ? v11 : key
         if (!selectedKey) return fail('secret-service-unavailable', 'Unlock the Chrome keyring and retry cookie import.')
-        let plaintext: Buffer | undefined
+        let decrypted = false
         for (const candidate of platform === 'linux' ? [selectedKey, empty] : [selectedKey]) {
-          try { const decipher = createDecipheriv('aes-128-cbc', candidate, Buffer.alloc(16, 0x20)); const decoded = Buffer.concat([decipher.update(encrypted.subarray(3)), decipher.final()]); if (schema >= 24 && !decoded.subarray(0, 32).equals(createHash('sha256').update(row.host_key).digest())) continue; plaintext = schema >= 24 ? decoded.subarray(32) : decoded; break } catch { /* Try Chromium's documented empty-key fallback. */ }
+          let decoded: Buffer | undefined
+          try {
+            const decipher = createDecipheriv('aes-128-cbc', candidate, Buffer.alloc(16, 0x20))
+            decoded = Buffer.concat([decipher.update(encrypted.subarray(3)), decipher.final()])
+            if (schema >= 24 && !decoded.subarray(0, 32).equals(createHash('sha256').update(row.host_key).digest())) continue
+            value = (schema >= 24 ? decoded.subarray(32) : decoded).toString('utf8'); decrypted = true; break
+          } catch { /* Try Chromium's documented empty-key fallback. */ }
+          finally { decoded?.fill(0) }
         }
-        if (!plaintext) return fail('source-unavailable', 'Chrome cookies could not be decrypted with the approved key. Use its inspect toggle instead.')
-        value = plaintext.toString('utf8')
+        if (!decrypted) return fail('source-unavailable', 'Chrome cookies could not be decrypted with the approved key. Use its inspect toggle instead.')
       }
       cookies.push({ ...(row.partition_key ? { partitionKey: row.partition_key, partitionHasCrossSiteAncestor: !!row.cross_site } : {}), name: row.name, value, domain: row.host_key, path: row.path, expires: row.expires, secure: !!row.is_secure, httpOnly: !!row.is_httponly, sameSite: row.samesite === 0 ? 'None' : row.samesite === 2 ? 'Strict' : 'Lax', ...(row.last_used && row.last_used > 0 ? { lastUsedAt: new Date(row.last_used * 1000).toISOString() } : {}) })
     }
     return cookies
-  } finally { database.close() }
+  } finally { key?.fill(0); v11?.fill(0); empty?.fill(0); database.close() }
 }

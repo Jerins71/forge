@@ -35,7 +35,7 @@ export async function pairTestAccess(access: ReturnType<typeof createEnvironment
   };
 }
 /** Pair through the public exchange after a private parent-owned bootstrap grant. */
-export async function pairTestServer(server: import('../server.js').StartedServer) {
+export async function pairTestServer(server: import('../server.js').StartedServer, scopes: Scope[] = environmentTestScopes) {
   const baseUrl = `http://${server.host}:${server.port}`;
   const grant = await server.createBootstrapGrant();
   const challenge = await (await fetch(`${baseUrl}/api/v2/access/challenge`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).json() as { challengeId: string; nonce: string };
@@ -44,7 +44,7 @@ export async function pairTestServer(server: import('../server.js').StartedServe
   const jwk = publicKey.export({ format: 'jwk' });
   const input = { environmentId: grant.environmentId, challengeId: challenge.challengeId, nonce: challenge.nonce,
     credential: { kind: 'link', grantId: grant.grantId, secret: fragment.get('secret')! },
-    deviceKind: 'cli', delivery: 'bearer', deviceName: 'paired server fixture', requestedScopes: environmentTestScopes,
+    deviceKind: 'cli', delivery: 'bearer', deviceName: 'paired server fixture', requestedScopes: scopes,
     proofKey: { kty: 'EC', crv: 'P-256', x: jwk.x!, y: jwk.y! } } as Omit<PairingExchange, 'proof'>;
   const digest = createHash('sha256').update(canonicalPairingFields(input)).digest('hex');
   const exchanged = await fetch(`${baseUrl}/api/v2/access/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
