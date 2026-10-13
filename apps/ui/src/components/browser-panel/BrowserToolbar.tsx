@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ArrowLeft, ArrowRight, ExternalLink, Lock, RotateCw } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ExternalLink, Lock, Monitor, PanelRight, RotateCw } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import type { BrowserPanelTab } from './browser-panel-port'
@@ -13,11 +13,12 @@ interface BrowserToolbarProps {
   onReload: () => void
   onNavigate: (url: string) => void
   onOpenExternal: () => void
+  onViewportMode: (mode: 'desktop' | 'panel') => void
 }
 
 /** Back, forward, reload and the address bar, with a loading bar on the bottom edge. */
 export function BrowserToolbar({
-  tab, disabled, focusAddressNonce, onBack, onForward, onReload, onNavigate, onOpenExternal,
+  tab, disabled, focusAddressNonce, onBack, onForward, onReload, onNavigate, onOpenExternal, onViewportMode,
 }: BrowserToolbarProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [draft, setDraft] = useState('')
@@ -88,6 +89,13 @@ export function BrowserToolbar({
             </button>
           ) : null}
         </div>
+        {/* Pages render at desktop size, scaled to fit, so agents see the layout people do. Fit to
+            panel lays the page out at the panel's own size instead, which reads better up close. */}
+        {tab?.viewportMode ? (
+          tab.viewportMode === 'panel'
+            ? <ToolbarButton label="Desktop size" disabled={disabled} onClick={() => onViewportMode('desktop')}><Monitor /></ToolbarButton>
+            : <ToolbarButton label="Fit to panel" disabled={disabled} onClick={() => onViewportMode('panel')}><PanelRight /></ToolbarButton>
+        ) : null}
       </form>
       {tab?.loading ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-[-1px] h-0.5 overflow-hidden" aria-hidden="true">

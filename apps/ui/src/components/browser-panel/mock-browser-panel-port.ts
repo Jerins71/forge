@@ -98,7 +98,7 @@ export function createMockBrowserPanelPort(options: { surface?: BrowserPanelSurf
     const tabId = `mock-tab-${nextTab++}`
     tabs.set(tabId, {
       tabId, url, title: titleFor(url), faviconUrl: null, loading: false, canGoBack: false, canGoForward: false,
-      controller, agentAction, agentCursor: null, crashed: false, error: null, history: [url], index: 0, clicks: [],
+      controller, agentAction, agentCursor: null, crashed: false, error: null, viewportMode: 'desktop', history: [url], index: 0, clicks: [],
     })
     snapshot = { ...snapshot, activeTabId: tabId }
     load(tabId, url, false)
@@ -113,6 +113,12 @@ export function createMockBrowserPanelPort(options: { surface?: BrowserPanelSurf
     subscribe(listener) {
       listeners.add(listener)
       return () => { listeners.delete(listener) }
+    },
+    async setViewportMode(tabId, mode) {
+      const tab = tabs.get(tabId)
+      if (!tab) return
+      tab.viewportMode = mode
+      publish()
     },
     async open(url) {
       if (port.failNextOpen) { const message = port.failNextOpen; port.failNextOpen = null; throw new Error(message) }

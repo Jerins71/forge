@@ -32,6 +32,9 @@ export interface BrowserPanelTab {
   agentCursor?: BrowserPanelAgentCursor | null
   crashed?: boolean
   error: string | null
+  /** How the page is sized: a desktop page scaled to fit (the default), the panel's own size, or a
+   *  size the agent chose. Absent when the machine cannot switch. */
+  viewportMode?: 'desktop' | 'panel' | 'custom'
 }
 
 export type BrowserPanelAvailability =
@@ -106,6 +109,8 @@ export interface BrowserPanelPort {
   history(tabId: string, direction: 'back' | 'forward'): Promise<void>
   reload(tabId: string): Promise<void>
   openExternal(tabId: string): Promise<void>
+  /** Desktop size scaled to fit, or the panel's own size; resets a size the agent chose. */
+  setViewportMode?(tabId: string, mode: 'desktop' | 'panel'): Promise<void>
   /** Installs (or retries installing) the machine's browser. */
   setup?(): Promise<void>
 
