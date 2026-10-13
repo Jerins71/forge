@@ -153,10 +153,10 @@ function LoopbackWarning({ address, label }: { address: PairingAddress; label: s
       <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-attention" />
       <p>
         {address.baseUrl} only works on {label} itself, so another device cannot use this link. To pair one, restart Forge
-        there with <code className="font-mono">--tailscale-serve</code>
-        {address.tailscaleUrl ? <> (it would be <span className="font-mono">{address.tailscaleUrl}</span>)</> : null}, or with{' '}
-        <code className="font-mono">--public-url</code> and a TLS certificate
-        {address.lanAddresses.length ? <> (its LAN address: <span className="font-mono">{address.lanAddresses.join(', ')}</span>)</> : null}.
+        there listening on every interface (<code className="font-mono">FORGE_HOST=0.0.0.0</code>
+        {address.lanAddresses.length ? <>; its LAN address is <span className="font-mono">{address.lanAddresses.join(', ')}</span></> : null}), or with{' '}
+        <code className="font-mono">--tailscale-serve</code>
+        {address.tailscaleUrl ? <> (it would be <span className="font-mono">{address.tailscaleUrl}</span>)</> : null}.
       </p>
     </div>
   )

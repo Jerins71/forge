@@ -123,7 +123,7 @@ it('Desktop defaults to loopback and refuses plaintext safeStorage fallback', as
   const child=fork(entry,[],options);cleanup.push(()=>child.kill());
   const [observed]=await once(child,'message');expect(observed).toMatchObject({host:'0.0.0.0',mode:'lan',publicUrl:'https://dev1.test',origins:'app://forge,https://client.test'});
   expect(resolveBackendExposurePolicy(options.env!).publicBaseUrl).toBe('https://dev1.test');
-  expect(()=>createBackendForkOptions({runtimeRoot:root,inheritedEnv:{},isPackaged:true,backendPort:47187,resourcesDir:root,appVersion:'1',electronVersion:'1',execArgv:[],exposure:{mode:'lan',host:'0.0.0.0',allowedClientOrigins:[]}})).toThrow(/TLS/);
+  expect(createBackendForkOptions({runtimeRoot:root,inheritedEnv:{},isPackaged:true,backendPort:47187,resourcesDir:root,appVersion:'1',electronVersion:'1',execArgv:[],exposure:{mode:'lan',host:'0.0.0.0',allowedClientOrigins:[]}}).env?.FORGE_HOST).toBe('0.0.0.0');
   const service = createEnvironmentCredentialService({ storePath: join(tmpdir(), 'unused-test-file'), safeStorage: { isEncryptionAvailable: () => false, encryptString: () => Buffer.alloc(0), decryptString: () => '' } });
   expect(await service.list()).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } });
 });

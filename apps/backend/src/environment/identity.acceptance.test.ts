@@ -46,9 +46,20 @@ it("persists identity across restart, blocks a copied root, rekeys without rewri
   await expect(loadEnvironmentIdentity({ dataDir, installationStateDir })).rejects.toMatchObject({ code: "IDENTITY_MISMATCH" });
   db.close();
 });
-it("requires an explicit remote HTTPS plan and trusts forwarded metadata only from the configured loopback peer", () => {
-  expect(() => createExposurePolicy({ host: "0.0.0.0", port: 47187 })).toThrow();
-  expect(() => createExposurePolicy({ host: "0.0.0.0", port: 47187, publicBaseUrl: "http://dev1.test" })).toThrow();
+it("serves plain HTTP on every interface, as Forge 1 did", () => {
+  const all = createExposurePolicy({ host: "0.0.0.0", port: 47187 });
+  expect(all.publicBaseUrl).toBe("http://127.0.0.1:47187");
+  all.setLoopbackPort(47287);
+  expect(all.publicBaseUrl).toBe("http://127.0.0.1:47287");
+  expect(all.secure).toBe(false);
+  // Pairing links carry whichever LAN or Tailscale address the user reaches this machine on.
+  expect(all.validateReachableBaseUrl("http://100.64.0.7:47287")).toBe("http://100.64.0.7:47287");
+  const named = createExposurePolicy({ host: "0.0.0.0", port: 47187, publicBaseUrl: "http://dev1.test:47287" });
+  expect(named.publicBaseUrl).toBe("http://dev1.test:47287");
+  expect(() => named.validateReachableBaseUrl("http://other.test:47287")).toThrow();
+});
+
+it("trusts forwarded metadata only from the configured loopback peer", () => {
   const policy = createExposurePolicy({
     host: "0.0.0.0",
     port: 47187,

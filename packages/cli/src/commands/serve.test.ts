@@ -16,8 +16,9 @@ it('launches an explicit real backend process, private pairing output is exclusi
   await expect(serveBackend({ backendEntry: entry, pair: true, pairOutput: destination, interactive: false })).rejects.toThrow();
 });
 it('rejects unsafe exposure, absent packaged backend and noninteractive pairing without explicit protected output', async () => {
-  expect(() => validateServeOptions({ host: '0.0.0.0' })).toThrow();
-  expect(() => validateServeOptions({ host: '0.0.0.0', publicUrl: 'http://dev1.test' })).toThrow();
+  expect(() => validateServeOptions({ host: '0.0.0.0' })).not.toThrow();
+  expect(() => validateServeOptions({ host: '0.0.0.0', publicUrl: 'http://dev1.test' })).not.toThrow();
+  expect(() => validateServeOptions({ host: '0.0.0.0', publicUrl: 'http://dev1.test/path' })).toThrow();
   expect(() => validateServeOptions({ pair: true, interactive: false })).toThrow();
   await expect(resolveBackendEntry({ env: {}, manifestPath: join(tmpdir(), 'forge-nonexistent-manifest') })).rejects.toThrow(/backend/);
   await expect(resolveBackendEntry({ backendEntry: 'relative.js' })).rejects.toThrow(/absolute/);

@@ -18,7 +18,6 @@ export function canonicalJson(value: unknown): string {
 export function parsePairTarget(target: string): { baseUrl: string; environmentId?: string; credential?: PairingExchange['credential'] } {
   const url = new URL(target);
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search) throw new Error('Pairing target must be an HTTP(S) URL without userinfo or query');
-  if (url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) throw new Error('Remote pairing requires HTTPS');
   const fragment = new URLSearchParams(url.hash.slice(1));
   const credential = fragment.has('secret') ? { kind: 'link' as const, grantId: fragment.get('grantId') ?? '', secret: fragment.get('secret')! } : undefined;
   return { baseUrl: url.origin, environmentId: fragment.get('environmentId') ?? undefined, credential };

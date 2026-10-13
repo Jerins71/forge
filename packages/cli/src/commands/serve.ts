@@ -19,8 +19,7 @@ export function validateServeOptions(options: ServeOptions): void {
   if (options.port !== undefined && (!Number.isInteger(options.port) || options.port < 0 || options.port > 65535)) throw new Error('Port must be between 0 and 65535');
   if (Boolean(options.tlsCert) !== Boolean(options.tlsKey)) throw new Error('Supply both --tls-cert and --tls-key');
   if (options.tailscaleServe && !loopback) throw new Error('Tailscale serve requires loopback binding');
-  if (!loopback && (!options.publicUrl || !options.tlsCert && !options.env?.FORGE_TRUSTED_PROXY_PEER)) throw new Error('Non-loopback binding requires --public-url and TLS certificate/key or configured trusted loopback reverse proxy');
-  if (options.publicUrl) { const u = new URL(options.publicUrl); if (u.username || u.password || u.hash || u.search || u.pathname !== '/' || !['http:', 'https:'].includes(u.protocol) || (!loopback || options.tailscaleServe) && u.protocol !== 'https:') throw new Error('Public URL must be an explicit HTTPS origin for remote access'); }
+  if (options.publicUrl) { const u = new URL(options.publicUrl); if (u.username || u.password || u.hash || u.search || u.pathname !== '/' || !['http:', 'https:'].includes(u.protocol) || options.tailscaleServe && u.protocol !== 'https:') throw new Error('Public URL must be an HTTP(S) origin; Tailscale serve requires HTTPS'); }
   if (options.pair && !options.pairOutput && !(options.interactive ?? (process.stdin.isTTY && process.stderr.isTTY))) throw new Error('Noninteractive --pair requires --pair-output <absolute-file>; pairing credentials cannot go to ordinary stdout');
   if (options.pairOutput && !options.pair) throw new Error('--pair-output requires --pair');
 }

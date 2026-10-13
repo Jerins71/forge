@@ -339,13 +339,19 @@ export function createEnvironmentAccess({
     );
   }
   /** The address pairing links name; a loopback-only one works on this machine alone. */
-  function pairingAddress() {
-    const baseUrl = exposure.publicBaseUrl;
-    return { baseUrl, loopbackOnly: isLoopbackHost(new URL(baseUrl).hostname) };
+  async function pairingAddress() {
+    const base = new URL(exposure.publicBaseUrl);
+    if (exposure.anyAddress) {
+      // Prefer the Tailscale name, which reaches this machine from anywhere on the tailnet, then the LAN.
+      const { tailscaleUrl, lanAddresses } = await detectExposureSuggestions();
+      const host = tailscaleUrl ? new URL(tailscaleUrl).hostname : lanAddresses[0];
+      if (host) return { baseUrl: `${base.protocol}//${host}:${base.port}`, loopbackOnly: false };
+    }
+    return { baseUrl: base.origin, loopbackOnly: isLoopbackHost(base.hostname) };
   }
   async function pairingAddressInfo(p: Principal): Promise<RpcOutput<"access.pairing.address">> {
     authorize(p, ["access:admin"]);
-    const address = pairingAddress();
+    const address = await pairingAddress();
     return { ...address, ...(address.loopbackOnly ? await detectExposureSuggestions() : { tailscaleUrl: null, lanAddresses: [] }) };
   }
   /** Local data-directory owner only (the local pairing channel). Never route this publicly. */
@@ -357,7 +363,7 @@ export function createEnvironmentAccess({
     if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 60 || expiresInSeconds > 3600)
       throw new AccessError("INVALID_INPUT", "Expiry must be between 1 and 60 minutes");
     const label = typeof input.label === "string" && input.label.trim() ? input.label.trim().slice(0, 80) : "New device";
-    const address = pairingAddress();
+    const address = await pairingAddress();
     const grant = mintGrant({ kind: input.kind ?? "link", label, scopes, expiresInSeconds, reachableBaseUrl: address.baseUrl }, "@local-owner");
     return { grant, ...address };
   }

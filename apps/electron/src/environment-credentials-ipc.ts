@@ -54,7 +54,7 @@ const fail = (code: EnvironmentCredentialError['code'], message: string): never 
 function canonical(value: unknown): string { if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`; if (value !== null && typeof value === 'object') return `{${Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`; return JSON.stringify(value); }
 function targetUrl(value: string): string {
   let url: URL; try { url = new URL(value); } catch { return fail('INVALID_INPUT', 'Invalid environment URL'); }
-  if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || !['https:', 'http:'].includes(url.protocol) || url.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) fail('INVALID_INPUT', 'Environment URL must be an HTTPS origin or direct loopback HTTP');
+  if (url.username || url.password || url.search || url.hash || url.pathname !== '/' || !['https:', 'http:'].includes(url.protocol)) fail('INVALID_INPUT', 'Environment URL must be an HTTP(S) origin');
   return url.origin;
 }
 async function boundedBytes(response: Response, maximum = MAX_ARTIFACT_BYTES): Promise<Uint8Array> {

@@ -21,6 +21,8 @@ export interface ExposurePolicy {
   readonly mode: "loopback" | "lan" | "tailscale";
   readonly publicBaseUrl: string;
   readonly secure: boolean;
+  /** Listens on every interface with no configured public URL, so any address that reaches it may be named. */
+  readonly anyAddress: boolean;
   allowsOrigin(origin: string | null): boolean;
   validateForwarding(request: IncomingMessage): void;
   sourceIp(request: IncomingMessage): string;
@@ -38,7 +40,6 @@ function normalizedBase(value: string): URL {
   const url = new URL(value);
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== "/")
     throw new Error("Public URL must be an HTTP(S) origin without credentials, path, query or fragment");
-  if (url.protocol !== "https:" && !isLoopbackHost(url.hostname)) throw new Error("Remote environments require HTTPS");
   return url;
 }
 export function createExposurePolicy(options: ExposureOptions = {}): ExposurePolicy {
@@ -46,22 +47,22 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
   if (!host || /[\s/]/.test(host) || (!isIP(host.replace(/^\[|\]$/g, "")) && host !== "localhost"))
     throw new Error("Bind host must be an IP address or localhost");
   const loopback = isLoopbackHost(host);
+  // A wildcard bind serves every interface; this machine reaches itself on loopback.
+  const wildcard = ["0.0.0.0", "::", "[::]"].includes(host);
   const mode = options.mode ?? (loopback ? "loopback" : "lan");
   if (!["loopback", "lan", "tailscale"].includes(mode)) throw new Error("Invalid exposure mode");
   if (mode === "loopback" && !loopback) throw new Error("Loopback mode requires a loopback listener");
   if (mode === "tailscale" && !loopback) throw new Error("Tailscale mode requires a loopback backend listener");
   if ((options.tlsCert && !options.tlsKey) || (!options.tlsCert && options.tlsKey))
     throw new Error("TLS requires both certificate and key");
-  if (!loopback && (!options.publicBaseUrl || (!(options.tlsCert && options.tlsKey) && !options.trustedProxy)))
-    throw new Error("Non-loopback binding requires an explicit public HTTPS URL and TLS certificate/key or trusted loopback reverse proxy");
   if (mode === "tailscale" && !options.publicBaseUrl) throw new Error("Tailscale requires its explicit public HTTPS URL");
   if (options.trustedProxy && (!isLoopbackHost(options.trustedProxy.peer) || options.trustedProxy.proto !== "https"))
     throw new Error("Trusted proxy must be an exact loopback peer with HTTPS");
   const scheme = options.tlsCert && options.tlsKey ? "https" : "http";
-  let base = options.publicBaseUrl
-    ? normalizedBase(options.publicBaseUrl).origin
-    : `${scheme}://${host.includes(":") ? `[${host}]` : host}:${options.port ?? 47187}`;
-  if ((!loopback || mode === "tailscale") && new URL(base).protocol !== "https:") throw new Error("Remote environments require HTTPS");
+  const anyAddress = wildcard && !options.publicBaseUrl;
+  const selfHost = wildcard ? "127.0.0.1" : host.includes(":") ? `[${host}]` : host;
+  let base = options.publicBaseUrl ? normalizedBase(options.publicBaseUrl).origin : `${scheme}://${selfHost}:${options.port ?? 47187}`;
+  if (mode === "tailscale" && new URL(base).protocol !== "https:") throw new Error("Tailscale requires its HTTPS URL");
   const origins = new Set(options.allowedClientOrigins ?? []);
   for (const origin of origins) {
     if (origin !== "app://forge" && normalizedBase(origin).origin !== origin) throw new Error("Client origins must be exact origins");
@@ -91,6 +92,7 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
     get secure() {
       return new URL(base).protocol === "https:";
     },
+    anyAddress,
     allowsOrigin: (origin) => origin === null || origin === base || origins.has(origin),
     validateForwarding,
     sourceIp(request) {
@@ -101,12 +103,12 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
     },
     validateReachableBaseUrl(value) {
       const url = normalizedBase(value);
-      if (url.origin !== base) throw new Error("Pairing URL must use the configured public origin");
+      if (url.origin !== base && !anyAddress) throw new Error("Pairing URL must use the configured public origin");
       return url.origin;
     },
     setLoopbackPort(port) {
       if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid port");
-      if (!options.publicBaseUrl && loopback) base = `${scheme}://${host.includes(":") ? `[${host}]` : host}:${port}`;
+      if (!options.publicBaseUrl && (loopback || wildcard)) base = `${scheme}://${selfHost}:${port}`;
     },
   };
 }
