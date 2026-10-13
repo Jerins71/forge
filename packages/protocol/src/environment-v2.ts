@@ -207,6 +207,12 @@ export const LaunchSessionSchema = O({
   cli: Type.Optional(CliInvocationSchema),
 })
 export type LaunchSession = Static<typeof LaunchSessionSchema>
+/** A new session's title until it has a better one: the first line of its first message. */
+export function placeholderSessionTitle(text: string): string {
+  const line = text.trim().split('\n', 1)[0]?.trim() ?? ''
+  if (!line) return 'New session'
+  return line.length > 60 ? `${line.slice(0, 57)}…` : line
+}
 export const SendMessageSchema = O({ commandId: V2Uuid, sessionId: V2Id, message: MessageInputSchema,
   source: Type.Optional(CliSourceSchema), delivery: Type.Optional(E('auto', 'followUp', 'steer')),
   resendOfCommandId: Type.Optional(V2Uuid) })

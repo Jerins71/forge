@@ -28,7 +28,7 @@ const configValue = key => {
 const counters = { formatVersion: 1, instanceId: fixture.instanceId, pid: process.pid, ownerAgentId: null, threadId: null,
   openaiBaseUrl: configValue('model_providers.forge_router.base_url') ?? configValue('openai_base_url'),
   modelProvider: configValue('model_provider'), supportsWebsockets: configValue('model_providers.forge_router.supports_websockets'),
-  initialize: 0, threadStarts: 0, turnStarts: 0, compactions: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0 };
+  initialize: 0, threadStarts: 0, turnStarts: 0, compactions: 0, steers: 0, interrupts: 0, toolCalls: 0, choices: 0, workerSpawns: 0, workerResults: 0, titleRequests: 0 };
 const threads = new Map();
 const pending = new Map();
 let requestId = 0;
@@ -277,6 +277,12 @@ async function request(method, params = {}) {
   if (method === 'account/read') return { account: null, requiresOpenaiAuth: false };
   if (method === 'model/list') return { data: [{ id: 'gpt-6-sol', model: 'gpt-6-sol', displayName: 'Fixture Codex',
     description: 'Deterministic fixture', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'Fixture' }], defaultReasoningEffort: 'high' }], nextCursor: null };
+  if (method === 'thread/start' && params.ephemeral === true) {
+    // A one-off ephemeral thread, such as a session title request: no rollout, counters or tools.
+    const thread = { id: `fixture-${fixture.instanceId}-${process.pid}-ephemeral-${++threadId}`, ephemeral: true, model: params.model ?? 'gpt-6-sol' };
+    threads.set(thread.id, thread);
+    return { thread: { id: thread.id, path: null, turns: [] }, model: thread.model };
+  }
   if (method === 'thread/start') {
     await startDelay();
     count('threadStarts');
@@ -324,6 +330,26 @@ async function request(method, params = {}) {
   if (method === 'turn/start') {
     await startDelay();
     const thread = threads.get(params.threadId);
+    if (thread?.ephemeral) {
+      count('titleRequests');
+      const text = (params.input ?? []).map(item => item.text ?? '').join('\n');
+      const turn = { thread, id: `${thread.id}-turn`, done: false };
+      // Only [fixture:title] messages get a title, so other specs keep their first-prompt titles.
+      // The delay lets the placeholder be seen first; the reply is quoted and punctuated the way a
+      // real model often answers, so Forge's cleanup is exercised.
+      const named = text.includes('[fixture:title]');
+      setTimeout(() => {
+        notify('turn/started', { threadId: thread.id, turn: { id: turn.id, status: 'inProgress', items: [] } });
+        if (!named) {
+          notify('error', { ...context(turn), error: { message: 'Synthetic title failure' }, willRetry: false });
+          complete(turn, 'failed');
+          return;
+        }
+        notify('item/completed', { ...context(turn), item: { id: `${turn.id}-assistant`, type: 'agentMessage', text: '"Plan the fixture launch."', phase: 'final_answer' } });
+        complete(turn);
+      }, named ? 1500 : 15);
+      return { turn: { id: turn.id, status: 'inProgress', items: [] } };
+    }
     if (!thread || active) throw new Error('Unknown thread or turn already active');
     count('turnStarts');
     const turn = { thread, id: `${thread.id}-turn-${counters.turnStarts}`, done: false };

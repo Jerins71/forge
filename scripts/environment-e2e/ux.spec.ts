@@ -785,3 +785,60 @@ test('Archive all sessions archives every session but each checkout\'s own, here
   assertions.archiveAll = { archived: expected, machines: 2 }
   expect(renderErrors).toEqual([])
 })
+
+test('a new thread is named after its first message, here and on a paired machine, live and after reload; a rename or a failure keeps its title', async ({ page }) => {
+  const { a, b } = fleet
+  // This machine's rows carry no session ref; find them by title in the project list.
+  const localRow = (title: string) => page.getByRole('complementary').getByRole('list').getByRole('button').filter({ hasText: title })
+  const header = () => page.getByRole('heading', { level: 1 }).filter({ visible: true }).first()
+  const generated = 'Plan the fixture launch'
+  const text = 'I have a problem I\'m wanting you to work on [fixture:title]. The scenario is the launch.'
+  // The first line of the first message, cut at 57 characters (placeholderSessionTitle).
+  const placeholder = `${text.slice(0, 57)}…`
+
+  // Here: the first-prompt placeholder first, then the generated title in place, in the row and the header.
+  const key = await logicalGroupKey(page)
+  await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(key)}`)
+  await page.getByRole('combobox', { name: 'Message agent...' }).fill(text)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/agent=v2-/)
+  const local = new URL(page.url()).searchParams.get('agent')!
+  await expect(localRow(placeholder)).toHaveCount(1)
+  await expect(header()).toContainText(placeholder)
+  await shot(page, 'auto-title-before')
+  await expect(localRow(generated)).toHaveCount(1, { timeout: 30_000 })
+  await expect(localRow(placeholder)).toHaveCount(0)
+  await expect(header()).toContainText(generated)
+  await shot(page, 'auto-title-after')
+  await page.reload()
+  await expect(localRow(generated)).toHaveCount(1)
+  await expect(header()).toContainText(generated)
+
+  // A paired machine names its own session, with its own provider, in its own record.
+  const remoteSession = await bootstrap(b)
+  const remoteProject = (await shellSession(b, b.sessionId))!.projectId
+  const remote = (await fixtureRpcOnce(b.baseUrl, remoteSession, 'session.launch', { commandId: randomUUID(), projectId: remoteProject,
+    title: placeholder, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })).sessionId as string
+  await expect.poll(async () => (await shellSession(b, remote))?.title, { timeout: 30_000 }).toBe(generated)
+
+  // A rename while the title is generating wins, and is never replaced.
+  const localSession = await bootstrap(a)
+  const projectId = (await shellSession(a, a.sessionId))!.projectId
+  const renamed = (await fixtureRpcOnce(a.baseUrl, localSession, 'session.launch', { commandId: randomUUID(), projectId,
+    title: placeholder, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text, artifactIds: [] } })).sessionId as string
+  // A rename waits for the session's own turn to end, which the fixture finishes well before the title.
+  await until(() => fixtureRpcOnce(a.baseUrl, localSession, 'session.update', { commandId: randomUUID(), sessionId: renamed, title: 'My own name' }).then(() => true, () => false), Boolean)
+  await expect(localRow('My own name')).toHaveCount(1)
+  // A failed title keeps the placeholder.
+  const failedText = 'Keep this first prompt as the title when naming fails'
+  const failed = (await fixtureRpcOnce(a.baseUrl, localSession, 'session.launch', { commandId: randomUUID(), projectId,
+    title: failedText, workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: failedText, artifactIds: [] } })).sessionId as string
+  await expect(localRow(failedText)).toHaveCount(1)
+  // Well past the fixture's title delay, both keep their titles.
+  await page.waitForTimeout(5_000)
+  await page.reload()
+  await expect(localRow('My own name')).toHaveCount(1)
+  await expect(localRow(failedText)).toHaveCount(1)
+  assertions.autoTitles = { local, remote, renamed, failed, generated }
+  expect(renderErrors).toEqual([])
+})
