@@ -45,6 +45,7 @@ const roleScopedBridge = {
           present: (input: Parameters<import('@forge/protocol').BrowserEngineDesktopBridge['present']>[0]): Promise<void> => ipcRenderer.invoke('forge:browser-engine:present', input),
           hide: (): Promise<void> => ipcRenderer.invoke('forge:browser-engine:hide'),
         },
+  setBrowserPanelWindow: (input: { open: boolean; growth: number }): Promise<void> => ipcRenderer.invoke('forge:browser-panel:window', input),
   showOpenDialog: (options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> =>
           ipcRenderer.invoke('bridge:showOpenDialog', options),
   onTerminalShortcut: (listener: (event: { action: 'toggle' | 'new' | 'next' | 'prev' }) => void): (() => void) => {

@@ -840,6 +840,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
       data-sidebar-layout={sidebarLayout}
       className={cn(
         'flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground',
+        // Keep in step with sidebarWidthAtViewport, which predicts this width for a resized window.
         'max-md:w-full md:w-[min(var(--forge-sidebar-width,clamp(16rem,20vw,26rem)),60vw)] md:shrink-0',
       )}
     >

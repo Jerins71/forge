@@ -1,15 +1,10 @@
 import { useLayoutEffect, useRef, type KeyboardEvent, type PointerEvent } from 'react'
+import { remPx, SIDEBAR_WIDTH_VAR } from './sidebar-width'
 
 const SIDEBAR_WIDTH_KEY = 'forge-sidebar-width'
-/** The CSS variable the sidebar's width reads (see AgentSidebar); unset means the default width. */
-const SIDEBAR_WIDTH_VAR = '--forge-sidebar-width'
 const MIN_REM = 14
 const MAX_REM = 40
 const KEY_STEP_PX = 16
-
-function remPx(): number {
-  return Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
-}
 
 function clampWidth(px: number): number {
   const rem = remPx()

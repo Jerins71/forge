@@ -109,7 +109,7 @@ Set `FORGE_MANAGED_PROOF_INJECT_STORAGE_FAILURE=1` for the additional minted-ses
 | `src/browser/cdp-relay.ts` | Minimal CDP browser facade for Playwright over the private channel |
 | `src/browser/browser-engine-fixture-main.ts` | Isolated native-host E2E fixture |
 | `src/auto-updater.ts` | Auto-update logic using `electron-updater` and GitHub Releases |
-| `src/window-state.ts` | Persists window position, size, maximized state, and fullscreen state across restarts |
+| `src/window-state.ts` | Persists window position, size, maximized state, and fullscreen state across restarts; widens the window for the docked browser panel and remembers its closed and open widths |
 | `src/fix-path.ts` | Ensures PATH is set correctly on macOS when launched from GUI (not terminal) |
 | `src/whats-new.ts` | Displays release notes after successful update |
 | `electron-builder.yml` | Build configuration for packaging and updater publishing |

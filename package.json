@@ -56,7 +56,8 @@
     "help:baseline": "node scripts/snapshot-help-content-baseline.mjs",
     "postinstall": "node scripts/fix-node-pty-spawn-helper-permissions.mjs",
     "e2e:env": "node --import ./apps/backend/node_modules/tsx/dist/loader.mjs scripts/environment-e2e/launch.ts",
-    "e2e:browser:desktop": "node --import ./apps/backend/node_modules/tsx/dist/loader.mjs scripts/environment-e2e/browser-desktop-smoke.ts"
+    "e2e:browser:desktop": "node --import ./apps/backend/node_modules/tsx/dist/loader.mjs scripts/environment-e2e/browser-desktop-smoke.ts",
+    "e2e:browser:window-sizing": "node --import ./apps/backend/node_modules/tsx/dist/loader.mjs scripts/environment-e2e/browser-window-sizing-smoke.ts"
   },
   "pnpm": {
     "overrides": {
