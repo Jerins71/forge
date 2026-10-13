@@ -1,3 +1,4 @@
+import { restrictChromeCookieImportsToFixtures } from '../../apps/backend/src/swarm/browser-automation/chrome-cookies.js';
 import type { EnvironmentDescriptor, DeviceSession } from '@forge/protocol/environment-v2';
 import { fixtureRpcOnce } from './fixtures/rpc-client.js';
 import { redeemFixtureGrant, fixtureScopes } from './fixtures/pairing.js';
@@ -15,6 +16,10 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { nativeSmoke } from './fixtures/native-smoke.js';
 import { writeInfrastructureArtifacts } from './assert-artifacts.js';
+
+// This module is the shared entry for every fleet and Playwright suite, including
+// runs without the E2E config. Teardown must never restore real-profile access.
+restrictChromeCookieImportsToFixtures();
 
 export const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const markerName = '.forge-environment-e2e-root.json';

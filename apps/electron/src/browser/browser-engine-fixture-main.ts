@@ -3,7 +3,9 @@ import { app, BrowserWindow } from 'electron'
 import { fork } from 'node:child_process'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { restrictChromeCookieImportsToFixtures } from '../../../backend/src/swarm/browser-automation/chrome-cookies.js'
 import { DesktopBrowserHost } from './desktop-browser-host.js'
+restrictChromeCookieImportsToFixtures()
 app.commandLine.appendSwitch('use-mock-keychain')
 app.commandLine.appendSwitch('password-store', 'basic')
 app.setPath('userData', process.env.FORGE_ELECTRON_USER_DATA_DIR!)

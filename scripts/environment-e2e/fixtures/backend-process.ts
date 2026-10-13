@@ -1,3 +1,4 @@
+import { restrictChromeCookieImportsToFixtures } from '../../../apps/backend/src/swarm/browser-automation/chrome-cookies.js';
 import { installEnvironmentParentBootstrap } from '../../../apps/backend/src/environment/parent-bootstrap.js';
 import { readFile, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -7,6 +8,8 @@ import { getWorkerPresetsPath, saveWorkerPresetSettings } from '../../../apps/ba
 import { startServer, type StartedServer } from '../../../apps/backend/src/server.js';
 import { getNativeCodexHome, getSharedAuthFilePath } from '../../../apps/backend/src/swarm/storage/data-paths.js';
 import { installHardeningHooks } from './hardening-hooks.js';
+
+restrictChromeCookieImportsToFixtures();
 
 // Separate process per backend. Avoid index.ts's dotenv loading and Desktop-only
 // ready gate; use the ordinary composition and its existing ready callback.

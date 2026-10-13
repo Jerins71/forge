@@ -1,6 +1,8 @@
+import { restrictChromeCookieImportsToFixtures } from '../../../apps/backend/src/swarm/browser-automation/chrome-cookies.js'
 import { BrowserEngine } from '../../../apps/backend/src/swarm/browser-automation/browser-engine.js'
 import { DesktopBrowserChannel } from '../../../apps/backend/src/swarm/browser-automation/desktop-browser-channel.js'
 import type { BrowserAutomationOperation, BrowserAutomationInputByOperation } from '@forge/protocol'
+restrictChromeCookieImportsToFixtures()
 const engine = new BrowserEngine({ dataDir: process.env.FORGE_DATA_DIR!, resolveSession: id => id === 'session' ? 'project' : id === 'other' ? 'other-project' : undefined, desktop: new DesktopBrowserChannel(true) })
 process.on('message', raw => {
   if (!raw || typeof raw !== 'object' || (raw as { type?: string }).type !== 'fixture:browser:call') return
