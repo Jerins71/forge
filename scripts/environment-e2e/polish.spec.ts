@@ -17,7 +17,7 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page } from '@playwright/test'
-import type { CommandReceipt, SessionSummary } from '@forge/protocol/environment-v2'
+import type { CommandReceipt, DetailStreamItem, SessionSummary } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
@@ -585,4 +585,61 @@ test('the header meter shows the provider\'s context usage, and /compact compact
     results[environment.environmentId] = { sessionId, before: '25%', after: '5%', afterStopCompact: '5%', usageAfterTerminal: true }
   }
   assertions.contextMeter = results
+})
+
+
+test('Codex compacts an active plan and goal and sees both on its next native input, live and after reload', async ({ page }) => {
+  const sessionId = await launchRunning('Polish Codex compact state', '[fixture:compact-state] Create a plan and goal with a 1,000,000-token budget')
+  await open(page, sessionId)
+  await expect(transcript(page)).toContainText('The active plan and goal are ready for compaction.', { timeout: 30_000 })
+  const readState = async () => {
+    const rpc = await openFixtureRpc(fleet.a.baseUrl, admin)
+    try {
+      await rpc.call('session.subscribe', { sessionId })
+      const snapshot = await until<Extract<DetailStreamItem, { kind: 'snapshot' }>['snapshot'] | undefined>(() => rpc.frames.find(frame => frame.item?.kind === 'snapshot')?.item.snapshot, Boolean)
+      return snapshot!
+    } finally { rpc.close() }
+  }
+  const state = async () => {
+    const snapshot = await readState(), goal = snapshot.goal?.goal
+    return { plan: snapshot.plan?.plan, goal: goal ? { id: goal.id, objective: goal.objective, status: goal.status } : null }
+  }
+  const expectedState = await state()
+  expect(expectedState).toMatchObject({ plan: [{ step: 'Verify compacted fixture context', status: 'in_progress' }], goal: { objective: 'Keep the compacted fixture goal available', status: 'active' } })
+  const stop = async () => {
+    await page.getByRole('button', { name: 'Stop', exact: true }).click()
+    await expect.poll(async () => (await shellSession(sessionId))?.status, { timeout: 30_000 }).toBe('stopped')
+  }
+  await stop()
+  const pinned = (await readState()).items.find(item => item.kind === 'assistant' && item.text === 'The active plan and goal are ready for compaction.')!
+  expect(pinned).toBeDefined()
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.message.pin', { commandId: randomUUID(), sessionId, itemId: pinned.itemId, pinned: true })
+  await expect.poll(async () => (await readState()).items.find(item => item.itemId === pinned.itemId)?.pinned).toBe(true)
+  const replies: string[] = []
+  for (const phase of ['live', 'reload']) {
+    if (phase === 'reload') {
+      await page.reload()
+      await expect(transcript(page)).toContainText(replies[0]!, { timeout: 30_000 })
+    }
+    expect(await state()).toEqual(expectedState)
+    expect((await shellSession(sessionId))?.contextUsage).toBeUndefined()
+    await composer(page).fill('/compact')
+    await page.keyboard.press('Enter')
+    await expect(transcript(page).getByText('Compaction complete.', { exact: true }).last()).toBeVisible({ timeout: 15_000 })
+    await expect.poll(async () => (await shellSession(sessionId))?.contextUsage, { timeout: 30_000 }).toEqual({ tokens: 6_400, contextWindow: 128_000 })
+    await expect(transcript(page)).not.toContainText('Compaction failed:')
+    expect(await state()).toEqual(expectedState)
+    await send(page, `[fixture:compact-context] ${phase} Verify the context visible to the model`)
+    const reply = `Codex context ${phase}: goal "Keep the compacted fixture goal available" (active); plan "Verify compacted fixture context" (in_progress); pinned message kept.`
+    await expect(transcript(page)).toContainText(reply, { timeout: 30_000 })
+    await stop()
+    replies.push(reply)
+    expect(await state()).toEqual(expectedState)
+    await shot(page, `codex-compact-state-${phase}`)
+  }
+  await page.reload()
+  await expect(transcript(page)).toContainText(replies[1]!, { timeout: 30_000 })
+  expect(await state()).toEqual(expectedState)
+  expect((await readState()).items.find(item => item.itemId === pinned.itemId)?.pinned).toBe(true)
+  assertions.codexCompactState = { sessionId, pinnedItemId: pinned.itemId, nativeInputChecks: 2, liveAndReload: true, authoritativeState: expectedState, replies }
 })

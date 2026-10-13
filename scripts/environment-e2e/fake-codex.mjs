@@ -113,6 +113,21 @@ async function runTurn(turn, text) {
     if (text.includes('[fixture:empty]')) { complete(turn); return; }
     if (text.includes('[fixture:error]')) throw new Error('Synthetic failed turn');
     if (text.includes('[fixture:hang]')) { hung = true; setInterval(() => {}, 1000); return; }
+    if (text.includes('[fixture:compact-state]')) {
+      await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify compacted fixture context', status: 'in_progress' }] });
+      await dynamicTool(turn, 'create_goal', { objective: 'Keep the compacted fixture goal available', tokenBudget: 1_000_000 });
+      reply = 'The active plan and goal are ready for compaction.';
+    }
+    if (text.includes('[fixture:compact-context]')) {
+      // Observe only this native turn's input. No fixture memory or backend state
+      // can stand in for context Forge actually sent after native compaction.
+      const snapshot = marker => JSON.parse(text.split('\n').find(line => line.startsWith(marker))?.slice(marker.length).trim() ?? 'null');
+      const goal = snapshot('[activeGoal]'), plan = snapshot('[workingPlan]');
+      const phase = /\[fixture:compact-context\] (live|reload)/.exec(text)?.[1];
+      const pinned = text.includes('<forge_pinned_context>') && text.includes('The active plan and goal are ready for compaction.');
+      if (!pinned || goal?.status !== 'active' || plan?.plan?.[0]?.status !== 'in_progress' || !phase) throw new Error('Native turn is missing its authoritative goal or plan');
+      reply = `Codex context ${phase}: goal "${goal.objective}" (${goal.status}); plan "${plan.plan[0].step}" (${plan.plan[0].status}); pinned message kept.`;
+    }
     if (text.includes('[fixture:detail]')) {
       await dynamicTool(turn, 'update_plan', { plan: [{ step: 'Verify typed detail', status: 'in_progress' }] });
       await dynamicTool(turn, 'create_goal', { objective: 'Verify the explicitly requested fixture goal', tokenBudget: 1 });
@@ -229,6 +244,13 @@ async function runTurn(turn, text) {
     write(join(checkout, 'fixture-provider-marker.txt'), `${fixture.instanceId}:turns=${counters.turnStarts}\n`);
     const item = { id: `${turn.id}-assistant`, type: 'agentMessage', text: '', phase: 'final_answer' };
     notify('item/started', { ...context(turn), item });
+    if (text.includes('[fixture:compact-state]') || text.includes('[fixture:compact-context]')) {
+      // Keep the active goal's turn open until Stop; no automatic continuation
+      // can race the context-maintenance assertion.
+      notify('item/agentMessage/delta', { ...context(turn), itemId: item.id, delta: reply });
+      turn.holding = true;
+      return;
+    }
     const half = Math.floor(reply.length / 2);
     if (text.includes('[fixture:crash-mid-reply]')) {
       // The provider process dies with half a reply on screen.
