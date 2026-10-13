@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { BrowserCookieTransfer, DesktopBrowserCommand, DesktopBrowserEvent } from '@forge/protocol'
+export function desktopCdpEndpoint(pipe: string): string { return `ws+unix:${pipe}:/cdp` }
 export class DesktopBrowserChannel {
   readonly available: boolean
   private readonly entries = new Map<string, { socket?: WebSocket; close(): Promise<void> }>()
@@ -56,7 +57,7 @@ export class DesktopBrowserChannel {
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(pipe, () => { server.off('error', reject); resolve() }) })
     if (process.platform !== 'win32') await chmod(pipe, 0o600)
     try {
-      const endpointURL = `ws+unix://${pipe}:/cdp`
+      const endpointURL = desktopCdpEndpoint(pipe)
       const browser = await chromium.connectOverCDP(endpointURL, { timeout: 15000 })
       const page = browser.contexts()[0]?.pages()[0]; if (!page) throw new Error('Desktop CDP relay did not expose its page.')
       return { page, browser, close: async () => { await browser.close(); await entry.close() } }
