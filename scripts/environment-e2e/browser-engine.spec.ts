@@ -6,6 +6,7 @@ import { test, expect, _electron as electron } from '@playwright/test'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { createRequire } from 'node:module'
 import { launchFleet, controlEnvironment, sanitizedEnvironment, type BootstrapSession } from './launch.js'
 import { seedUiEnvironment } from './fixtures/ui-fleet.js'
 import { openFixtureRpc, until } from './fixtures/rpc-client.js'
@@ -16,6 +17,31 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserEngine } from '../../apps/backend/src/swarm/browser-automation/browser-engine.js'
+
+test('desktop smoke refuses real-home storage and escaping symlinks before launch', async ({}, info) => {
+  const require = createRequire(import.meta.url)
+  const { assertDesktopSmokeIsolation } = require('./fixtures/desktop-smoke-isolation.cjs') as { assertDesktopSmokeIsolation(input: { root: string; env: NodeJS.ProcessEnv; cacheRoot: string }, realHome?: string): void }
+  const { homedir } = await import('node:os')
+  const { symlink, readFile } = await import('node:fs/promises')
+  const root = await mkdtemp(join(tmpdir(), 'forge-desktop-isolation-proof-'))
+  const owned = join(root, 'fleet'), cacheRoot = join(root, 'cache'), fakeHome = join(root, 'real-home')
+  await mkdir(owned); await mkdir(cacheRoot); await mkdir(join(fakeHome, '.forge', 'cli'), { recursive: true })
+  const hint = join(fakeHome, '.forge', 'cli', 'install-hint'); await writeFile(hint, 'untouched synthetic hint')
+  const env = { FORGE_E2E_DESKTOP_HOME: join(owned, 'home'), FORGE_ELECTRON_USER_DATA_DIR: join(owned, 'electron'), FORGE_DATA_DIR: join(owned, 'data'), FORGE_INSTALLATION_STATE_DIR: join(owned, 'installation'), FORGE_BROWSER_CACHE_DIR: cacheRoot }
+  try {
+    expect(() => assertDesktopSmokeIsolation({ root: owned, env, cacheRoot })).not.toThrow()
+    for (const name of ['FORGE_DATA_DIR', 'FORGE_INSTALLATION_STATE_DIR', 'FORGE_ELECTRON_USER_DATA_DIR', 'FORGE_BROWSER_CACHE_DIR']) {
+      expect(() => assertDesktopSmokeIsolation({ root: owned, env: { ...env, [name]: join(homedir(), '.forge', 'smoke') }, cacheRoot })).toThrow('real Forge data')
+    }
+    expect(() => assertDesktopSmokeIsolation({ root: owned, env: { ...env, FORGE_E2E_DESKTOP_HOME: homedir() }, cacheRoot })).toThrow('real Forge data')
+    expect(() => assertDesktopSmokeIsolation({ root: owned, env: { ...env, FORGE_DATA_DIR: join(root, 'unowned') }, cacheRoot })).toThrow('owned')
+    expect(() => assertDesktopSmokeIsolation({ root: owned, env: { ...env, FORGE_INSTALLATION_STATE_DIR: undefined }, cacheRoot })).toThrow('absolute')
+    await symlink(fakeHome, join(owned, 'escape'), 'dir')
+    expect(() => assertDesktopSmokeIsolation({ root: owned, env: { ...env, FORGE_E2E_DESKTOP_HOME: join(owned, 'escape') }, cacheRoot }, fakeHome)).toThrow('owned')
+    expect(await readFile(hint, 'utf8')).toBe('untouched synthetic hint')
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'desktop-isolation-proof.json'), JSON.stringify({ passed: true, prelaunch: true, realHomeRejectedWithoutReading: true, storagePathsChecked: true, escapingSymlinkRejected: true, missingPathsRejected: true, syntheticHintUntouched: true }, null, 2))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
 
 test('headless engine drives fixtures, acknowledged screencast and persistent profile', async ({}, info) => {
   const root = await mkdtemp(join(tmpdir(), 'forge-browser-proof-'))
