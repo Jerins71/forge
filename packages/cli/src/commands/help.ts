@@ -20,6 +20,7 @@ Commands:
   pair <url-or-host> [--credential-file <absolute-file>]
   pair-link [--data-dir <absolute-directory>] [--code] [--scopes <comma-separated>] [--label <name>] [--expires 10m]
   environment rekey|adopt|restore --data-dir <absolute-directory>
+  import-v1 --data-dir <absolute-directory>
   status
   doctor
   config get|set|unset|list
@@ -59,6 +60,8 @@ export function commandHelp(command: string | undefined): string {
       return 'Usage: forge pair-link [--data-dir <absolute-directory>] [--code] [--scopes <comma-separated>] [--label <name>] [--expires <1m..60m>] [--json]\n\nIssues a one-time pairing link (or code with --code) from the Forge already running on this machine, without restarting it. Run it as the account that owns the data directory (default $FORGE_DATA_DIR or ~/.forge). The link goes to stdout and works once; it expires after 10 minutes unless --expires says otherwise. Grants every permission unless --scopes narrows them.'
     case 'environment':
       return 'Usage: forge environment rekey|adopt|restore --data-dir <absolute-directory> [--backend-entry <absolute-file>] [--from-data-dir <previous-directory>]\n\nLocal recovery runs under the ordinary backend runtime lock. Re-key assigns a new identity and revokes sessions; adopt retires the old data-path binding; restore rotates the stream epoch and revokes stale tokens.'
+    case 'import-v1':
+      return 'Usage: forge import-v1 --data-dir <absolute-directory> [--backend-entry <absolute-file>]\n\nImports Forge 1 projects and sessions from swarm/agents.json in the same data directory, once, into a stopped Forge 2 data directory that has no projects yet. Run it on a copy (cp -cR ~/.forge ~/.forge-v2). Sessions Forge 2 cannot continue are archived and marked read-only. The Forge 1 files are only read.'
     case 'status':
       return 'Usage: forge status [--json]\n\nShows Forge CLI API status and capability summary.'
     case 'doctor':

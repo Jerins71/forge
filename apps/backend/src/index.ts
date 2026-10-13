@@ -2,6 +2,7 @@ import "./stdio-epipe-guard-install.js";
 
 import { installEnvironmentParentBootstrap } from "./environment/parent-bootstrap.js";
 import { recoverLocalEnvironment } from "./environment/environment-recovery.js";
+import { importForgeV1 } from "./environment/import-v1.js";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,11 @@ async function main(): Promise<void> {
   delete process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT;
   if (process.env.FORGE_ENVIRONMENT_RECOVERY) {
     await recoverLocalEnvironment(config.paths.dataDir, process.env.FORGE_ENVIRONMENT_RECOVERY, process.env.FORGE_ENVIRONMENT_ADOPT_FROM);
+    return;
+  }
+  if (process.env.FORGE_IMPORT_V1 === "1") {
+    const summary = await importForgeV1({ dataDir: config.paths.dataDir, storeFilePath: config.paths.agentsStoreFile });
+    console.log(`Imported from Forge 1: ${summary.projects} projects, ${summary.sessions} sessions (${summary.archivedSessions} archived, ${summary.legacySessions} of them read-only legacy), ${summary.workers} workers; skipped ${summary.skippedRecords} unreadable or orphaned records.`);
     return;
   }
   if (!config.isDesktop && (!process.env.FORGE_APP_VERSION || process.env.FORGE_APP_VERSION.trim().length === 0)) {

@@ -16,12 +16,12 @@ interface DecodeStoreOptions {
 }
 
 /**
- * Raw agents.json records owned by removed features. They are never loaded into
- * the Builder. The original read-only import source preserves their exact bytes.
+ * Records of removed features (Collaboration, Cortex). They still decode, without the
+ * removed purpose, so a Forge 1 import can keep them as archived legacy history.
  */
 export interface RetiredStoreRecords {
-  agents: unknown[];
-  profiles: unknown[];
+  agentIds: Set<string>;
+  profileIds: Set<string>;
 }
 
 export interface DecodeStoreResult {
@@ -55,7 +55,7 @@ function isRetiredAgentRecord(candidate: unknown, retiredManagerIds: ReadonlySet
   );
 }
 
-function partitionRetiredAgentRecords(candidates: unknown[]): { active: unknown[]; retired: unknown[] } {
+function findRetiredAgentIds(candidates: unknown[]): Set<string> {
   const retiredManagerIds = new Set<string>();
   for (const candidate of candidates) {
     if (isRecord(candidate) && candidate.role === "manager" && isRetiredAgentRecord(candidate, retiredManagerIds)) {
@@ -66,12 +66,12 @@ function partitionRetiredAgentRecords(candidates: unknown[]): { active: unknown[
     }
   }
 
-  const active: unknown[] = [];
-  const retired: unknown[] = [];
+  const retired = new Set<string>();
   for (const candidate of candidates) {
-    (isRetiredAgentRecord(candidate, retiredManagerIds) ? retired : active).push(candidate);
+    const agentId = extractDescriptorAgentId(candidate);
+    if (agentId && isRetiredAgentRecord(candidate, retiredManagerIds)) retired.add(agentId);
   }
-  return { active, retired };
+  return retired;
 }
 
 export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions): DecodeStoreResult {
@@ -79,7 +79,7 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   if (!isRecord(parsed) || !Array.isArray(parsed.agents)) {
     return {
       store: { agents: [], profiles: [] },
-      retired: { agents: [], profiles: [] },
+      retired: { agentIds: new Set(), profileIds: new Set() },
       normalizedPathCount: 0,
       skippedDescriptorCount: 0
     };
@@ -90,20 +90,12 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   let skippedDescriptorCount = 0;
   const warn = options.warn ?? console.warn;
 
-  const agentRecords = partitionRetiredAgentRecords(parsed.agents);
+  const retiredAgentIds = findRetiredAgentIds(parsed.agents);
   const profileCandidates = Array.isArray(parsed.profiles) ? parsed.profiles : [];
-  const retiredProfiles = profileCandidates.filter(
-    (candidate) =>
-      isRecord(candidate) && typeof candidate.profileId === "string" && RETIRED_PROFILE_IDS.has(candidate.profileId),
-  );
-  if (agentRecords.retired.length > 0 || retiredProfiles.length > 0) {
-    options.logDebug?.("Retained retired Collaboration/Cortex records without loading them", {
-      agents: agentRecords.retired.length,
-      profiles: retiredProfiles.length,
-    });
-  }
+  const retiredProfileIds = new Set(profileCandidates.flatMap((candidate) =>
+    isRecord(candidate) && typeof candidate.profileId === "string" && RETIRED_PROFILE_IDS.has(candidate.profileId) ? [candidate.profileId] : []));
 
-  for (const [index, candidate] of agentRecords.active.entries()) {
+  for (const [index, candidate] of parsed.agents.entries()) {
     const validated = validateAgentDescriptor(stripLegacyDelegationFields(candidate));
     if (typeof validated === "string") {
       skippedDescriptorCount += 1;
@@ -131,13 +123,9 @@ export function decodeAgentsStoreFile(raw: string, options: DecodeStoreOptions):
   return {
     store: {
       agents: validAgents,
-      profiles: decodePersistedProfiles(
-        profileCandidates.filter((candidate) => !retiredProfiles.includes(candidate)),
-        options.storeFilePath,
-        warn,
-      )
+      profiles: decodePersistedProfiles(profileCandidates, options.storeFilePath, warn)
     },
-    retired: { agents: agentRecords.retired, profiles: retiredProfiles },
+    retired: { agentIds: new Set(validAgents.flatMap((agent) => retiredAgentIds.has(agent.agentId) ? [agent.agentId] : [])), profileIds: retiredProfileIds },
     normalizedPathCount,
     skippedDescriptorCount
   };
@@ -162,6 +150,7 @@ function stripLegacyDelegationFields(candidate: unknown): unknown {
   if (!isRecord(candidate)) return candidate;
   const stripped = { ...candidate };
   for (const field of LEGACY_DELEGATION_DESCRIPTOR_FIELDS) delete stripped[field];
+  if (RETIRED_SESSION_PURPOSES.has(stripped.sessionPurpose)) delete stripped.sessionPurpose;
   return stripped;
 }
 
@@ -182,6 +171,8 @@ function decodePersistedProfiles(
     const {
       defaultManagerPosture: _legacyPosture,
       defaultDelegationRosterId: _legacyRosterId,
+      // Cortex was the only system profile; once imported it is ordinary legacy history.
+      profileType: _retiredProfileType,
       defaultContextMode,
       secureSessionsEnabled,
       ...rest
