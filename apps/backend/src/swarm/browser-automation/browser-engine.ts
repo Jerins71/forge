@@ -124,7 +124,7 @@ export class BrowserEngine {
   private async create(session: Session, tabId: string, viewport: BrowserEngineTab['viewport']): Promise<LiveTab> {
     let page: Page; let dispose: () => Promise<void>
     if (this.desktop.available) { const native = await this.desktop.create(tabId, session.snapshot.projectId, viewport); page = native.page; dispose = native.close }
-    else { page = await (await this.headless.context(session.snapshot.projectId)).newPage(); dispose = async () => { await page.close() } }
+    else { page = await this.headless.withContext(session.snapshot.projectId, context => context.newPage()); dispose = async () => { await page.close(); await this.headless.retireIdle(session.snapshot.projectId) } }
     try { return await this.attachPage(session, tabId, viewport, page, dispose) }
     catch (error) { await dispose().catch(() => {}); throw error }
   }
@@ -146,7 +146,7 @@ export class BrowserEngine {
     const cdp = await page.context().newCDPSession(page)
     const state: BrowserEngineTab = { tabId, sessionId: session.snapshot.sessionId, projectId: session.snapshot.projectId, host: this.desktop.available ? 'desktop' : 'headless', url: page.url(), title: '', loading: false, canGoBack: false, canGoForward: false, viewport, controller: 'none' }
     const tab: LiveTab = { state, page, cdp, dispose, actionEpoch: 0, actionTail: Promise.resolve(), cursorSequence: 0, console: [], network: [] }
-    page.on('popup', popup => { if (!this.desktop.available) this.adoptPopup(session, tab, randomUUID(), async () => ({ page: popup, dispose: () => popup.close() })) })
+    page.on('popup', popup => { if (!this.desktop.available) this.adoptPopup(session, tab, randomUUID(), async () => ({ page: popup, dispose: async () => { await popup.close(); await this.headless.retireIdle(session.snapshot.projectId) } })) })
     page.on('console', message => { tab.console.push({ level: message.type(), text: message.text().slice(0, 4096), timestamp: new Date().toISOString() }); if (tab.console.length > 200) tab.console.shift() })
     page.on('response', response => { tab.network.push({ url: response.url().slice(0, 2048), method: response.request().method(), status: response.status(), failed: false, timestamp: new Date().toISOString() }); if (tab.network.length > 200) tab.network.shift() })
     page.on('crash', () => { tab.action?.abort(); state.error = 'Browser page crashed. Reload or close this tab.'; state.errorCode = 'crashed'; this.publish(session) })
@@ -172,7 +172,7 @@ export class BrowserEngine {
   }
   async withCookieContext<T>(sessionId: string, work: (context: BrowserContext) => Promise<T>): Promise<T> {
     const projectId = this.project(sessionId)
-    if (!this.desktop.available) return work(await this.headless.context(projectId))
+    if (!this.desktop.available) return this.headless.withContext(projectId, work)
     for (const loaded of this.sessions.values()) { const session = await loaded; if (session.snapshot.projectId === projectId) { const tab = [...session.tabs.values()][0]; if (tab && !tab.page.isClosed()) return work(tab.page.context()) } }
     const temporary = await this.desktop.create(randomUUID(), projectId, { width: 1280, height: 800 })
     try { return await work(temporary.page.context()) } finally { await temporary.close() }

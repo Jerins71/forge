@@ -92,6 +92,44 @@ for (const host of ['headless', 'desktop'] as const) test(`${host} adopts OAuth 
   } finally { await engine?.shutdown(); await application?.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
 })
 
+test('idle project contexts retire after the last tab and cookie operation, preserving the profile', async ({}, info) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-idle-proof-'))
+  const engine = new BrowserEngine({ dataDir: root, resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') })
+  let releaseRetirement = () => {}
+  let release!: () => void, entered!: () => void
+  const pause = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { entered = resolve })
+  try {
+    const first = await engine.open('one', {}), second = await engine.open('two', {})
+    const context = await engine.headless.context('project')
+    await engine.close('one', first.activeTabId!); expect(context.browser()!.isConnected()).toBe(true)
+    const cookieWork = engine.withCookieContext('two', async held => { entered(); await pause; expect(held.browser()!.isConnected()).toBe(true); await held.addCookies([{ url: 'https://idle.example.test', name: 'fixture-idle', value: 'synthetic-persistent', expires: Date.now() / 1000 + 3600 }]) })
+    await started; await engine.close('two', second.activeTabId!)
+    expect(context.browser()!.isConnected()).toBe(true)
+    release(); await cookieWork
+    await expect.poll(() => context.browser()!.isConnected()).toBe(false)
+    await engine.open('one', {})
+    const reopened = await engine.headless.context('project'); expect(reopened).not.toBe(context)
+    expect((await reopened.cookies()).some(cookie => cookie.name === 'fixture-idle')).toBe(true)
+    let retiring!: () => void, retirementCalls = 0
+    const retirementStarted = new Promise<void>(resolve => { retiring = resolve })
+    const retirementPause = new Promise<void>(resolve => { releaseRetirement = resolve })
+    const originalClose = reopened.close.bind(reopened)
+    reopened.close = async () => { retirementCalls++; retiring(); await retirementPause; return originalClose() }
+    const archive = engine.archiveSession('project', 'one'); await retirementStarted
+    let admitted = false
+    const nextOpen = engine.open('two', {}).then(snapshot => { admitted = true; return snapshot })
+    await new Promise(resolve => setTimeout(resolve, 100)); expect(admitted).toBe(false); expect(retirementCalls).toBe(1)
+    releaseRetirement(); await archive; const next = await nextOpen
+    expect(reopened.browser()!.isConnected()).toBe(false)
+    await engine.close('two', next.activeTabId!)
+    // A cookie-only operation starts lazily and also retires its empty context.
+    let cookieOnly: typeof context | undefined
+    await engine.withCookieContext('two', async held => { cookieOnly = held; expect((await held.cookies()).some(cookie => cookie.name === 'fixture-idle')).toBe(true) })
+    expect(cookieOnly!.browser()!.isConnected()).toBe(false)
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'idle-context-proof.json'), JSON.stringify({ passed: true, sharedProjectRetainedWhileBusy: true, cookieOperationFencedClose: true, closedAfterLastOperation: true, persistentCookieSurvived: true, archiveRetired: true, cookieOnlyRetired: true }, null, 2))
+  } finally { release(); releaseRetirement(); await engine.shutdown(); await rm(root, { recursive: true, force: true }) }
+})
+
 test('desktop smoke refuses real-home storage and escaping symlinks before launch', async ({}, info) => {
   const require = createRequire(import.meta.url)
   const { assertDesktopSmokeIsolation } = require('./fixtures/desktop-smoke-isolation.cjs') as { assertDesktopSmokeIsolation(input: { root: string; env: NodeJS.ProcessEnv; cacheRoot: string }, realHome?: string): void }

@@ -48,6 +48,8 @@ Forge never copies Login Data, a whole Chrome profile, or decrypted cookie value
 
 Session `browser.json` stores the tab list, active tab, viewport, and revision metadata. Browser contexts and cookie audits use the canonical paths in `data-paths.ts`. Desktop project partitions are held in Electron’s own user-data directory. Browser admission rejects archived sessions and archived projects, including reads and subscriptions. Explicit restore re-enables loading their saved tabs. Restarting Forge restores logical tabs; closing or archiving a session closes its physical tabs while preserving its project profile. Deleting a session removes its session metadata and artifacts, without deleting shared project logins.
 
+Headless project contexts retire after their last tab and cookie operation finish. Their profile directories remain intact and reopen lazily; new work waits for a retiring process to release the profile.
+
 The former Chrome extension, native-messaging host, External Chrome relay, setup page, leases, and journals have been removed. There is no mode for agents to control everyday Chrome. Existing old integration files are not read or automatically removed from users’ machines.
 
 ## Validation and isolation
