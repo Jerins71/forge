@@ -1,6 +1,6 @@
 Skills give agents reusable instructions and optional capabilities such as web search, image generation, and the separate `agent-browser` CLI workflow. The Skills page lets you browse installed skills, inspect their files, configure API keys and settings, and share or import user-created skills from links.
 
-Browser is a local Forge Desktop capability for normal local Builder managers, not a Skill. Forge automatically uses either an embedded surface or a Chrome-backed tab. Optional Chrome setup and repair live in **Settings → Use Chrome with Forge**.
+The browser is built into Forge, not a Skill. Pages agents open appear in the Browser panel beside the chat; each project's sign-ins live in **Settings → Browser**.
 
 ## Scope and skill browser
 
@@ -18,7 +18,7 @@ To configure a variable, paste the value into the input field and click **Save**
 
 ## Dedicated skill panels
 
-Some skills may expose dedicated configuration UI in the right detail pane when selected. These panels expose settings specific to that skill, like connection targets or scope controls. The `agent-browser` Skill instead documents its external CLI prerequisites and browser lifecycle. It is not an alias or configuration surface for the Automatic Browser.
+Some skills may expose dedicated configuration UI in the right detail pane when selected. These panels expose settings specific to that skill, like connection targets or scope controls. The `agent-browser` Skill instead documents its external CLI prerequisites and browser lifecycle. It is not an alias or configuration surface for Forge's built-in browser.
 
 ## How skills load
 

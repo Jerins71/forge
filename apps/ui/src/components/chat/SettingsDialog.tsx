@@ -19,7 +19,6 @@ import { SettingsProjectResources } from '@/components/settings/SettingsProjectR
 import { SettingsProjectSettings, type ProjectSettingsActions } from '@/components/settings/SettingsProjectSettings'
 import { SettingsSlashCommands } from '@/components/settings/SettingsSlashCommands'
 import { SettingsExtensions } from '@/components/settings/SettingsExtensions'
-import { SettingsExternalChrome } from '@/components/settings/SettingsExternalChrome'
 import { SettingsBrowser } from '@/components/settings/SettingsBrowser'
 import { SettingsAbout } from '@/components/settings/SettingsAbout'
 import { useNativeRuntimeAttention } from '@/components/settings/native-runtimes-api'
@@ -222,7 +221,6 @@ export function SettingsPanel({
       )}
       {activeTab === 'extensions' && <SettingsExtensions apiClient={apiClient} />}
       {activeTab === 'browser' && <SettingsBrowser environmentId={environmentId} onOpenBrowserPanel={onOpenBrowserPanel} />}
-      {activeTab === 'external-chrome' && <SettingsExternalChrome />}
       {activeTab === 'cli-access' && <SettingsCliAccess backendUrl={backendUrl} apiClient={apiClient} />}
       {activeTab === 'environments' && <EnvironmentsSettings />}
       {activeTab === 'stream-deck' && <SettingsStreamDeck apiClient={apiClient} />}

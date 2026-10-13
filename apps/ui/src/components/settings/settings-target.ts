@@ -24,7 +24,6 @@ export type SettingsTab =
   | 'slash-commands'
   | 'extensions'
   | 'browser'
-  | 'external-chrome'
   | 'cli-access'
   | 'stream-deck'
   | 'observability'
@@ -52,7 +51,6 @@ export const SETTINGS_TABS: SettingsTab[] = [
   'slash-commands',
   'extensions',
   'browser',
-  'external-chrome',
   'cli-access',
   'stream-deck',
   'observability',

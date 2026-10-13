@@ -24,7 +24,7 @@ export const chatArticles: HelpArticle[] = [
     id: 'chat-overview',
     title: 'Chat Interface',
     category: 'chat',
-    summary: 'How chat works, including streaming responses, the local Automatic Browser, workspace rail surfaces, and stopping agents.',
+    summary: 'How chat works, including streaming responses, the Browser panel, workspace rail surfaces, and stopping agents.',
     content: chatOverviewContent,
     keywords: [
       'chat',
@@ -93,7 +93,7 @@ export const chatArticles: HelpArticle[] = [
       'forget site',
       'set up browser',
     ],
-    relatedIds: ['chat-overview', 'settings-external-chrome', 'settings-skills'],
+    relatedIds: ['chat-overview', 'settings-browser', 'settings-skills'],
     contextKeys: ['chat.browser', 'chat.main'],
   },
   {
