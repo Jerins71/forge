@@ -29,6 +29,7 @@ async function fixture() {
     emit: vi.fn(),
     controlSessionGoal: vi.fn(async () => ({ revision: 1, goal: null })),
     compactAgentContext: vi.fn(async () => undefined),
+    resumeSession: vi.fn(async (_agentId: string, _options?: unknown) => undefined),
     getPendingCodexElicitationsForManager: () => [{ elicitationId: 'pending', managerAgentId: 'session', sidecarAgentId: 'sidecar', threadId: 'thread', turnId: 'turn' }],
     respondToCodexElicitation: vi.fn(() => true),
   };
@@ -37,6 +38,24 @@ async function fixture() {
   return { ...streams, swarm, rpc };
 }
 describe('detail control acceptance', () => {
+  it('compacts a confirmed stopped session once without continuing its goal', async () => {
+    const f = await fixture();
+    let status = 'stopped';
+    f.swarm.getAgent = () => ({ agentId: 'session', role: 'manager', profileId: 'project', status: loadState(f.database).threads.session?.desired === 'running' ? 'idle' : status });
+    f.core.controlService.record({ type: 'thread.create', commandId: 'thread', now: 1, threadId: 'session', role: 'manager', projectId: 'project', model: { provider: 'codex-native', modelId: 'gpt-6-sol', thinkingLevel: 'high' } });
+    f.core.controlService.record({ type: 'thread.stop', commandId: 'stop', now: 2, threadId: 'session', writerPending: false });
+    f.swarm.resumeSession.mockImplementation(async (_id, options) => { expect(options).toEqual({ continueGoal: false }); status = 'idle'; });
+    f.swarm.compactAgentContext.mockImplementation(async () => {
+      expect(status).toBe('idle');
+      expect(loadState(f.database).threads.session.desired).toBe('running');
+    });
+    const input = { commandId, sessionId: 'session', mode: 'manual' };
+    expect(await f.rpc.execute(principal, 'session.compact', input)).toMatchObject({ state: 'succeeded' });
+    await f.rpc.execute(principal, 'session.compact', input);
+    expect(f.swarm.resumeSession).toHaveBeenCalledTimes(1);
+    expect(f.swarm.compactAgentContext).toHaveBeenCalledTimes(1);
+  });
+
   it('publishes environment recovery without selecting a session and deduplicates decisions', async () => {
     const f = await fixture();
     await f.core.controlService.execute(principal, 'session.send', { commandId: randomUUID(), sessionId: 'session', message: { text: 'Interrupted fixture turn', artifactIds: [] } }); await f.core.effectWorker.drain();

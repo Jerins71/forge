@@ -128,6 +128,27 @@ afterEach(() => {
 });
 
 describe("CursorSdkAgentRuntime", () => {
+  it("freezes output before an asynchronous SDK cancel completes", async () => {
+    let releaseStream!: () => void; let releaseCancel!: () => void;
+    const streamGate = new Promise<void>(resolve => { releaseStream = resolve; });
+    const cancelGate = new Promise<void>(resolve => { releaseCancel = resolve; });
+    const run = createRun({ streamGate, streamItems: [assistantText("After Stop"), { type: "thinking", text: "Late reasoning" },
+      { type: "tool_call", call_id: "late", name: "Bash", status: "running", args: { command: "late" } }], cancel: () => cancelGate });
+    const agent = { agentId: "sdk-agent-1", send: vi.fn(async () => run), close: vi.fn() };
+    const { runtime, callbacks } = await setupRuntime({ sdkAgent: agent as never });
+    try {
+      await runtime.sendMessage("Work");
+      await vi.waitFor(() => expect(agent.send).toHaveBeenCalled());
+      const stopped = runtime.stopInFlight();
+      await vi.waitFor(() => expect(run.cancel).toHaveBeenCalled());
+      releaseStream();
+      await vi.waitFor(() => expect(runtime.hasUnsettledDispatches()).toBe(false));
+      expect(JSON.stringify(callbacks.onSessionEvent.mock.calls)).not.toContain("After Stop");
+      expect(callbacks.onSessionEvent.mock.calls.some(([, event]) => event.type === "tool_execution_start")).toBe(false);
+      releaseCancel(); await stopped;
+    } finally { releaseStream(); releaseCancel(); await runtime.terminate(); }
+  });
+
   it("injects Forge prompt context, uses stream as the sole text source, and persists SDK state", async () => {
     let sendText: string | { text: string } = "";
     let sendOptions: CursorSdkSendOptions | undefined;

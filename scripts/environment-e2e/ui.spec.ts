@@ -1029,6 +1029,7 @@ test('a session shows the shell status after its detail view is released', async
 })
 
 test('Needs You lists a remote session that was never opened, survives an offline reload, and dismisses by occurrence', async ({ page }) => {
+  test.setTimeout(90_000) // The capped reconnect plus this case's two backend restarts can exceed 60s.
   const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
   const { c } = fleet!
   const attention = (operation: 'attention' | 'attention-state') => controlEnvironment<Array<{ attentionId: string }>>(manifest, 'env-c', 'fixture', { operation, sessionId: c.sessionId })
@@ -1055,8 +1056,9 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   } finally {
     await fleet!.start(c)
   }
-  // Supervisor connect has a 10s budget; allow 5s for the next scheduled reconnect.
-  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh, { timeout: 15_000 }).toBe(true)
+  // Repeated offline attempts use full-jitter backoff up to 30s, then a 10s connect budget.
+  // Slow boot/load can reach that cap; allow 5s more for scheduling and shell synchronization.
+  await expect.poll(async () => (await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())).find((value: any) => value.environmentId === c.environmentId)?.fresh, { timeout: 45_000 }).toBe(true)
   await expect(row).toHaveCount(1)
   expect(await attention('attention-state')).toHaveLength(1)
 

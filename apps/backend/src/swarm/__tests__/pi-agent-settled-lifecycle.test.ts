@@ -4,6 +4,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { AgentRuntime } from "../runtime/pi-agent-runtime.js";
+import type { RuntimeSessionEvent } from "../runtime-contracts.js";
 import type { AgentDescriptor } from "../types.js";
 
 class FakeSession {
@@ -100,7 +101,7 @@ function makeDescriptor(status: AgentDescriptor["status"] = "idle"): AgentDescri
 function makeRuntime(status?: AgentDescriptor["status"]) {
   const session = new FakeSession();
   const onAgentEnd = vi.fn(async () => undefined);
-  const onSessionEvent = vi.fn(async () => undefined);
+  const onSessionEvent = vi.fn(async (_agentId: string, _event: RuntimeSessionEvent) => undefined);
   const onStatusChange = vi.fn(async () => undefined);
   const onRuntimeError = vi.fn(async () => undefined);
   const reportSuccess = vi.fn(async () => undefined);
@@ -137,6 +138,29 @@ function makeRuntime(status?: AgentDescriptor["status"]) {
 }
 
 describe("Pi agent_settled lifecycle adapter (WP-5)", () => {
+  it("freezes the visible partial reply and tool rows while abort is pending", async () => {
+    const { runtime, session, onSessionEvent } = makeRuntime();
+    let release!: () => void;
+    session.abortImpl = () => new Promise<void>(resolve => { release = resolve; });
+    const message = { role: "assistant", content: [{ type: "text", text: "Shown" }], stopReason: "stop" };
+    session.emit({ type: "agent_start" });
+    session.emit({ type: "message_update", message, assistantMessageEvent: { type: "text_delta", delta: "Shown", contentIndex: 0, partial: message } });
+    await vi.waitFor(() => expect(onSessionEvent.mock.calls.some(([,event]) => (event as any).type === "message_update")).toBe(true));
+    const before = onSessionEvent.mock.calls.length;
+    const stopped = runtime.stopInFlight();
+    await vi.waitFor(() => expect(session.abortCalls).toBe(1));
+    message.content[0]!.text = "Shown after Stop";
+    session.emit({ type: "message_end", message });
+    session.emit({ type: "tool_execution_start", toolCallId: "late", toolName: "bash", args: { command: "late" } });
+    session.emit({ type: "agent_end", messages: [message], willRetry: false });
+    session.emit({ type: "agent_settled" });
+    await vi.waitFor(() => expect(onSessionEvent.mock.calls.some(([,event]) => (event as any).type === "agent_end")).toBe(true));
+    const after = onSessionEvent.mock.calls.slice(before).map(([,event]) => event as any);
+    expect(after.some(event => event.type === "tool_execution_start" || event.type === "message_end")).toBe(false);
+    expect(after.find(event => event.type === "agent_end")).toMatchObject({ settledAssistantMessage: { content: [{ text: "Shown" }] } });
+    release(); await stopped;
+  });
+
   it("finalizes exactly once at agent_settled after willRetry:false cycle", async () => {
     const { runtime, onAgentEnd, onSessionEvent, onStatusChange, reportSuccess } = makeRuntime();
 

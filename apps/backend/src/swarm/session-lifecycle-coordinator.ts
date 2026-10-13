@@ -154,6 +154,7 @@ export interface SessionLifecycleCoordinatorOptions {
   runtime: {
     resolveAndValidateCwd(cwd: string): Promise<string>;
     beforeResumeSession(descriptor: AgentDescriptor & { role: "manager" }): Promise<void>;
+    suppressGoalContinuation(agentId: string): void;
     sendInitialMessage(
       creatorAgentId: string,
       targetAgentId: string,
@@ -409,14 +410,17 @@ export class SessionLifecycleCoordinator {
     return this.stopValidatedSession(agentId, options);
   }
 
-  async resumeSession(agentId: string): Promise<void> {
+  async resumeSession(agentId: string, options?: { continueGoal?: boolean }): Promise<void> {
     const descriptor = this.getRequiredSessionDescriptor(agentId);
     this.assertDescriptorNotEffectivelyArchived(descriptor);
     await this.options.runtime.beforeResumeSession(descriptor);
     await this.options.lifecycle.resumeSession(agentId);
-    this.options.goals.scheduleContinuation(
-      this.getRequiredSessionDescriptor(agentId),
-    );
+    if (options?.continueGoal === false) {
+      // Runtime replacement clears old suppression; fence the prepared idle runtime.
+      this.options.runtime.suppressGoalContinuation(agentId);
+    } else {
+      this.options.goals.scheduleContinuation(this.getRequiredSessionDescriptor(agentId));
+    }
   }
 
   async resumeStoppedSessionForUserInput(agentId: string): Promise<void> {

@@ -319,10 +319,10 @@ async function request(method, params = {}) {
       const item = { id: `${turn.id}-item`, type: 'contextCompaction' };
       notify('item/started', { ...context(turn), item });
       notify('item/completed', { ...context(turn), item });
-      // A compacted thread is smaller; the header meter follows this report.
+      complete(turn);
+      // Thread usage can arrive after the compact turn terminal; the meter still follows it.
       notify('thread/tokenUsage/updated', { threadId: thread.id, turnId: turn.id,
         tokenUsage: { total: { inputTokens: 10, outputTokens: 10, totalTokens: 20 }, last: { totalTokens: 6400 }, modelContextWindow: 128000 } });
-      complete(turn);
     }, 15);
     return {};
   }

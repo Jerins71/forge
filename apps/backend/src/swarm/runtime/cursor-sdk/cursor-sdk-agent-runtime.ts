@@ -295,9 +295,12 @@ export class CursorSdkAgentRuntime implements SwarmAgentRuntime {
     this.queuedPrompts.length = 0;
     const active = this.activePrompt;
     if (active) {
-      if (active.run) await active.run.cancel();
       active.cancelled = true;
       this.providerHooks?.interrupted();
+      // The SDK can keep streaming while its asynchronous cancel request is in flight.
+      // Retain the reply accumulated before Stop; native settlement still owns the terminal.
+      await this.emitPromptSessionEvents(active, this.eventMapper.completePrompt({ outcome: "cancelled" }));
+      if (active.run) await active.run.cancel();
       if (active.pendingSendTracker) {
         active.pendingSendTracker.cancelOnResolve = true;
       }

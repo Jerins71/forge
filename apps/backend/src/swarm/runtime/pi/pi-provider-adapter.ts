@@ -47,6 +47,7 @@ export class PiProviderAdapter implements ProviderAdapter {
   private toolHost: ToolHostBinding;
   private itemId: string | undefined;
   private itemSequence = 0;
+  private readonly openTools = new Map<string, string>();
   private readonly completedTurns = new Map<string, string>();
 
   constructor(private readonly runtime: AgentRuntime, private readonly session: AgentSession, private readonly preparation: PiProviderPreparation) {
@@ -54,7 +55,7 @@ export class PiProviderAdapter implements ProviderAdapter {
     this.toolHost = preparation.toolHost;
     this.unsubscribe = session.subscribe(event => {
       if (!["message_start", "message_update", "message_end", "compaction_start", "compaction_end",
-        "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_start"].includes(event.type)) return;
+        "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_start", "auto_retry_start"].includes(event.type)) return;
       // Pi mutates its partial assistant object in place. Capture each raw delta before queuing.
       // Observation failures must not interrupt the native tool/session owner.
       let snapshot = event;
@@ -66,6 +67,7 @@ export class PiProviderAdapter implements ProviderAdapter {
   }
 
   capabilities(): ProviderCapabilities { return piProviderCapabilities(); }
+  hasActiveAttempt(): boolean { return this.active !== undefined; }
 
   async open(input: ProviderOpenInput): Promise<ProviderBinding> {
     assertProviderRequirements(this.capabilities(), input.required);
@@ -127,9 +129,19 @@ export class PiProviderAdapter implements ProviderAdapter {
 
   async interrupt(input: { binding: ProviderBinding; attemptId: string; turn: ProviderTurnRef }): Promise<void> {
     this.assertTurn(input.binding, input.turn, input.attemptId);
-    this.active!.interrupted = true;
+    this.freeze();
     // This acknowledgment never creates a terminal. Native settlement supplies it separately.
     await this.runtime.stopInFlight();
+  }
+
+  /** Stop closes only the rows already shown, before native cancellation can emit more output. */
+  freeze(): void {
+    if (!this.active || this.active.interrupted || !this.binding || !this.active.turn) return;
+    this.active.interrupted = true;
+    for (const [nativeId, name] of this.openTools) this.publish({ type: "tool", name, phase: "complete",
+      call: { ...this.binding.scope, kind: "tool_call", conversationId: this.session.sessionId, turnId: this.active.turn.nativeId, nativeId },
+      payload: { status: "interrupted" }, isError: true });
+    this.openTools.clear();
   }
 
   async respond(input: ProviderRespondInput): Promise<void> {
@@ -207,9 +219,12 @@ export class PiProviderAdapter implements ProviderAdapter {
     const outcome = this.active.interrupted ? "interrupted" : error ? "failed" : last?.stopReason === "aborted" ? "cancelled" : "completed";
     const leaf = this.session.sessionManager.getLeafId();
     if (this.active.turn && leaf) this.completedTurns.set(this.active.turn.nativeId, leaf);
+    // Native Pi owns bounded retries. Only its final settled error can fail the Forge run.
+    if (error && !this.active.interrupted) this.publish({ type: "error", ...error, delivery: "accepted" });
     this.publish({ type: "terminal", terminalAuthority: "root_attempt", outcome, ...(error ? { error } : {}) });
     this.active.resolveAcceptance({ status: "unknown" });
     this.active = undefined;
+    this.openTools.clear();
   }
 
   async observeDispatchFailure(error: unknown): Promise<void> {
@@ -219,6 +234,7 @@ export class PiProviderAdapter implements ProviderAdapter {
     this.publish({ type: "terminal", terminalAuthority: "root_attempt", outcome: "failed" });
     this.active.resolveAcceptance({ status: "unknown" });
     this.active = undefined;
+    this.openTools.clear();
   }
 
   async observePromptCompletion(): Promise<void> {
@@ -269,6 +285,11 @@ export class PiProviderAdapter implements ProviderAdapter {
       return;
     }
     if (!this.active?.turn) return;
+    if (this.active.interrupted && (event.type.startsWith("message_") || event.type.startsWith("tool_execution_"))) return;
+    if (event.type === "auto_retry_start") {
+      this.publish({ type: "retry", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: event.errorMessage });
+      return;
+    }
     if (event.type === "message_start" && event.message.role === "assistant") {
       this.itemId = `${this.active.turn.nativeId}:assistant:${++this.itemSequence}`;
       this.publishMessage("start", "assistant", "");
@@ -286,7 +307,6 @@ export class PiProviderAdapter implements ProviderAdapter {
       const message = event.message;
       const text = message.content.filter(block => block.type === "text").map(block => block.text).join("\n");
       this.publishMessage("complete", "assistant", text, jsonValue(message.content));
-      if (message.stopReason === "error") this.publish({ type: "error", code: "PI_MODEL_ERROR", message: message.errorMessage ?? "Pi model request failed.", delivery: "accepted" });
       this.publish({ type: "usage", usage: { input: message.usage.input, output: message.usage.output, cacheRead: message.usage.cacheRead,
         cacheWrite: message.usage.cacheWrite, total: message.usage.totalTokens }, costUsd: message.usage.cost,
         modelId: message.model, provider: message.provider, api: message.api, stopReason: message.stopReason,
@@ -295,6 +315,8 @@ export class PiProviderAdapter implements ProviderAdapter {
       if (usage) this.publish({ type: "context_usage", ...usage });
     }
     if (event.type === "tool_execution_start" || event.type === "tool_execution_update" || event.type === "tool_execution_end") {
+      if (event.type === "tool_execution_end") this.openTools.delete(event.toolCallId);
+      else this.openTools.set(event.toolCallId, event.toolName);
       this.publish({ type: "tool", call: { ...this.binding.scope, kind: "tool_call", conversationId: this.session.sessionId, turnId: this.active.turn.nativeId, nativeId: event.toolCallId },
         name: event.toolName, phase: event.type === "tool_execution_start" ? "start" : event.type === "tool_execution_update" ? "update" : "complete",
         payload: jsonValue(event.type === "tool_execution_start" ? event.args : event.type === "tool_execution_update" ? event.partialResult : event.result),

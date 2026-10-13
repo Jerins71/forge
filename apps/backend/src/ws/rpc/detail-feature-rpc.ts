@@ -38,9 +38,11 @@ export function createDetailFeatureRpc({ swarmManager: swarm, control, compactio
       const input = raw as RpcInput<'session.goal.control'> | RpcInput<'session.compact'> | RpcInput<'recovery.decide'>;
       const recovery = method === 'recovery.decide' ? recoveryProjection(swarm) : null;
       const sessionId = 'sessionId' in input ? input.sessionId : undefined;
+      // Core resume changes the public projection before runtime preparation runs.
+      const resumeForCompaction = method === 'session.compact' && swarm.getAgent(sessionId!)?.status === 'stopped';
       await control.admitLifecycle(principal, {
         commandId: input.commandId, command: method, request: input,
-        sessionIds: sessionId ? [sessionId] : [...new Set([...(recovery?.interruptedManagers ?? []), ...(recovery?.interruptedWorkers ?? []).map(id => { const d = swarm.getAgent(id); return d?.role === 'worker' ? d.managerId : id; }), ...(recovery?.undeliveredReports ?? []).map(r => { const d = swarm.getAgent(r.toAgentId); return d?.role === 'worker' ? d.managerId : r.toAgentId; })])], intent: 'inspect',
+        sessionIds: sessionId ? [sessionId] : [...new Set([...(recovery?.interruptedManagers ?? []), ...(recovery?.interruptedWorkers ?? []).map(id => { const d = swarm.getAgent(id); return d?.role === 'worker' ? d.managerId : id; }), ...(recovery?.undeliveredReports ?? []).map(r => { const d = swarm.getAgent(r.toAgentId); return d?.role === 'worker' ? d.managerId : r.toAgentId; })])], intent: resumeForCompaction ? 'resume' : 'inspect',
         receipt: { method, ...(sessionId ? { sessionId } : {}) },
         receiptReplay: true, ambiguousDelivery: method === 'session.compact',
         preflight: () => {
@@ -62,6 +64,8 @@ export function createDetailFeatureRpc({ swarmManager: swarm, control, compactio
           await swarm.controlSessionGoal(sessionId!, goal.action === 'edit' ? { action: goal.action, objective: goal.objective, tokenBudget: goal.tokenBudget } : { action: goal.action });
         } else {
           const compact = input as RpcInput<'session.compact'>;
+          // Context maintenance prepares an idle runtime after confirmed Stop, without resuming a goal.
+          if (resumeForCompaction) await swarm.resumeSession(sessionId!, { continueGoal: false });
           // A refusal never reached the provider, so the receipt fails with its message instead of an unknown outcome.
           await swarm.compactAgentContext(sessionId!, { customInstructions: compact.customInstructions, sourceContext: { channel: compact.source ?? compactionSource, messageId: compact.commandId }, trigger: (compact.source ?? compactionSource) === "cli" ? "cli" : "api" })
             .catch(error => { throw error instanceof CompactionRejectedError ? new ControlError('CONFLICT', error.message, error.retryable) : error; });

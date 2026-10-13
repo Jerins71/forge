@@ -578,6 +578,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     }
 
     this.lifecycleInterruptionInProgress = true;
+    this.providerAdapter?.freeze();
     this.endContextRecovery();
     this.guardAbortController?.abort();
     this.guardAbortController = undefined;
@@ -796,7 +797,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     }
 
     const messages = this.getSessionAgentMessages();
-    const sessionStateCandidate = messages.length > this.sessionMessageCountAtAgentStart
+    const sessionStateCandidate = !this.lifecycleInterruptionInProgress && messages.length > this.sessionMessageCountAtAgentStart
       ? asEligibleSettledAssistantMessage(messages.at(-1))
       : undefined;
 
@@ -1614,7 +1615,7 @@ export class AgentRuntime implements SwarmAgentRuntime {
     // Forge terminal agent_end / idle / onAgentEnd happen once at agent_settled.
     if (event.type === "agent_end") {
       this.lastAgentEndWillRetry = Boolean(event.willRetry);
-      this.settledAssistantMessage =
+      if (!this.lifecycleInterruptionInProgress) this.settledAssistantMessage =
         findEligibleSettledAssistantMessage(event.messages) ?? this.settledAssistantMessage;
       if (this.lastAgentEndWillRetry) {
         console.warn(`[swarm][${this.now()}] runtime:agent_end_will_retry`, {
@@ -1644,12 +1645,18 @@ export class AgentRuntime implements SwarmAgentRuntime {
       this.sessionMessageCountAtAgentStart = this.getSessionAgentMessages().length;
     }
 
+    // Stop retains the last projected partial, before the provider's abort acknowledgement.
+    if (this.lifecycleInterruptionInProgress && (event.type.startsWith("message_") || event.type.startsWith("tool_execution_"))) return;
     const normalizedEvent = normalizeRuntimeSessionEvent(event, this.session);
-    if (normalizedEvent?.type === "message_end") {
-      this.settledAssistantMessage =
-        asEligibleSettledAssistantMessage(normalizedEvent.message) ?? this.settledAssistantMessage;
+    if (normalizedEvent?.type === "message_update" || normalizedEvent?.type === "message_end") {
+      const partial = asEligibleSettledAssistantMessage(normalizedEvent.message);
+      if (partial) this.settledAssistantMessage = structuredClone(partial);
     }
-    if (this.callbacks.onSessionEvent && normalizedEvent) {
+    // The native cycle's error is provisional while Pi can retry. The adapter's
+    // settled observation owns the managed run's final failure and status row.
+    const provisionalError = normalizedEvent?.type === "message_end" && event.type === "message_end"
+      && event.message.role === "assistant" && event.message.stopReason === "error" && this.providerAdapter?.hasActiveAttempt();
+    if (this.callbacks.onSessionEvent && normalizedEvent && !provisionalError) {
       await this.callbacks.onSessionEvent(this.descriptor.agentId, normalizedEvent);
     }
 

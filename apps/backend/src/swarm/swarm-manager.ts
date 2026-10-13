@@ -663,8 +663,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
           this.configurationCoordinator.resolveSpecialistRosterForProfile(profileId),
         resolveSpecialistRosterForManager: (manager) =>
           this.configurationCoordinator.resolveSpecialistRosterForManager(manager),
-        resolveSpawnModelWithCapacityFallback: (model) =>
-          this.resolveSpawnModelWithCapacityFallback(model),
         resolveSpawnWorkerArchetypeId: (input, normalizedAgentId, profileId) =>
           this.configurationCoordinator.resolveSpawnWorkerArchetypeId(
             input,
@@ -1228,7 +1226,6 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
     await this.projectAgentCoordinator.preflightRuntime(descriptor);
     return this.lifecycleService.getOrCreateRuntimeForDescriptor(descriptor, requirements);
   }
-  private resolveSpawnModelWithCapacityFallback(model: AgentModelDescriptor): AgentModelDescriptor { return this.lifecycleService.resolveSpawnModelWithCapacityFallback(model); }
   private async resolveSystemPromptForDescriptor(descriptor: AgentDescriptor): Promise<string> {
     return this.configurationCoordinator.resolveSystemPromptForDescriptor(descriptor);
   }

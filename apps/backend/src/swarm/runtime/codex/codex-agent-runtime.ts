@@ -328,6 +328,22 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
 
   private async onNotification(method: string, params: Record<string, any>): Promise<void> {
     if (params.threadId !== this.threadId) return;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = normalizeCodexUsage(params.tokenUsage?.total);
+      if (usage) {
+        const record: NativeUsageRecord = { version: 1, provider: "codex-native", nativeSessionId: this.threadId,
+          counterId: "thread", modelId: this.descriptor.model.modelId, reasoningLevel: this.descriptor.model.thinkingLevel,
+          ownerAgentId: this.descriptor.agentId, runtimeStartedAt: this.runtimeStartedAt, capturedAt: new Date().toISOString(), usage };
+        if (this.accounting.consume(record)) this.appendCustomEntry(NATIVE_USAGE_ENTRY_TYPE, record);
+      }
+      const tokens = params.tokenUsage?.last?.totalTokens;
+      const window = params.tokenUsage?.modelContextWindow;
+      if (typeof tokens === "number" && typeof window === "number") {
+        this.usage = { tokens, contextWindow: window, percent: window ? tokens / window * 100 : 0 };
+        await this.publishStatus();
+      }
+      return;
+    }
     const active = this.active;
     if (!active) return;
     const turnId = params.turnId ?? params.turn?.id;
@@ -348,22 +364,6 @@ export class CodexAgentRuntime implements SwarmAgentRuntime {
         // Activate it once, preserving suppression of output from older input.
         await this.emit({ type: "message_start", message: { role: "user", content: consumed.text } });
       }
-    }
-    if (method === "thread/tokenUsage/updated") {
-      const usage = normalizeCodexUsage(params.tokenUsage?.total);
-      if (usage) {
-        const record: NativeUsageRecord = { version: 1, provider: "codex-native", nativeSessionId: this.threadId,
-          counterId: "thread", modelId: this.descriptor.model.modelId, reasoningLevel: this.descriptor.model.thinkingLevel,
-          ownerAgentId: this.descriptor.agentId, runtimeStartedAt: this.runtimeStartedAt, capturedAt: new Date().toISOString(), usage };
-        if (this.accounting.consume(record)) this.appendCustomEntry(NATIVE_USAGE_ENTRY_TYPE, record);
-      }
-      const tokens = params.tokenUsage?.last?.totalTokens;
-      const window = params.tokenUsage?.modelContextWindow;
-      if (typeof tokens === "number" && typeof window === "number") {
-        this.usage = { tokens, contextWindow: window, percent: window ? tokens / window * 100 : 0 };
-        await this.publishStatus();
-      }
-      return;
     }
     const asyncQuestions = method === "item/completed" && params.item?.type === "agentMessage" && params.item.delivery === "async"
       ? parseNativeAsyncQuestions(params.item.questions) : undefined;

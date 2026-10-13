@@ -458,6 +458,11 @@ export class CodexProviderAdapter implements ProviderAdapter {
   private async onNotification(method: string, params: Record<string, any>): Promise<void> {
     const s = this.state!;
     if (s.closing) return;
+    // Thread usage also arrives after a compact turn completes. Its owner is the binding,
+    // so update the meter even when there is no active native turn left to correlate.
+    if (method === "thread/tokenUsage/updated" && params.threadId === s.conversationId) {
+      await this.options.onNotification?.(method, params);
+    }
     const turn = this.correlate(params, method === "turn/started");
     if (!turn || turn.ended) return;
     if (method === "turn/started" && typeof params.turn?.id === "string") this.accept(turn, params.turn.id);
@@ -510,7 +515,7 @@ export class CodexProviderAdapter implements ProviderAdapter {
       this.releaseTurn(turn);
     }
     // A native child never enters the old Forge worker/result lifecycle projection.
-    if (!turn.parentTurn && method !== "turn/completed") await this.options.onNotification?.(method, params);
+    if (!turn.parentTurn && method !== "turn/completed" && method !== "thread/tokenUsage/updated") await this.options.onNotification?.(method, params);
   }
 
   private correlate(params: Record<string, any>, allowChildStart = false): NativeTurn | undefined {

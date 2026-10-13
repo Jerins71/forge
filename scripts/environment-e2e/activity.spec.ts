@@ -16,6 +16,7 @@ const assertions: Record<string, unknown> = {}
 const renderErrors: string[] = []
 let fleet: UiFleet
 let manifest: FleetManifest
+let historyAdmin: BootstrapSession
 let context: BrowserContext
 let sharedPage: Page
 const test = base.extend({ page: async ({}, use) => { await use(sharedPage) } })
@@ -29,6 +30,11 @@ const releaseFile = () => join(manifest.environments[0]!.checkout, '.fixture-act
 async function shot(page: Page, name: string) {
   const path = join(evidenceRoot, `${name}.png`)
   await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
+}
+/** Count canonical rows: the transcript only mounts the current viewport's history. */
+async function canonicalStatusRows() {
+  const history = await fixtureRpcOnce(fleet.a.baseUrl, historyAdmin, 'session.history', { sessionId: fleet.a.sessionId, turns: 20 })
+  return history.items.filter((item: any) => item.activity?.kind === 'status') as Array<{ itemId: string; text: string }>
 }
 async function send(page: Page, text: string) {
   await page.getByRole('combobox', { name: /^(Message |Send another message to )/ }).fill(text)
@@ -55,6 +61,7 @@ test.beforeAll(async ({ browser, environmentManifest }) => {
   await mkdir(evidenceRoot, { recursive: true })
   manifest = await readManifest(environmentManifest)
   fleet = await openUiFleet(environmentManifest)
+  historyAdmin = await controlEnvironment<BootstrapSession>(manifest, 'env-a', 'bootstrap')
   context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
   sharedPage = await context.newPage()
   sharedPage.on('pageerror', error => renderErrors.push(error.message))
@@ -78,6 +85,18 @@ test('tool and reasoning rows stream live, expand, group, and replay after reloa
   await expect(header.locator('[data-activity-shimmer]')).toHaveCSS('animation-name', 'activity-shimmer')
   await expect.poll(() => describeRows(page)).toEqual([FINISHED[2]])
   await expect(page.getByTestId('activity-work-timer')).toContainText('Working for')
+  const elapsedWork = () => page.getByTestId('activity-work-timer').evaluate(node => {
+    const match = /Working for (?:(\d+)m )?(\d+)s/.exec(node.textContent ?? '')
+    return match ? Number(match[1] ?? 0) * 60 + Number(match[2]) : -1
+  })
+  // A long tool stops producing events; the turn clock still advances and survives a reload.
+  await expect.poll(elapsedWork, { timeout: 7_000 }).toBeGreaterThanOrEqual(3)
+  const elapsedBeforeReload = await elapsedWork()
+  await page.reload()
+  await expect(transcript(page)).toBeVisible()
+  await expect.poll(elapsedWork).toBeGreaterThanOrEqual(elapsedBeforeReload)
+  assertions.longToolTimer = { elapsedBeforeReload, elapsedAfterReload: await elapsedWork() }
+
   assertions.liveCollapsed = { header: await header.textContent(), rows: await describeRows(page) }
   await shot(page, 'live-collapsed')
 
@@ -261,7 +280,7 @@ test('provider retries and the final failure show as one status row, live and af
 
 test('a successful turn after a failure and a model switch clears the failure, live and after reload', async ({ page }) => {
   // As after a weekly limit: the first turn fails, the user switches the model, and the next turn succeeds.
-  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const admin = historyAdmin
   const settled = async (commandId: string) => { await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000) }
   const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title: 'Failure then success', workspaceStrategy: { kind: 'current_checkout' },
     initialMessage: { text: '[fixture:reject] Hit a limit', artifactIds: [] } }
@@ -288,11 +307,12 @@ test('a successful turn after a failure and a model switch clears the failure, l
   assertions.failureResolvedBySuccess = { sessionId, attention: (await attention()) ?? null }
 })
 
-test('after a model switch a session still streams, settles and reports it finished, and a cut-off reply is marked, live and after reload', async ({ page }) => {
-  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+test('after repeated model switches the shared session still streams, settles and reports it finished, live and after reload', async ({ page }) => {
+  const admin = historyAdmin
   const settled = async (commandId: string) => { await until(() => fixtureRpcOnce(fleet.a.baseUrl, admin, 'command.get', { commandId }), receipt => receipt.state === 'succeeded', 30_000) }
-  const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title: 'Switched model', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Before the switch', artifactIds: [] } }
-  const sessionId = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
+  const sessionId = fleet.a.sessionId
+  const launch = { commandId: randomUUID(), projectId: sessionId, title: 'Elsewhere', workspaceStrategy: { kind: 'current_checkout' }, initialMessage: { text: 'Elsewhere', artifactIds: [] } }
+  const elsewhere = (await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)).sessionId as string
   await settled(launch.commandId)
   const attention = async () => (await controlEnvironment<Array<{ reason: string }>>(manifest, 'env-a', 'fixture', { operation: 'attention-state', sessionId }))[0]?.reason
   const open = async (id: string) => { await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(id)}`); await expect(transcript(page)).toBeVisible() }
@@ -307,7 +327,7 @@ test('after a model switch a session still streams, settles and reports it finis
   await send(page, '[fixture:retry] Answer on the new model')
   await expect(stop).toBeVisible({ timeout: 15_000 })
   // ...and, once it finishes out of view (the session in view is never left needing the user), it is reported finished.
-  await open(fleet.a.sessionId)
+  await open(elsewhere)
   await writeFile(releaseFile(), 'release')
   await expect.poll(attention, { timeout: 30_000 }).toBe('work_settled')
   await page.reload()
@@ -317,17 +337,10 @@ test('after a model switch a session still streams, settles and reports it finis
   await expect.poll(async () => { const text = await transcript(page).innerText(); return text.lastIndexOf('assistant reply') > text.lastIndexOf('Answer on the new model') }, { timeout: 30_000 }).toBe(true)
   await expect(stop).toHaveCount(0)
   await shot(page, 'rebound-runtime-settled')
-  // The rebound provider numbers its items afresh; a reply it cuts off is still its own row and is marked.
-  const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
-  const before = await status().count()
-  await send(page, '[fixture:crash-mid-reply] Stop halfway after the switch')
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
-  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
-  await expect(transcript(page)).toContainText('This reply stops halfway through its')
-  await page.reload()
-  await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.', { timeout: 30_000 })
-  await shot(page, 'rebound-runtime-reply-interrupted')
-  assertions.reboundRuntime = { sessionId, attention: 'work_settled', replyInterrupted: true }
+  const inherit = { commandId: randomUUID(), sessionId, model: { mode: 'inherit' } }
+  await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.configure', inherit)
+  await settled(inherit.commandId)
+  assertions.reboundRuntime = { sessionId, attention: 'work_settled' }
 })
 
 test('a session restarted by a trust change mid-turn settles to idle and accepts its next message', async () => {
@@ -385,10 +398,10 @@ test('a reply cut off by a dying provider is marked as interrupted, live and aft
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
-  const before = await status().count()
+  const before = (await canonicalStatusRows()).length
   await send(page, '[fixture:crash-mid-reply] Stop halfway')
   // The partial text stays, and it is followed by a marker so it cannot be read as a finished answer.
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect.poll(async () => (await canonicalStatusRows()).length, { timeout: 30_000 }).toBe(before + 1)
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
   await expect(status().last()).toContainText('Reply interrupted: The provider process stopped unexpectedly.')
   await expect(transcript(page)).toContainText('This reply stops halfway through its')
@@ -400,6 +413,7 @@ test('a reply cut off by a dying provider is marked as interrupted, live and aft
   await expect(transcript(page)).toContainText('This reply stops halfway through its')
   expect(await order()).toBe(true)
   await shot(page, 'reply-interrupted-replayed')
+  assertions.reboundCrash = { canonicalStatuses: await canonicalStatusRows(), liveAndReplayed: true }
 })
 
 // Last: the fixture's provider process exits, and recovering the session is outside this suite.
@@ -407,9 +421,9 @@ test('a provider process that dies mid-turn is one failed status row', async ({ 
   const status = () => page.locator('[data-testid="activity-row"][data-activity-kind="status"]')
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(fleet.a.sessionId)}`)
   await expect(transcript(page)).toBeVisible()
-  const before = await status().count()
+  const before = (await canonicalStatusRows()).length
   await send(page, '[fixture:crash] Lose the provider')
-  await expect(status()).toHaveCount(before + 1, { timeout: 30_000 })
+  await expect.poll(async () => (await canonicalStatusRows()).length, { timeout: 30_000 }).toBe(before + 1)
   await expect(status().last()).toHaveAttribute('data-activity-status', 'failed')
   await expect(status().last()).toContainText('Failed: The provider process stopped unexpectedly.')
   await status().last().getByRole('button').click()
@@ -423,7 +437,7 @@ test('a provider process that dies mid-turn is one failed status row', async ({ 
 
 /** A session on Claude: the real bundled Claude Code, against the fleet's scripted model. */
 async function launchClaude(title: string, text: string) {
-  const admin = await controlEnvironment<BootstrapSession>(manifest, manifest.environments[0]!.name, 'bootstrap')
+  const admin = historyAdmin
   const launch = { commandId: randomUUID(), projectId: fleet.a.sessionId, title, workspaceStrategy: { kind: 'current_checkout' },
     model: { provider: 'claude-native', modelId: 'claude-sonnet-5', thinkingLevel: 'low' }, initialMessage: { text, artifactIds: [] } }
   const { sessionId } = await fixtureRpcOnce(fleet.a.baseUrl, admin, 'session.launch', launch)
@@ -461,12 +475,20 @@ test('a scheduled Claude wake-up is a wait, not a stall: its row and the footer 
     return { footer: await footer.textContent(), row: await wakeRow.textContent(), wakeAt: await wakeRow.getAttribute('data-wake-at') }
   }
   const live = await readWait()
+  const timer = page.getByTestId('activity-work-timer').first()
+  // The tool already returned; a scheduled wait is still the same live turn.
+  await expect(timer).toContainText('Working for')
+  await expect.poll(() => timer.textContent(), { timeout: 7_000 }).not.toBe('Working for 0s')
+  const liveTimer = await timer.textContent()
+
   // The reason is in the row's details.
   await wakeRow.getByRole('button').click()
   await expect(wakeRow.getByTestId('activity-detail')).toContainText('Check the fixture build again')
   await shot(page, 'scheduled-wakeup')
   // The countdown is live: the footer moves to the next minute without any new event.
   await expect.poll(() => footer.textContent(), { timeout: 75_000, intervals: [1_000] }).not.toBe(live.footer)
+  await expect(timer).not.toHaveText(liveTimer!)
+  assertions.scheduledWaitTimer = { live: liveTimer, laterDuringWait: await timer.textContent() }
 
   await page.reload()
   await expect(transcript(page)).toContainText('Waiting for the scheduled check.', { timeout: 30_000 })
@@ -478,10 +500,10 @@ test('a scheduled Claude wake-up is a wait, not a stall: its row and the footer 
   await expect(transcript(page)).toContainText('Woke up: the scheduled check ran.', { timeout: 240_000 })
   await expect(footer).toHaveCount(0, { timeout: 30_000 })
   await expect(stopButton(page)).toHaveCount(0, { timeout: 30_000 })
-  const settledRows = async () => {
-    if (await wakeRow.count() === 0) await page.getByTestId('activity-group-header').first().click()
-    await expect(wakeRow).toContainText(/Scheduled wake-up · \d{1,2}:\d{2}\s?[AP]M/)
-    await expect(wakeRow).not.toContainText('(in ')
+  const settledRows = async (row = wakeRow) => {
+    if (await row.count() === 0) await page.getByTestId('activity-group-header').first().click()
+    await expect(row).toContainText(/Scheduled wake-up · \d{1,2}:\d{2}\s?[AP]M/)
+    await expect(row).not.toContainText('(in ')
     await expect(page.locator('[data-system-marker="manager_stalled"]')).toHaveCount(0)
   }
   await settledRows()
@@ -490,6 +512,28 @@ test('a scheduled Claude wake-up is a wait, not a stall: its row and the footer 
   await expect(footer).toHaveCount(0)
   await settledRows()
   await shot(page, 'scheduled-wakeup-fired')
-  assertions.scheduledWakeup = { sessionId, live, replayed }
+  // A later wait must not revive this settled row, even with a future wakeAt.
+  // Move only the renderer's clock back to make that condition deterministic;
+  // the real native provider still schedules and fires on its own clock.
+  const skewClock = () => { const realNow = Date.now; Date.now = () => realNow() - 300_000 }
+  await page.evaluate(skewClock)
+  await page.addInitScript(skewClock)
+  expect(Date.parse(live.wakeAt!)).toBeGreaterThan(await page.evaluate(() => Date.now()))
+  const oldWakeRow = page.locator(`[data-testid="activity-row"][data-wake-at="${live.wakeAt}"]`).first()
+  await send(page, '[fixture:wakeup] Schedule another build check')
+  await expect(footer).toBeVisible({ timeout: 30_000 })
+  await settledRows(oldWakeRow)
+  expect(await oldWakeRow.getAttribute('data-wake-at')).toBe(live.wakeAt)
+  await page.reload()
+  await expect(footer).toBeVisible({ timeout: 30_000 })
+  await settledRows(oldWakeRow)
+  expect(await oldWakeRow.getAttribute('data-wake-at')).toBe(live.wakeAt)
+  const settledDuringLaterWait = await oldWakeRow.textContent()
+  await page.evaluate(() => { const skewedNow = Date.now; Date.now = () => skewedNow() + 300_000 })
+  await page.waitForTimeout(1_100)
+  await shot(page, 'scheduled-wakeup-later-wait')
+  await stopButton(page).click()
+  await expect(footer).toHaveCount(0, { timeout: 30_000 })
+  assertions.scheduledWakeup = { sessionId, live, replayed, laterWaitDoesNotReviveSettledCountdown: true, settledDuringLaterWait, rendererClockSkewMs: -300_000 }
   expect(renderErrors).toEqual([])
 })

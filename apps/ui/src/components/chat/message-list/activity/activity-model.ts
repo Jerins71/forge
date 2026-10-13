@@ -106,10 +106,11 @@ export function formatWorkDuration(ms: number): string {
 }
 
 /** "10:58 AM (in 12 min)": when a scheduled wake-up resumes the agent, counted down from `nowMs`. */
-export function formatWakeTime(wakeAt: string, nowMs: number): string | undefined {
+export function formatWakeTime(wakeAt: string, nowMs: number, countingDown = true): string | undefined {
   const at = Date.parse(wakeAt)
   if (!Number.isFinite(at)) return undefined
   const clock = new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+  if (!countingDown) return clock
   const seconds = Math.ceil((at - nowMs) / 1000)
   if (seconds <= 0) return clock
   return `${clock} (in ${seconds < 60 ? `${seconds}s` : `${Math.ceil(seconds / 60)} min`})`

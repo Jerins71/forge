@@ -33,6 +33,7 @@ export class CursorSdkObservationMapper {
   }
   runtimeEvent(event: RuntimeSessionEvent): void {
     const turn = this.turn; if (!turn) return;
+    if (this.interrupted && (event.type === "message_start" || event.type === "message_update" || event.type.startsWith("tool_execution_"))) return;
     const item = { ...this.binding.scope, kind: "item" as const, conversationId: turn.conversationId, turnId: turn.nativeId, nativeId: `${turn.nativeId}:assistant:${this.itemIndex}` };
     if ((event.type === "message_start" || event.type === "message_update" || event.type === "message_end") && event.message.role === "assistant") {
       const content = event.message.content;
@@ -55,6 +56,7 @@ export class CursorSdkObservationMapper {
   }
   sdkMessage(raw: unknown): boolean {
     if (!raw || typeof raw !== "object" || !this.turn) return false;
+    if (this.interrupted) return true;
     const message = raw as Record<string, unknown>;
     const agentId = typeof message.agent_id === "string" ? message.agent_id : this.binding.conversation.nativeId;
     const runId = typeof message.run_id === "string" ? message.run_id : this.turn.nativeId;

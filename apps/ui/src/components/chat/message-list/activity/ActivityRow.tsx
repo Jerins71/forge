@@ -31,11 +31,12 @@ function useReplayedContent(row: ActivityRowModel, expanded: boolean, load: Acti
 }
 
 /** One compact line with a type icon; a chevron expands it to its full content. */
-export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, loadContent }: {
+export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, loadContent, waitingWakeAt }: {
   row: ActivityRowModel
   expanded: boolean
   onToggle: (itemId: string) => void
   loadContent?: ActivityContentLoader
+  waitingWakeAt?: string
 }) {
   const detailId = useId()
   const [showAll, setShowAll] = useState(false)
@@ -43,7 +44,7 @@ export const ActivityRow = memo(function ActivityRow({ row, expanded, onToggle, 
   const loaded = useReplayedContent(row, expanded && expandable, loadContent)
   const Icon = ACTIVITY_ICONS[row.kind]
   const running = row.status === 'running'
-  const wakeLabel = useWakeLabel(row.wakeAt)
+  const wakeLabel = useWakeLabel(row.wakeAt, running || (row.wakeAt !== undefined && row.wakeAt === waitingWakeAt))
   const summary = row.summary || (row.kind === 'reasoning' ? 'Thinking…' : 'Tool')
   const label = wakeLabel ? `${summary} · ${wakeLabel}` : summary
 

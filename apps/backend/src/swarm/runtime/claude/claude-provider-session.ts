@@ -194,7 +194,7 @@ export class ClaudeProviderSession {
     }
   }
   frame(frame: SDKMessage): void {
-    if (!this.current) return; // Native startup is not an app attempt.
+    if (!this.current || this.interrupted) return; // Stop fences output while native interruption lands.
     const parent = "parent_tool_use_id" in frame ? frame.parent_tool_use_id : undefined;
     const origin = this.origin(parent ? this.taskForTool(parent) ?? parent : undefined, parent ? this.tools.get(parent)?.turn : undefined);
     if (!parent) {
