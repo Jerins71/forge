@@ -1,5 +1,5 @@
 import { WebContentsView, type BrowserWindow } from 'electron'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { ChildProcess } from 'node:child_process'
 import type { BrowserEngineDesktopBridge, DesktopBrowserCommand, DesktopBrowserEvent } from '@forge/protocol'
 import { createCdpRelayConnection } from './cdp-relay.js'
@@ -32,13 +32,21 @@ export class DesktopBrowserHost {
   }
   private async create(command: Extract<DesktopBrowserCommand, { type: 'forge:browser:create' }>, send: (event: DesktopBrowserEvent) => void) {
     if (this.tabs.has(command.tabId)) { send({ type: 'forge:browser:created', requestId: command.requestId, tabId: command.tabId }); return }
+    const view = this.createView(command, send)
+    await view.webContents.loadURL('about:blank'); send({ type: 'forge:browser:created', requestId: command.requestId, tabId: command.tabId })
+  }
+  private createView(command: { tabId: string; projectId: string; viewport: { width: number; height: number } }, send: (event: DesktopBrowserEvent) => void, options?: Electron.WebContentsViewConstructorOptions, popupReady?: () => void): WebContentsView {
     const partition = `persist:forge-browser-${createHash('sha256').update(command.projectId).digest('hex').slice(0, 20)}`
-    const view = new WebContentsView({ webPreferences: { partition, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } })
+    const view = new WebContentsView({ ...options, webPreferences: { ...options?.webPreferences, partition, preload: undefined, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } })
     // Keep the established partition name so existing Forge project logins survive.
     view.webContents.session.setPermissionRequestHandler((_contents, permission, callback) => callback(allowedPermissions.has(permission)))
     view.webContents.session.setPermissionCheckHandler((_contents, permission) => allowedPermissions.has(permission))
     view.setBounds({ x: 0, y: 0, ...command.viewport })
-    const wc = view.webContents; wc.debugger.attach('1.3')
+    const wc = view.webContents
+    // Let Electron adopt its supplied popup contents before announcing the page
+    // and attaching the debugger for the backend.
+    if (popupReady) setImmediate(() => { if (wc.isDestroyed()) return; try { wc.debugger.attach('1.3'); popupReady() } catch { this.close(command.tabId) } })
+    else wc.debugger.attach('1.3')
     let target: { targetId: string; browserContextId?: string } | undefined
     const targetInfo = async () => { target ??= ((await wc.debugger.sendCommand('Target.getTargetInfo')) as { targetInfo: NonNullable<typeof target> }).targetInfo; return target }
     const tab = { view, inputDepth: 0, relay: createCdpRelayConnection({
@@ -57,10 +65,17 @@ export class DesktopBrowserHost {
     const input = () => { if (tab.inputDepth === 0) send({ type: 'forge:browser:input', tabId: command.tabId }) }
     wc.on('before-input-event', (_event, event) => { if (event.type === 'keyDown') input() })
     wc.on('before-mouse-event', (_event, event) => { if (event.type === 'mouseDown' || event.type === 'mouseWheel') input() })
-    wc.on('destroyed', () => { this.tabs.delete(command.tabId); send({ type: 'forge:browser:closed', tabId: command.tabId }) })
-    wc.setWindowOpenHandler(() => ({ action: 'deny' }))
+    wc.on('destroyed', () => { if (this.presented?.tabId === command.tabId) this.hide(); this.tabs.delete(command.tabId); send({ type: 'forge:browser:closed', tabId: command.tabId }) })
+    wc.setWindowOpenHandler(details => {
+      if (!this.child?.connected || (!/^https?:\/\//i.test(details.url) && details.url !== 'about:blank')) return { action: 'deny' }
+      return { action: 'allow', createWindow: options => {
+        const tabId = randomUUID()
+        const popup = this.createView({ ...command, tabId }, send, options, () => send({ type: 'forge:browser:popup', tabId, openerTabId: command.tabId }))
+        return popup.webContents
+      } }
+    })
     wc.on('will-navigate', (event, target) => { if (!/^https?:\/\//i.test(target) && target !== 'about:blank') event.preventDefault() })
-    await wc.loadURL('about:blank'); send({ type: 'forge:browser:created', requestId: command.requestId, tabId: command.tabId })
+    return view
   }
   trackWindow(window: BrowserWindow) {
     const hide = () => { if (this.presented?.window === window) this.hide() }

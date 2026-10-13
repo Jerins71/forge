@@ -21,7 +21,7 @@ interface LiveTab {
   recording?: { recordingId: string; startedAt: string; encoder: BrowserRecording; cast: { release(): Promise<void> }; work: Promise<void>; error?: Error }
   console: BrowserConsoleEntry[]; network: BrowserNetworkEntry[]; stream?: ScreencastHub
 }
-interface Session { closed?: boolean; snapshot: BrowserEngineSnapshot; tabs: Map<string, LiveTab>; write: Promise<void> }
+interface Session { closed?: boolean; snapshot: BrowserEngineSnapshot; tabs: Map<string, LiveTab>; popups: Set<Promise<void>>; write: Promise<void> }
 interface Viewer { send(item: BrowserScreencastItem): void; pending?: number; last: number }
 class ScreencastHub {
   private readonly viewers = new Set<Viewer>()
@@ -89,6 +89,15 @@ export class BrowserEngine {
     this.cookies = new BrowserCookieImport({ engine: this, dataDir: options.dataDir }); this.options = options; this.desktop = options.desktop ?? new DesktopBrowserChannel()
     this.headless = new HeadlessBrowser({ dataDir: options.dataDir, cacheDir: options.browserCacheDir ?? process.env.FORGE_BROWSER_CACHE_DIR, onSetup: () => { for (const work of this.sessions.values()) void work.then(session => this.publish(session)).catch(() => {}) } })
     this.desktop.onInput = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) this.humanInput(session, tab) }).catch(() => {}) }
+    this.desktop.onPopup = (tabId, openerTabId) => {
+      void (async () => {
+        for (const work of this.sessions.values()) {
+          const session = await work, opener = session.tabs.get(openerTabId)
+          if (opener && !session.closed) { this.adoptPopup(session, opener, tabId, async () => { try { const native = await this.desktop.adopt(tabId); return { page: native.page, dispose: native.close } } catch (error) { await this.desktop.discard(tabId).catch(() => {}); throw error } }); return }
+        }
+        await this.desktop.discard(tabId)
+      })().catch(() => this.desktop.discard(tabId).catch(() => {}))
+    }
     this.desktop.onClosed = tabId => { for (const work of this.sessions.values()) void work.then(session => { const tab = session.tabs.get(tabId); if (tab) { tab.state.errorCode = 'crashed'; tab.state.error = 'Desktop browser page closed.'; this.publish(session) } }).catch(() => {}) }
   }
   setupState(): BrowserSetupState { return this.desktop.available ? { browserEngineState: 'ready' } : this.headless.state() }
@@ -103,7 +112,7 @@ export class BrowserEngine {
     let restored: BrowserEngineSnapshot | undefined
     try { const stored = JSON.parse(await readFile(getSessionBrowserStatePath(this.options.dataDir, projectId, sessionId), 'utf8')); if (stored.schemaVersion === 3 && Value.Check(BrowserEngineSnapshotSchema, stored.snapshot) && stored.snapshot.sessionId === sessionId && stored.snapshot.projectId === projectId) restored = stored.snapshot }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error }
-    const session: Session = { snapshot: { sessionId, projectId, tabs: [], activeTabId: restored?.activeTabId ?? null, revision: restored?.revision ?? 0 }, tabs: new Map(), write: Promise.resolve() }
+    const session: Session = { snapshot: { sessionId, projectId, tabs: [], activeTabId: restored?.activeTabId ?? null, revision: restored?.revision ?? 0 }, tabs: new Map(), popups: new Set(), write: Promise.resolve() }
     for (const previous of restored?.tabs ?? []) {
       const tab = await this.create(session, previous.tabId, previous.viewport); session.tabs.set(previous.tabId, tab)
       try { if (previous.url && previous.url !== 'about:blank') await tab.page.goto(normalizeUrl(previous.url), { waitUntil: 'domcontentloaded', timeout: 15000 }) }
@@ -116,14 +125,32 @@ export class BrowserEngine {
     let page: Page; let dispose: () => Promise<void>
     if (this.desktop.available) { const native = await this.desktop.create(tabId, session.snapshot.projectId, viewport); page = native.page; dispose = native.close }
     else { page = await (await this.headless.context(session.snapshot.projectId)).newPage(); dispose = async () => { await page.close() } }
+    try { return await this.attachPage(session, tabId, viewport, page, dispose) }
+    catch (error) { await dispose().catch(() => {}); throw error }
+  }
+  private adoptPopup(session: Session, opener: LiveTab, tabId: string, physical: () => Promise<{ page: Page; dispose(): Promise<void> }>) {
+    const work = (async () => {
+      const native = await physical()
+      try {
+        if (session.closed || this.shuttingDown || opener.page.isClosed() || session.tabs.size >= 100) return
+        const tab = await this.attachPage(session, tabId, opener.state.viewport, native.page, native.dispose)
+        if (session.closed || this.shuttingDown || native.page.isClosed() || opener.page.isClosed() || session.tabs.size >= 100) return
+        tab.state.openerTabId = opener.state.tabId; session.tabs.set(tabId, tab); session.snapshot.activeTabId = tabId
+        this.publish(session); await this.refresh(tab); await this.persist(session)
+      } finally { if (!session.tabs.has(tabId)) await native.dispose().catch(() => {}) }
+    })().catch(() => {})
+    session.popups.add(work); void work.finally(() => session.popups.delete(work))
+  }
+  private async attachPage(session: Session, tabId: string, viewport: BrowserEngineTab['viewport'], page: Page, dispose: () => Promise<void>): Promise<LiveTab> {
     await page.setViewportSize(viewport); page.setDefaultTimeout(15000)
     const cdp = await page.context().newCDPSession(page)
     const state: BrowserEngineTab = { tabId, sessionId: session.snapshot.sessionId, projectId: session.snapshot.projectId, host: this.desktop.available ? 'desktop' : 'headless', url: page.url(), title: '', loading: false, canGoBack: false, canGoForward: false, viewport, controller: 'none' }
     const tab: LiveTab = { state, page, cdp, dispose, actionEpoch: 0, actionTail: Promise.resolve(), cursorSequence: 0, console: [], network: [] }
+    page.on('popup', popup => { if (!this.desktop.available) this.adoptPopup(session, tab, randomUUID(), async () => ({ page: popup, dispose: () => popup.close() })) })
     page.on('console', message => { tab.console.push({ level: message.type(), text: message.text().slice(0, 4096), timestamp: new Date().toISOString() }); if (tab.console.length > 200) tab.console.shift() })
     page.on('response', response => { tab.network.push({ url: response.url().slice(0, 2048), method: response.request().method(), status: response.status(), failed: false, timestamp: new Date().toISOString() }); if (tab.network.length > 200) tab.network.shift() })
     page.on('crash', () => { tab.action?.abort(); state.error = 'Browser page crashed. Reload or close this tab.'; state.errorCode = 'crashed'; this.publish(session) })
-    page.on('close', () => { if (this.shuttingDown || tab.closing) return; tab.action?.abort(); void tab.stream?.stop(); if (session.tabs.delete(tabId)) { if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; this.publish(session); void this.persist(session) } })
+    page.on('close', () => { if (this.shuttingDown || tab.closing) return; tab.closing = true; void tab.stream?.stop(); void tab.dispose().catch(() => {}); if (session.tabs.delete(tabId)) { if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; this.publish(session); void this.persist(session) } })
     page.on('framenavigated', frame => { if (frame === page.mainFrame()) void this.refresh(tab).then(() => { this.publish(session); return this.persist(session) }).catch(() => {}) })
     page.on('domcontentloaded', () => { void this.refresh(tab).then(() => this.publish(session)).catch(() => {}) })
     return tab
@@ -168,7 +195,7 @@ export class BrowserEngine {
   }
   private async tab(sessionId: string, tabId?: string): Promise<{ session: Session; tab: LiveTab }> { const session = await this.session(sessionId); const tab = session.tabs.get(tabId ?? session.snapshot.activeTabId ?? ''); if (!tab) throw new Error('Browser tab does not belong to this session.'); return { session, tab } }
   async activate(sessionId: string, tabId: string) { const { session } = await this.tab(sessionId, tabId); session.snapshot.activeTabId = tabId; this.publish(session); await this.persist(session); return this.snapshot(session) }
-  async close(sessionId: string, tabId: string) { const { session, tab } = await this.tab(sessionId, tabId); tab.action?.abort(); if (tab.recording) await this.recordingStop(sessionId, tabId); await tab.stream?.stop(); session.tabs.delete(tabId); if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; await tab.dispose(); this.publish(session); await this.persist(session); return this.snapshot(session) }
+  async close(sessionId: string, tabId: string) { const { session, tab } = await this.tab(sessionId, tabId); tab.closing = true; tab.action?.abort(); if (tab.recording) await this.recordingStop(sessionId, tabId); await tab.stream?.stop(); session.tabs.delete(tabId); if (session.snapshot.activeTabId === tabId) session.snapshot.activeTabId = session.tabs.keys().next().value ?? null; await tab.dispose(); this.publish(session); await this.persist(session); return this.snapshot(session) }
   async navigate(sessionId: string, tabId: string, input: { url?: string; direction?: 'back' | 'forward' | 'reload' }, signal?: AbortSignal, readiness: 'load' | 'domcontentloaded' | 'commit' = 'domcontentloaded') {
     const { session, tab } = await this.tab(sessionId, tabId); if (!signal) this.humanInput(session, tab); tab.state.loading = true; delete tab.state.error; delete tab.state.errorCode; this.publish(session)
     try { const options = { waitUntil: readiness, timeout: 15000, signal }; if (input.url) await tab.page.goto(normalizeUrl(input.url), options); else if (input.direction === 'back') await tab.page.goBack(options); else if (input.direction === 'forward') await tab.page.goForward(options); else await tab.page.reload(options); await this.refresh(tab) }
@@ -308,7 +335,7 @@ export class BrowserEngine {
   async archiveSession(profileId: string, sessionId: string): Promise<void> {
     await this.releaseSessionForLifecycle(profileId, sessionId, 'archive'); this.cookies.releaseSession(sessionId)
     const loaded = this.sessions.get(sessionId); if (!loaded) return; const session = await loaded
-    await this.persist(session); session.closed = true; this.sessions.delete(sessionId)
+    await this.persist(session); session.closed = true; this.sessions.delete(sessionId); await Promise.allSettled([...session.popups])
     for (const tab of session.tabs.values()) { tab.closing = true; if (tab.recording) { await tab.recording.cast.release(); await tab.recording.work; await tab.recording.encoder.stop().catch(() => {}) }; await tab.stream?.stop(); await tab.dispose() }
     session.tabs.clear(); session.snapshot.activeTabId = null; this.publish(session)
   }
@@ -318,7 +345,7 @@ export class BrowserEngine {
     await rm(getSessionBrowserStatePath(this.options.dataDir, profileId, sessionId), { force: true })
     await rm(getSessionBrowserArtifactsDir(this.options.dataDir, profileId, sessionId), { recursive: true, force: true })
   }
-  async shutdown() { this.cookies.shutdown(); this.shuttingDown = true; for (const work of this.sessions.values()) { const session = await work.catch(() => undefined); if (!session) continue; await this.persist(session); for (const tab of session.tabs.values()) { tab.action?.abort(); if (tab.recording) await this.recordingStop(session.snapshot.sessionId, tab.state.tabId).catch(() => {}); await tab.stream?.stop(); await tab.dispose().catch(() => {}) } } this.sessions.clear(); await this.headless.shutdown(); await this.desktop.shutdown() }
+  async shutdown() { this.cookies.shutdown(); this.shuttingDown = true; for (const work of this.sessions.values()) { const session = await work.catch(() => undefined); if (!session) continue; await Promise.allSettled([...session.popups]); await this.persist(session); for (const tab of session.tabs.values()) { tab.action?.abort(); if (tab.recording) await this.recordingStop(session.snapshot.sessionId, tab.state.tabId).catch(() => {}); await tab.stream?.stop(); await tab.dispose().catch(() => {}) } } this.sessions.clear(); await this.headless.shutdown(); await this.desktop.shutdown() }
 }
 function normalizeUrl(raw: string) { const url = new URL(raw); if (!['http:', 'https:', 'about:'].includes(url.protocol) || url.username || url.password || (url.protocol === 'about:' && url.href !== 'about:blank')) throw new Error('Browser navigation requires HTTP(S) or about:blank, without URL credentials.'); return url.href }
 function locate(page: Page, input: { selector?: string; locator?: string }) { if (input.selector) return page.locator(input.selector); const locator = input.locator ?? ':focus'; if (locator.startsWith('label=')) return page.getByLabel(locator.slice(6), { exact: true }); if (locator.startsWith('text=')) return page.getByText(locator.slice(5), { exact: true }); const role = /^role=([\w-]+)(?:\[name=["'](.*)["']\])?$/.exec(locator); if (role) return page.getByRole(role[1] as Parameters<Page['getByRole']>[0], role[2] ? { name: role[2], exact: true } : {}); return page.locator(locator) }

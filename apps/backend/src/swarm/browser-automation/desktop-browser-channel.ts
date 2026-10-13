@@ -17,11 +17,13 @@ export class DesktopBrowserChannel {
   private readonly onMessage: (value: unknown) => void
   onInput: (tabId: string) => void = () => {}
   onClosed: (tabId: string) => void = () => {}
+  onPopup: (tabId: string, openerTabId: string) => void = () => {}
   constructor(authorizedParent = process.env.FORGE_DESKTOP === '1' && process.env.FORGE_ENVIRONMENT_BOOTSTRAP_PARENT === '1') {
     this.available = authorizedParent && !!process.send
     this.onMessage = raw => {
       if (!raw || typeof raw !== 'object') return
       const event = raw as DesktopBrowserEvent
+      if (event.type === 'forge:browser:popup') this.onPopup(event.tabId, event.openerTabId)
       if (event.type === 'forge:browser:cookies.result') { const pending = this.imports.get(event.requestId); if (event.cookies) pending?.resolve(event.cookies); else if (event.error) void import('./chrome-cookies.js').then(module => pending?.reject(new module.ChromeCookieReadError(event.error!))); return }
       if (event.type === 'forge:browser:created') this.requests.get(event.requestId)?.resolve()
       if (event.type === 'forge:browser:error') this.requests.get(event.requestId)?.reject(new Error(event.message))
@@ -43,6 +45,11 @@ export class DesktopBrowserChannel {
     const timer = setTimeout(() => this.requests.get(requestId)?.reject(new Error('Desktop browser tab creation timed out.')), 15000)
     try { this.send({ type: 'forge:browser:create', requestId, tabId, projectId, viewport }); await created }
     finally { clearTimeout(timer); this.requests.delete(requestId) }
+    return this.adopt(tabId)
+  }
+  async discard(tabId: string): Promise<void> { const entry = this.entries.get(tabId); if (entry) await entry.close(); else if (process.connected) this.send({ type: 'forge:browser:close', tabId }) }
+  /** Main already created this physical popup with its real opener relationship. */
+  async adopt(tabId: string): Promise<{ page: Page; browser: Browser; close(): Promise<void> }> {
     const root = await mkdtemp(join(tmpdir(), 'forge-cdp-')); await chmod(root, 0o700)
     const pipe = process.platform === 'win32' ? `\\\\.\\pipe\\forge-cdp-${randomUUID()}` : join(root, 'cdp.sock')
     const server = createServer((_request, response) => response.writeHead(404).end())

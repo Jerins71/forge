@@ -6,6 +6,9 @@ import { randomUUID } from 'node:crypto'
 import { restrictChromeCookieImportsToFixtures } from '../../../backend/src/swarm/browser-automation/chrome-cookies.js'
 import { DesktopBrowserHost } from './desktop-browser-host.js'
 restrictChromeCookieImportsToFixtures()
+// Fixture failures must reach the test runner instead of opening Electron's
+// synchronous native exception dialog and blocking its teardown.
+process.on('uncaughtException', error => { process.stderr.write(`${error.stack ?? error.message}\n`); app.exit(1) })
 app.commandLine.appendSwitch('use-mock-keychain')
 app.commandLine.appendSwitch('password-store', 'basic')
 app.setPath('userData', process.env.FORGE_ELECTRON_USER_DATA_DIR!)

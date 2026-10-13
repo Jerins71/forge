@@ -3,6 +3,10 @@ import { Value } from '@sinclair/typebox/value'
 import { decodeEnvironmentValue, rpcSchemas, rpcScopes, BrowserEngineSnapshotSchema, BrowserCookiePreviewSchema, BrowserScreencastItemSchema, DeviceSessionSchema } from './environment-v2.js'
 
 describe('environment browser engine wire contract', () => {
+  it('preserves a popup opener in the session tab inventory', () => {
+    const tab = { tabId: 'popup', openerTabId: 'opener', sessionId: 's', projectId: 'p', host: 'headless', url: 'about:blank', title: '', loading: false, canGoBack: false, canGoForward: false, viewport: { width: 1280, height: 800 }, controller: 'none' }
+    expect(Value.Check(BrowserEngineSnapshotSchema, { sessionId: 's', projectId: 'p', tabs: [tab], activeTabId: 'popup', revision: 1 })).toBe(true)
+  })
   it('carries a host setup command through status, setup and tab snapshots', () => {
     const command = 'sudo forge browser setup'
     expect(Value.Check(rpcSchemas['browser.engine.status'].output, { state: 'needs-host-setup', setupCommand: command })).toBe(true)

@@ -30,6 +30,8 @@ The tools are `browser_status`, `browser_open`, `browser_navigate`, `browser_res
 
 A tab reports its URL, title, favicon, viewport, loading/error state, optional short agent action label, and optional agent cursor in page CSS pixels. Tab subscriptions deliver replacement snapshots with a revision. User mouse, wheel, text, or key input in a tab cancels the agent’s current and queued actions in that tab. Subsequent agent actions can resume normally. There is no separate take-over mode or lease, receipt, or operation journal.
 
+HTTP(S) and `about:blank` popups join the opener’s session on both hosts. They appear in the shared tab inventory with `openerTabId`; OAuth popups retain their real `window.opener` so callback messages and self-closing sign-in flows work. Closing or archiving the session cleans up its popups too.
+
 Remote tabs use `Page.startScreencast` over the existing authenticated environment-v2 connection. Each viewer has its own outstanding frame and acknowledgement; one slow viewer cannot block others. `browser.screencast.subscribe` sends bounded JPEG frames or stream-state messages. The client’s `screencast()` handle supplies `release()` and `ack(frameId)` and replaces its subscription ID on reconnect. `browser.tabs.input` injects CDP input into the same page. Local native tabs can also stream to another client; the local panel can display the real view instead.
 
 ## Import from Chrome

@@ -10,7 +10,7 @@ import { createRequire } from 'node:module'
 import { launchFleet, controlEnvironment, sanitizedEnvironment, type BootstrapSession } from './launch.js'
 import { seedUiEnvironment } from './fixtures/ui-fleet.js'
 import { openFixtureRpc, until } from './fixtures/rpc-client.js'
-import type { BrowserEngineSnapshot } from '@forge/protocol'
+import type { BrowserEngineSnapshot, BrowserEngineTab } from '@forge/protocol'
 import { randomUUID, createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
@@ -54,6 +54,42 @@ test('Stop fences agent open during context creation, page creation and publicat
     }
   } finally { server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
   await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'stop-open-proof.json'), JSON.stringify({ passed: true, cancelled: report, abandonedPagesDisposed: true, navigationRequests: requests }, null, 2))
+})
+
+/** Popup failures: OAuth loses its opener, new pages miss session ownership,
+ * a self-closing page stays listed, or archive leaves a physical popup behind. */
+for (const host of ['headless', 'desktop'] as const) test(`${host} adopts OAuth and target-blank popups and closes them with the session`, async ({}, info) => {
+  const root = await mkdtemp(join(tmpdir(), 'forge-browser-popup-proof-'))
+  const server = createServer((request, response) => response.end(request.url === '/oauth' ? `<!doctype html><title>OAuth popup</title><button id="return" onclick="window.opener.postMessage('authenticated',location.origin);window.close()">Return</button>` : request.url === '/blank' ? '<title>Blank link popup</title><h1>New tab</h1>' : `<!doctype html><title>Popup opener</title><button id="oauth" onclick="window.open('/oauth','forge-oauth')">Sign in</button><a id="blank" href="/blank" target="_blank">New tab</a><output>waiting</output><script>onmessage=e=>document.querySelector('output').textContent=e.data</script>`))
+  server.listen(0, '127.0.0.1'); await once(server, 'listening')
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`
+  let application: Awaited<ReturnType<typeof electron.launch>> | undefined
+  const engine = host === 'headless' ? new BrowserEngine({ dataDir: join(root, 'data'), resolveSession: () => 'project', browserCacheDir: join(process.cwd(), '.internal/browser-engine/runtime') }) : undefined
+  try {
+    if (host === 'desktop') {
+      application = await electron.launch({ args: [join(process.cwd(), 'apps/electron/dist/browser-engine-fixture-main.js')], cwd: join(process.cwd(), 'apps/electron'), env: { ...process.env, FORGE_BROWSER_FIXTURE_REPO: process.cwd(), FORGE_DATA_DIR: join(root, 'data'), FORGE_ELECTRON_USER_DATA_DIR: join(root, 'electron') } })
+      await expect.poll(() => application!.evaluate(() => typeof (globalThis as any).forgeBrowserFixture)).toBe('object')
+    }
+    const call = async (method: string, params: any = {}): Promise<any> => application ? application.evaluate(async (_electron, args) => (globalThis as any).forgeBrowserFixture.call(args.method, args.params), { method, params }) : method === 'open' ? engine!.open('session', params) : method === 'snapshot' ? engine!.getSnapshot('session') : method === 'archive' ? engine!.archiveSession('project', 'session') : engine!.invoke('session', 'project', params.operation, params.input)
+    const opened: BrowserEngineSnapshot = await call('open', { url }), opener = opened.activeTabId!
+    const click = async (tabId: string, selector: string) => expect((await call('tool', { operation: 'click', input: { tabId, selector } })).ok).toBe(true)
+    await click(opener, '#oauth')
+    await expect.poll(async () => (await call('snapshot')).tabs.length).toBe(2)
+    const popup: BrowserEngineTab = (await call('snapshot')).tabs.find((tab: BrowserEngineTab) => tab.tabId !== opener)
+    expect(popup.openerTabId).toBe(opener); expect(popup.host).toBe(host)
+    const value = await call('tool', { operation: 'evaluate', input: { tabId: popup.tabId, expression: 'Boolean(window.opener)', awaitPromise: true, returnByValue: true } })
+    expect(value.result.value).toBe(true)
+    await click(popup.tabId, '#return')
+    await expect.poll(async () => (await call('snapshot')).tabs.length).toBe(1)
+    await expect.poll(async () => (await call('tool', { operation: 'evaluate', input: { tabId: opener, expression: 'document.querySelector("output").textContent', awaitPromise: true, returnByValue: true } })).result.value).toBe('authenticated')
+    const snap = await call('tool', { operation: 'snapshot', input: { tabId: opener } }); await info.attach(`${host}-oauth-return`, { body: Buffer.from(snap.result.screenshot.data, 'base64'), contentType: 'image/png' })
+    await click(opener, '#blank'); await expect.poll(async () => (await call('snapshot')).tabs.length).toBe(2)
+    const context = engine ? await engine.headless.context('project') : undefined
+    await call('archive')
+    if (application) await expect.poll(() => application!.evaluate(({ webContents }, fixtureUrl) => webContents.getAllWebContents().filter(contents => contents.getURL().startsWith(fixtureUrl)).length, url)).toBe(0)
+    else expect(context!.pages()).toHaveLength(0)
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'popup-proof.json'), JSON.stringify({ passed: true, host, openerPreserved: true, callbackReceived: true, selfCloseRemoved: true, targetBlankAdopted: true, archiveClosedAllPages: true }, null, 2))
+  } finally { await engine?.shutdown(); await application?.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
 })
 
 test('desktop smoke refuses real-home storage and escaping symlinks before launch', async ({}, info) => {

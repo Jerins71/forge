@@ -12,6 +12,7 @@ const domains = Type.Array(domain, { minItems: 1, maxItems: 1000, uniqueItems: t
 export const BrowserEngineViewportSchema = O({ width: dimension, height: dimension })
 export const BrowserEngineTabSchema = O({
   tabId: id, sessionId: id, projectId: id, host: E('desktop', 'headless'),
+  openerTabId: Type.Optional(id),
   url: Type.String({ maxLength: 8192 }), title: Type.String({ maxLength: 4096 }),
   loading: Type.Boolean(), canGoBack: Type.Boolean(), canGoForward: Type.Boolean(),
   viewport: BrowserEngineViewportSchema, controller: E('human', 'agent', 'none'),
@@ -104,6 +105,7 @@ export type DesktopBrowserCommand =
   | { type: 'forge:browser:close'; tabId: string }
   | { type: 'forge:browser:cdp'; tabId: string; message: string }
 export type DesktopBrowserEvent =
+  | { type: 'forge:browser:popup'; tabId: string; openerTabId: string }
   | { type: 'forge:browser:cookies.result'; requestId: string; cookies?: Array<BrowserCookieTransfer['cookies'][number] & { lastUsedAt?: string }>; error?: BrowserCookieError }
   | { type: 'forge:browser:created'; requestId: string; tabId: string }
   | { type: 'forge:browser:closed'; tabId: string }
