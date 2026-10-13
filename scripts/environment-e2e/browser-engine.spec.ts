@@ -1,7 +1,7 @@
 /** Real Playwright proof, with fresh owned profiles only. Failure modes:
  * foreign iframe blocks control; page input is lost; frames outrun ack; another
  * session can drive the tab; cancelled locator acts later; cookies do not survive
- * restart; headless install disables sandbox; native CDP opens a TCP port. */
+ * restart; headless install disables sandbox; native CDP opens a TCP port; presenting or hiding leaves a stale native view in a shown window. */
 import { test, expect, _electron as electron } from '@playwright/test'
 import { createServer } from 'node:http'
 import { execFile } from 'node:child_process'
@@ -117,6 +117,16 @@ test('Electron WebContentsView is driven through private CDP without a TCP brows
     await info.attach('native-snapshot', { body: Buffer.from(snapshot.result.screenshot.data, 'base64'), contentType: 'image/png' })
     const bounds = () => application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.contentView.children.map(view => view.getBounds()))
     const beforeResize = await bounds()
+    expect(beforeResize).toEqual([{ x: 10, y: 70, width: 1280, height: 800 }])
+    const windowPage = await application.firstWindow()
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.showInactive())
+    expect(await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible())).toBe(true)
+    await info.attach('shown-window-presented', { body: await windowPage.screenshot(), contentType: 'image/png' })
+    await application.evaluate(() => (globalThis as any).forgeBrowserFixture.hide())
+    expect(await bounds()).toEqual([])
+    await info.attach('shown-window-hidden', { body: await windowPage.screenshot(), contentType: 'image/png' })
+    await application.evaluate((_electron, id) => (globalThis as any).forgeBrowserFixture.present(id), tabId)
+    expect(await bounds()).toEqual(beforeResize)
     expect((await call('tool', { operation: 'resize', input: { tabId, mode: 'freeform', width: 800, height: 600, timeoutMs: 15000 } })).ok).toBe(true)
     expect(await bounds()).toEqual(beforeResize)
     await (await application.firstWindow()).reload()
@@ -131,7 +141,7 @@ test('Electron WebContentsView is driven through private CDP without a TCP brows
       expect(listeners).toBe('')
     }
     await call('shutdown', {})
-    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'native-browser-proof.json'), JSON.stringify({ passed: true, platform: process.platform, host: 'WebContentsView', existingProjectLoginPreserved: true, mediaPermissionDenied: true, keychain: 'mocked in isolated fixture', privateTransport: 'fork IPC and ws+unix', foreignIframe: true, operations: ['open', 'snapshot', 'click', 'type', 'evaluate'] }, null, 2))
+    await mkdir(info.outputDir, { recursive: true }); await writeFile(join(info.outputDir, 'native-browser-proof.json'), JSON.stringify({ passed: true, platform: process.platform, host: 'WebContentsView', shownWindowPresentHide: true, presentBounds: beforeResize[0], existingProjectLoginPreserved: true, mediaPermissionDenied: true, keychain: 'mocked in isolated fixture', privateTransport: 'fork IPC and ws+unix', foreignIframe: true, operations: ['open', 'snapshot', 'click', 'type', 'evaluate'] }, null, 2))
   } finally { await application.close(); server.closeAllConnections(); server.close(); await rm(root, { recursive: true, force: true }) }
 })
 
