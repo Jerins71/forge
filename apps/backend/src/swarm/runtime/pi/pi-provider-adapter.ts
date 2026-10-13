@@ -54,7 +54,7 @@ export class PiProviderAdapter implements ProviderAdapter {
     this.toolHost = preparation.toolHost;
     this.unsubscribe = session.subscribe(event => {
       if (!["message_start", "message_update", "message_end", "compaction_start", "compaction_end",
-        "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_start"].includes(event.type)) return;
+        "tool_execution_start", "tool_execution_update", "tool_execution_end", "turn_start", "auto_retry_start"].includes(event.type)) return;
       // Pi mutates its partial assistant object in place. Capture each raw delta before queuing.
       // Observation failures must not interrupt the native tool/session owner.
       let snapshot = event;
@@ -66,6 +66,7 @@ export class PiProviderAdapter implements ProviderAdapter {
   }
 
   capabilities(): ProviderCapabilities { return piProviderCapabilities(); }
+  hasActiveAttempt(): boolean { return this.active !== undefined; }
 
   async open(input: ProviderOpenInput): Promise<ProviderBinding> {
     assertProviderRequirements(this.capabilities(), input.required);
@@ -207,6 +208,8 @@ export class PiProviderAdapter implements ProviderAdapter {
     const outcome = this.active.interrupted ? "interrupted" : error ? "failed" : last?.stopReason === "aborted" ? "cancelled" : "completed";
     const leaf = this.session.sessionManager.getLeafId();
     if (this.active.turn && leaf) this.completedTurns.set(this.active.turn.nativeId, leaf);
+    // Native Pi owns bounded retries. Only its final settled error can fail the Forge run.
+    if (error && !this.active.interrupted) this.publish({ type: "error", ...error, delivery: "accepted" });
     this.publish({ type: "terminal", terminalAuthority: "root_attempt", outcome, ...(error ? { error } : {}) });
     this.active.resolveAcceptance({ status: "unknown" });
     this.active = undefined;
@@ -269,6 +272,10 @@ export class PiProviderAdapter implements ProviderAdapter {
       return;
     }
     if (!this.active?.turn) return;
+    if (event.type === "auto_retry_start") {
+      this.publish({ type: "retry", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: event.errorMessage });
+      return;
+    }
     if (event.type === "message_start" && event.message.role === "assistant") {
       this.itemId = `${this.active.turn.nativeId}:assistant:${++this.itemSequence}`;
       this.publishMessage("start", "assistant", "");
@@ -286,7 +293,6 @@ export class PiProviderAdapter implements ProviderAdapter {
       const message = event.message;
       const text = message.content.filter(block => block.type === "text").map(block => block.text).join("\n");
       this.publishMessage("complete", "assistant", text, jsonValue(message.content));
-      if (message.stopReason === "error") this.publish({ type: "error", code: "PI_MODEL_ERROR", message: message.errorMessage ?? "Pi model request failed.", delivery: "accepted" });
       this.publish({ type: "usage", usage: { input: message.usage.input, output: message.usage.output, cacheRead: message.usage.cacheRead,
         cacheWrite: message.usage.cacheWrite, total: message.usage.totalTokens }, costUsd: message.usage.cost,
         modelId: message.model, provider: message.provider, api: message.api, stopReason: message.stopReason,

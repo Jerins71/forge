@@ -1649,7 +1649,11 @@ export class AgentRuntime implements SwarmAgentRuntime {
       this.settledAssistantMessage =
         asEligibleSettledAssistantMessage(normalizedEvent.message) ?? this.settledAssistantMessage;
     }
-    if (this.callbacks.onSessionEvent && normalizedEvent) {
+    // The native cycle's error is provisional while Pi can retry. The adapter's
+    // settled observation owns the managed run's final failure and status row.
+    const provisionalError = normalizedEvent?.type === "message_end" && event.type === "message_end"
+      && event.message.role === "assistant" && event.message.stopReason === "error" && this.providerAdapter?.hasActiveAttempt();
+    if (this.callbacks.onSessionEvent && normalizedEvent && !provisionalError) {
       await this.callbacks.onSessionEvent(this.descriptor.agentId, normalizedEvent);
     }
 

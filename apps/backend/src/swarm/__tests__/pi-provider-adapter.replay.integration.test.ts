@@ -44,6 +44,34 @@ async function start(adapter: NonNullable<Awaited<ReturnType<typeof open>>["adap
 }
 
 describe("Pi provider adapter on the native production path", () => {
+  it("keeps the core run active through 429 retries and persists only the recovered row", async () => {
+    const limited: ReplayEntry = { type: "emit_inbound", frame: { status: 429, body: { error: {
+      message: "Rate limit reached for requests.", type: "requests", code: "rate_limit_exceeded",
+    } } } };
+    const peer = await createPiModelPeer(transcript([request("first"), limited, request("second"), limited,
+      request("third"), ...reply("Recovered core reply.")]));
+    const fixture = await createPiProjectionFixture(peer.baseUrl);
+    const live: Array<{ status: string; summary: string }> = [];
+    fixture.manager.on("timeline_activity", event => { if (event.item.kind === "status") live.push({ status: event.item.status, summary: event.item.summary }); });
+    try {
+      const commandId = "33333333-3333-4333-8333-333333333333";
+      await fixture.send(commandId, "Meet a rate limit and recover.");
+      await fixture.waitTerminal(commandId);
+      await fixture.manager.flushPendingPersistence();
+      const canonical = await fixture.canonical();
+      const summaries = canonical.filter(entry => entry.customType === "swarm_conversation_entry" && entry.data?.type === "activity_summary" && entry.data?.activity?.kind === "status");
+      expect(live.filter(row => row.status === "running").map(row => row.summary)).toEqual([
+        "Rate limited by the provider (429). Retrying (attempt 1)", "Rate limited by the provider (429). Retrying (attempt 2)",
+      ]);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].data.status).toBe("completed");
+      expect(summaries[0].data.displaySummary).toContain("Recovered after 2 retries");
+      expect(Object.values(fixture.state().runs).find(run => run.commandId === commandId)).toMatchObject({ state: "terminal", outcome: "completed" });
+      expect(peer.requests).toHaveLength(3);
+      await fixture.evidence({ live, canonical, requests: peer.requests.length, failures: peer.failures });
+    } finally { await fixture.cleanup(); await peer.close(); }
+  }, 30_000);
+
   it("projects a core-driven adapter start into canonical JSONL, statuses and exactly one end", async () => {
     const peer = await createPiModelPeer(transcript([request("core-start"), ...reply("Canonical adapter output.", "hold-core")]));
     const fixture = await createPiProjectionFixture(peer.baseUrl);
@@ -417,20 +445,25 @@ pi.on('tool_result', async () => { await fetch(${JSON.stringify(gateUrl)}); });`
 
   // Ways this can fail: a refused key or a rate limit is retried out of sight; the failure is reported more
   // than once, without its status, or in words the status row cannot turn into a plain sentence.
-  it("fails a rate-limited turn once, with the status the row needs", async () => {
-    // Through Forge, Pi does not retry this itself: one request, one failure.
-    const peer = await createPiModelPeer(transcript([request("start"),
-      { type: "emit_inbound", frame: { status: 429, body: { error: { message: "Rate limit reached for requests. Please try again in 20s.", type: "requests", code: "rate_limit_exceeded" } } } }]));
+  it.each([true, false])("reports bounded native rate-limit retries (recovers=%s)", async recovers => {
+    const limited: ReplayEntry = { type: "emit_inbound", frame: { status: 429, body: { error: {
+      message: "Rate limit reached for requests.", type: "requests", code: "rate_limit_exceeded",
+    } } } };
+    const peer = await createPiModelPeer(transcript([request("first"), limited, request("retry-1"), limited,
+      request("retry-2"), ...(recovers ? reply("Recovered from rate limit.") : [limited])]));
     const fixture = await createNativePiFixture(peer.baseUrl);
     try {
-      const { adapter, binding } = await open(fixture);
+      const { adapter, binding, session } = await open(fixture);
+      session.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 2, baseDelayMs: 1, provider: { maxRetries: 0 } } });
       const collected = collectPiObservations(adapter.observations(binding));
       await start(adapter, binding, "limited", "Meet a rate limit.");
-      expect(await collected.wait("limited:terminal")).toMatchObject({ type: "terminal", outcome: "failed" });
+      expect(await collected.wait("limited:terminal")).toMatchObject({ type: "terminal", outcome: recovers ? "completed" : "failed" });
+      const retries = collected.observations.filter(value => value.type === "retry");
+      expect(retries).toEqual([1, 2].map(attempt => expect.objectContaining({ attempt, maxAttempts: 2, message: expect.stringContaining("429") })));
       const errors = collected.observations.filter(value => value.type === "error");
-      expect(errors).toHaveLength(1);
-      expect(readableProviderError(errors[0]!.type === "error" ? errors[0]!.message : "")).toBe("The provider is rate limiting requests (429). Wait a moment, then send again.");
-      expect(peer.requests).toHaveLength(1);
+      expect(errors).toHaveLength(recovers ? 0 : 1);
+      expect(peer.requests).toHaveLength(3);
+      await fixture.evidence(`pi-rate-limit-${recovers ? "recovered" : "exhausted"}.json`, { observations: collected.observations, requests: peer.requests.length, failures: peer.failures });
       await adapter.close(binding); await collected.done;
       expect(peer.failures).toEqual([]);
     } finally { await fixture.cleanup(); await peer.close(); }
@@ -441,7 +474,8 @@ pi.on('tool_result', async () => { await fetch(${JSON.stringify(gateUrl)}); });`
       { type: "emit_inbound", frame: { status, body: { error: { message: status === 401 ? "Incorrect API key provided." : "This key may not use the requested model.", type: "invalid_request_error" } } } }]));
     const fixture = await createNativePiFixture(peer.baseUrl);
     try {
-      const { adapter, binding } = await open(fixture);
+      const { adapter, binding, session } = await open(fixture);
+      session.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 2, baseDelayMs: 1, provider: { maxRetries: 0 } } });
       const collected = collectPiObservations(adapter.observations(binding));
       await start(adapter, binding, "refused", "Use a refused key.");
       expect(await collected.wait("refused:terminal")).toMatchObject({ type: "terminal", outcome: "failed" });
