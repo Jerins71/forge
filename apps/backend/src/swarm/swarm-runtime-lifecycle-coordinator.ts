@@ -208,8 +208,8 @@ export class SwarmRuntimeLifecycleCoordinator {
 
   private readonly managerTurnWatchdog: ManagerTurnWatchdog;
   private readonly pendingManualStopNoticeTimers = new Map<string, NodeJS.Timeout>();
-  /** Keep an exhausted goal-backed manager idle until new work explicitly starts. */
-  private readonly goalContinuationSuppressedAfterRunaway = new Set<string>();
+  /** Keep a halted manager idle through maintenance until new work explicitly starts. */
+  private readonly goalContinuationSuppressed = new Set<string>();
 
   constructor(private readonly options: SwarmRuntimeLifecycleCoordinatorOptions) {
     this.managerTurnWatchdog = new ManagerTurnWatchdog({
@@ -241,7 +241,7 @@ export class SwarmRuntimeLifecycleCoordinator {
   detachRuntime(agentId: string, runtimeToken?: number): boolean {
     const detached = this.options.controller.detachRuntime(agentId, runtimeToken);
     if (detached) {
-      this.goalContinuationSuppressedAfterRunaway.delete(agentId);
+      this.goalContinuationSuppressed.delete(agentId);
       this.options.turnContext.discard(agentId);
       this.options.codexScopes.closeWorkerScope(agentId);
     }
@@ -249,7 +249,7 @@ export class SwarmRuntimeLifecycleCoordinator {
   }
 
   clearAgentState(agentId: string): void {
-    this.goalContinuationSuppressedAfterRunaway.delete(agentId);
+    this.goalContinuationSuppressed.delete(agentId);
     this.options.turnContext.clearAgentState(agentId);
   }
 
@@ -279,7 +279,7 @@ export class SwarmRuntimeLifecycleCoordinator {
     }
 
     this.options.turnContext.clearAgentState(input.agentId);
-    this.goalContinuationSuppressedAfterRunaway.delete(input.agentId);
+    this.goalContinuationSuppressed.delete(input.agentId);
     reconcileInterruptedManagerToolCalls({
       descriptor,
       now: this.options.now,
@@ -296,6 +296,11 @@ export class SwarmRuntimeLifecycleCoordinator {
     options?: RuntimeShutdownOptions,
   ): Promise<RuntimeShutdownResult> {
     return this.options.controller.runRuntimeShutdown(descriptor, action, options);
+  }
+
+  suppressGoalContinuation(agentId: string): void {
+    this.goalContinuationSuppressed.add(agentId);
+    this.options.goals.cancelScheduledContinuation(agentId);
   }
 
   async handleRuntimeStatus(
@@ -329,7 +334,7 @@ export class SwarmRuntimeLifecycleCoordinator {
     }
     if (status === "idle" && pendingCount === 0 && descriptor?.status === "idle" && isSessionManager(descriptor)) {
       await this.options.plans.finalizeUsage(descriptor);
-      if (!this.goalContinuationSuppressedAfterRunaway.has(agentId)) {
+      if (!this.goalContinuationSuppressed.has(agentId)) {
         this.options.goals.scheduleContinuation(descriptor);
       }
     }
@@ -361,7 +366,7 @@ export class SwarmRuntimeLifecycleCoordinator {
         (event?.type === "agent_end" && event.settledAssistantMessage !== undefined)
       )
     ) {
-      this.goalContinuationSuppressedAfterRunaway.delete(agentId);
+      this.goalContinuationSuppressed.delete(agentId);
     }
   }
 
@@ -385,8 +390,7 @@ export class SwarmRuntimeLifecycleCoordinator {
       error?.details?.runawayRecoveryExhausted === true &&
       error.details.queuedWorkWillContinue !== true
     ) {
-      this.goalContinuationSuppressedAfterRunaway.add(agentId);
-      this.options.goals.cancelScheduledContinuation(agentId);
+      this.suppressGoalContinuation(agentId);
     }
     if (!error || !shouldPreserveActiveTurnForRuntimeError(error)) {
       this.options.turnContext.handleRuntimeError(agentId);

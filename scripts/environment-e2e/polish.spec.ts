@@ -570,9 +570,19 @@ test('the header meter shows the provider\'s context usage, and /compact compact
     await page.keyboard.press('Enter')
     await expect(page.getByText(/still working/i).first()).toBeVisible({ timeout: 15_000 })
     await page.getByRole('button', { name: 'Stop', exact: true }).click()
-    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 30_000 }).not.toBe('running')
+    await expect.poll(async () => (await shellSession(sessionId, environment, session))?.status, { timeout: 30_000 }).toBe('stopped')
+    expect(await usage()).toBeUndefined()
+    // Stop released the runtime. Compact on its rebound binding and accept the
+    // thread's usage report even though it arrives after the compact terminal.
+    await composer(page).fill('/compact')
+    await page.keyboard.press('Enter')
+    await expect.poll(usage, { timeout: 30_000 }).toEqual({ tokens: 6_400, contextWindow: 128_000 })
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 5% full, 6.4K of 128K tokens used$/, { timeout: 30_000 })
+    await page.reload()
+    await expect.poll(usage, { timeout: 30_000 }).toEqual({ tokens: 6_400, contextWindow: 128_000 })
+    await expect(meter).toHaveAttribute('aria-label', /^Context window 5% full, 6.4K of 128K tokens used$/, { timeout: 30_000 })
     await shot(page, `context-meter-${environment === fleet.a ? 'local' : 'remote'}`)
-    results[environment.environmentId] = { sessionId, before: '25%', after: '5%' }
+    results[environment.environmentId] = { sessionId, before: '25%', after: '5%', afterStopCompact: '5%', usageAfterTerminal: true }
   }
   assertions.contextMeter = results
 })

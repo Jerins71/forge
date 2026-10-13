@@ -40,6 +40,23 @@ async function fixture(root: string, options: { prompt?: string; onEnd?: () => P
 }
 
 describe("Claude native lifecycle", () => {
+  it("updates context from a compact result without streamed message usage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-compact-meter-")); const f = await fixture(root);
+    try {
+      const compact = f.runtime.compact("Keep decisions");
+      await f.input.next();
+      const state = f.runtime.getCustomEntries(NATIVE_CLAUDE_STATE).at(-1) as { sessionId: string };
+      await f.emit({ type: "result", subtype: "success", is_error: false, result: "Compacted", duration_ms: 3,
+        duration_api_ms: 2, num_turns: 1, total_cost_usd: 0.001, usage: { input_tokens: 11, output_tokens: 2,
+        cache_read_input_tokens: 7, cache_creation_input_tokens: 3 }, modelUsage: { "claude-opus-5-5": {
+          inputTokens: 9000, outputTokens: 2000, cacheReadInputTokens: 10000, cacheCreationInputTokens: 5000,
+          contextWindow: 1000, costUSD: 1,
+        } }, permission_denials: [], uuid: "compact-result", session_id: state.sessionId });
+      await compact;
+      expect(f.runtime.getContextUsage()).toEqual({ tokens: 21, contextWindow: 1000, percent: 2.1 });
+    } finally { await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("kills a child that ignores close and SIGTERM, and reports stopped only after it has exited", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-hung-")); const events: RuntimeSessionEvent[] = [];
     let child!: ChildProcess; let output = ""; let waiting: ((result: IteratorResult<SDKMessage>) => void) | undefined; let ended = false;

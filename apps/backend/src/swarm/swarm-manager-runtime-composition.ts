@@ -325,6 +325,7 @@ export class SwarmManagerRuntimeComposition {
     const sessionLifecycle = this.createSessionLifecycle(
       lifecycle,
       projectExecutableTrust,
+      runtimeLifecycle,
       services,
     );
     const boot = this.createBoot(
@@ -649,6 +650,7 @@ export class SwarmManagerRuntimeComposition {
   private createSessionLifecycle(
     lifecycle: SwarmAgentLifecycleService,
     trust: ProjectExecutableTrustCoordinator,
+    runtimeLifecycle: SwarmRuntimeLifecycleCoordinator,
     services: SwarmManagerRuntimeBoundServices,
   ): SessionLifecycleCoordinator {
     const { events, sessions, runtimeResources, messaging } = this.options;
@@ -679,6 +681,7 @@ export class SwarmManagerRuntimeComposition {
       runtime: {
         resolveAndValidateCwd: runtimeResources.resolveAndValidateCwd,
         beforeResumeSession: (descriptor) => trust.applyPendingManagerRuntimeRecycleBeforeRuntimeUse(descriptor),
+        suppressGoalContinuation: (agentId) => runtimeLifecycle.suppressGoalContinuation(agentId),
         sendInitialMessage: async (creatorAgentId, targetAgentId, message) => {
           await messaging.sendMessage(creatorAgentId, targetAgentId, message, "auto");
         },

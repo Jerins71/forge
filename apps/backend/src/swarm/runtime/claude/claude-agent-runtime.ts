@@ -368,6 +368,14 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
       if (this.usage) this.usage = { ...this.usage, contextWindow: this.contextWindow,
         percent: this.usage.tokens / this.contextWindow * 100 };
     }
+    // Manual compact can finish without any streamed message_start. Use its real
+    // result usage; cumulative modelUsage above is for billing, not context size.
+    if (this.turnCompaction) {
+      const tokens = contextInputTokens(frame.usage);
+      const contextWindow = this.contextWindow ?? getCatalogContextWindow(this.descriptor.model.modelId, this.descriptor.model.provider) ?? 200_000;
+      this.usage = { tokens, contextWindow, percent: tokens / contextWindow * 100 };
+      await this.publishStatus();
+    }
     const success = !frame.is_error;
     this.providerOutcome = success ? "completed" : "failed";
     for (const event of this.mapper.finish(success && frame.subtype === "success" ? frame.result : undefined)) await this.emit(event);

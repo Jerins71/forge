@@ -308,8 +308,8 @@ export abstract class SwarmManagerFacade extends SwarmManagerControlFacade {
     return this.services.sessions.stopSession(agentId, options);
   }
 
-  resumeSession(agentId: string): ReturnType<SessionLifecycleCoordinator["resumeSession"]> {
-    return this.services.sessions.resumeSession(agentId);
+  resumeSession(agentId: string, options?: Parameters<SessionLifecycleCoordinator["resumeSession"]>[1]): ReturnType<SessionLifecycleCoordinator["resumeSession"]> {
+    return this.services.sessions.resumeSession(agentId, options);
   }
 
   deleteSession(agentId: string): ReturnType<SessionLifecycleCoordinator["deleteSession"]> {

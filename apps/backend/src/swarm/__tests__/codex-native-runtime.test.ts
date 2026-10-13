@@ -75,6 +75,19 @@ async function fixture(options: { model?: AgentDescriptor["model"]; root?: strin
 }
 
 describe("Native Codex manager", () => {
+  it("accepts thread context usage after compaction has no active turn", async () => {
+    const onStatusChange = vi.fn();
+    const f = await fixture({ onStatusChange });
+    try {
+      await f.notify("thread/tokenUsage/updated", { threadId: "native-thread", tokenUsage: {
+        total: { inputTokens: 500, outputTokens: 20, totalTokens: 520 },
+        last: { totalTokens: 120 }, modelContextWindow: 1000,
+      } });
+      expect(f.runtime.getContextUsage()).toEqual({ tokens: 120, contextWindow: 1000, percent: 12 });
+      expect(onStatusChange).toHaveBeenCalledWith("native-test", "idle", 0, { tokens: 120, contextWindow: 1000, percent: 12 });
+    } finally { await f.runtime.terminate(); }
+  });
+
   // Exit failures: idle status must stay legal; a throwing projection callback
   // must not escape the process-exit boundary as an unhandled rejection.
   it("projects an idle native process exit without an illegal idle-to-error transition", async () => {
