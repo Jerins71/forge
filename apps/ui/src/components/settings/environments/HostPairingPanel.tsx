@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { encode } from 'uqr'
 import { AlertTriangle, Copy, KeyRound, Link2, Loader2 } from 'lucide-react'
 import type { RpcOutput, Scope } from '@forge/protocol/environment-v2'
 import type { EnvironmentCatalogEntry } from '@forge/client-runtime'
@@ -162,6 +163,21 @@ function LoopbackWarning({ address, label }: { address: PairingAddress; label: s
   )
 }
 
+/** The pairing link as a QR code, so a phone can pair by scanning it. Drawn as one SVG path. */
+function PairingQrCode({ value }: { value: string }) {
+  const { path, size } = useMemo(() => {
+    const { data, size } = encode(value, { ecc: 'M', border: 2 })
+    let d = ''
+    data.forEach((row, y) => row.forEach((dark, x) => { if (dark) d += `M${x} ${y}h1v1h-1z` }))
+    return { path: d, size }
+  }, [value])
+  return (
+    <svg viewBox={`0 0 ${size} ${size}`} className="size-44 rounded-lg bg-white" shapeRendering="crispEdges" role="img" aria-label="Pairing QR code" data-testid="pairing-qr">
+      <path d={path} fill="#000" />
+    </svg>
+  )
+}
+
 function GrantResult({ grant, environmentLabel, onDone }: { grant: CreatedGrant; environmentLabel: string; onDone: () => void }) {
   const expiresAt = Date.parse(grant.expiresAt)
   const [now, setNow] = useState(() => Date.now())
@@ -194,7 +210,11 @@ function GrantResult({ grant, environmentLabel, onDone }: { grant: CreatedGrant;
       {grant.code ? (
         <div className="font-mono text-[28px] font-medium tracking-[0.22em] text-foreground" data-testid="pairing-code">{secret}</div>
       ) : (
-        <div className="break-all rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-2 font-mono text-[12px] text-foreground/90" data-testid="pairing-link">{secret}</div>
+        <>
+          <PairingQrCode value={secret} />
+          <p className="text-[12px] text-subtle-foreground">Scan with the Forge mobile app, or copy the link.</p>
+          <div className="break-all rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-2 font-mono text-[12px] text-foreground/90" data-testid="pairing-link">{secret}</div>
+        </>
       )}
       {grant.code ? (
         <p className="text-[12px] text-subtle-foreground">On the other device, enter this environment's address and the code.</p>
