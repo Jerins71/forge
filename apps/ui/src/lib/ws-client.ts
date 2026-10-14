@@ -425,11 +425,19 @@ export class ManagerWsClient {
     const commandId = this.intentCommandIds.get(key) ?? crypto.randomUUID()
     this.intentCommandIds.set(key, commandId)
     try {
-      let receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
+      let receipt: CommandReceipt
+      try {
+        receipt = await whenSettled(() => this.environmentClient!.request(method, { ...input, commandId } as RpcInput<M>))
+      } catch (error) {
+        // An unanswered request may still have been applied: its receipt, not the timeout, decides.
+        if (!(error instanceof EnvironmentRuntimeError) || error.code !== 'UNAVAILABLE') throw error
+        receipt = await this.environmentClient.request('command.get', { commandId }).catch(() => { throw error })
+      }
       const started = Date.now()
-      // A stop stays running while the environment waits for the runtime to exit, then succeeds or
-      // explains why it could not. Outwait that bound; reporting a slow exit as a failure would be false.
-      const deadline = started + (method === 'session.stop' || method === 'worker.kill' || method === 'worker.delete' ? 120_000 : 10_000)
+      // Stopping waits for the runtime to exit, and clear, delete and archive stop the session first.
+      // Outwait that bound; reporting a slow exit as a failure would be false.
+      const stops = ['session.stop', 'session.clear', 'session.delete', 'session.archive', 'worker.kill', 'worker.delete'].includes(method)
+      const deadline = started + (stops ? 120_000 : 10_000)
       while (receipt.state === 'accepted' || receipt.state === 'running') {
         if (Date.now() >= deadline) throw new EnvironmentRuntimeError('UNAVAILABLE', 'Session operation is still settling; retry to inspect its receipt', true)
         await new Promise(resolve => setTimeout(resolve, Date.now() - started < 10_000 ? 25 : 250))

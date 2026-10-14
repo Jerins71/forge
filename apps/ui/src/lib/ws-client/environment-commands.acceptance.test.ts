@@ -211,6 +211,20 @@ describe('session stop reporting', () => {
     expect(outcome).toBe('stopped')
     expect(new Set(server.inputs.filter(entry => entry.method === 'session.stop').map(entry => (entry.input as { commandId: string }).commandId)).size).toBe(1)
   })
+  it('reports a clear that finished after its request timed out as done, not failed', async () => {
+    const { server, facade } = await environment()
+    // The environment applied the clear but its answer never arrived in time.
+    let answered = false
+    server.transformOutbound = value => {
+      const frame = value as { type?: string; requestId?: string; output?: CommandReceipt }
+      if (answered || frame.output?.method !== 'session.clear' || frame.type !== 'result') return value
+      answered = true
+      return { type: 'error', requestId: frame.requestId, error: { code: 'UNAVAILABLE', message: 'Request timed out', retryable: true } }
+    }
+    await expect(facade.clearSession('session-1')).resolves.toEqual({ agentId: 'session-1' })
+    expect(server.inputs.some(entry => entry.method === 'command.get')).toBe(true)
+    expect(new Set(server.inputs.filter(entry => entry.method === 'session.clear').map(entry => (entry.input as { commandId: string }).commandId)).size).toBe(1)
+  })
   it('shows a stop failure only on its own session and drops it when another session is opened', async () => {
     const { facade } = await environment()
     facade.reportSessionError('session-2', 'Failed to stop session: runtime could not be confirmed stopped')

@@ -63,7 +63,8 @@ export class LogicalProjects extends KeyedSelectorStore<
   private add(ref: ProjectRef, p: ProjectSummary, changed: Set<string>): void {
     const physical = qualifiedKey(ref.environmentId, ref.projectId),
       override = this.overrides[physical]
-    const key = override?.key ?? p.repository?.key ?? physical
+    // An archived project stays out of its repository's live group: it is no place to start new work.
+    const key = override?.key ?? (p.archived ? physical : p.repository?.key) ?? physical
     const existing = this.mutable.get(key)
     this.projects.set(physical, p)
     this.membership.set(physical, key)
