@@ -68,7 +68,7 @@ export interface ManagerSelectionCatalogResponse {
 }
 
 /** Favorite models, by `provider::modelId` key, in the user's order. Shared by every client of a machine. */
-export interface ModelFavoritesResponse {
+export type ModelFavoritesResponse = {
   favorites: string[]
 }
 export const MODEL_FAVORITES_LIMITS = { maxFavorites: 64, maxKeyLength: 330 } as const
