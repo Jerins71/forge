@@ -58,6 +58,26 @@ describe("Claude native lifecycle", () => {
     } finally { await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
   });
 
+  // Stall detection must not read a finished reply that waits on its own background work as a hang,
+  // and must again once Claude resumes.
+  it("reports waiting on background work only between a finished reply and Claude resuming", async () => {
+    const root = await mkdtemp(join(tmpdir(), "forge-claude-background-wait-")); const f = await fixture(root);
+    const result = { type: "result", subtype: "success", is_error: false, result: "Waiting", duration_ms: 1, duration_api_ms: 1, num_turns: 1, total_cost_usd: 0, usage: { input_tokens: 1, output_tokens: 1 }, modelUsage: {} };
+    try {
+      await f.runtime.sendMessage("Work"); const input = (await f.input.next()).value!;
+      await f.emit({ type: "user", user_message_uuid: input.uuid, message: { role: "user", content: "Work" } });
+      expect(f.runtime.isAwaitingBackgroundWork()).toBe(false);
+      const hooks = f.setup.hooks as Record<string, Array<{ hooks: Array<(...args: any[]) => Promise<unknown>> }>>;
+      await hooks.Stop![0]!.hooks[0]!({ hook_event_name: "Stop", session_crons: [{ id: "later", recurring: false, schedule: "0 0 1 1 *", prompt: "Check" }] }, undefined, { signal: new AbortController().signal });
+      expect(f.runtime.isAwaitingBackgroundWork()).toBe(false);
+      await f.emit(result);
+      expect(f.runtime.getStatus()).toBe("streaming");
+      expect(f.runtime.isAwaitingBackgroundWork()).toBe(true);
+      await f.emit({ type: "stream_event", event: { type: "message_start", message: { id: "resume", usage: { input_tokens: 1 } } } });
+      expect(f.runtime.isAwaitingBackgroundWork()).toBe(false);
+    } finally { await f.runtime.stopInFlight(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("settles a scheduled wait as soon as its fired prompt arrives", async () => {
     const root = await mkdtemp(join(tmpdir(), "forge-claude-wake-fire-")); const f = await fixture(root);
     try {

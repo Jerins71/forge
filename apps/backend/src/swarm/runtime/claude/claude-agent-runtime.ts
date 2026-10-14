@@ -71,6 +71,8 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   private turnError?: string;
   private stopping = false;
   private interrupted = false;
+  /** Claude ended its reply; the turn is held open only until background work settles. */
+  private replyFinished = false;
   private closed = false;
   private pinned?: string;
   private previousCost = 0;
@@ -188,6 +190,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
   getPendingCount(): number { return this.sent.size + this.followUps.length; }
   hasPendingInputDispatch(): boolean { return this.getPendingCount() > 0; }
   getContextUsage(): AgentContextUsage | undefined { return this.usage; }
+  isAwaitingBackgroundWork(): boolean { return this.turnOpen && this.replyFinished && this.sent.size === 0 && this.mapper.hasBackgroundWork(); }
   getSystemPrompt(): string { return this.options.systemPrompt; }
   setPinnedContent(content: string | undefined): void { this.pinned = content; }
   getCustomEntries(type: string): unknown[] { return this.session.getEntries().filter(e => e.type === "custom" && e.customType === type).map(e => (e as { data: unknown }).data); }
@@ -327,6 +330,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
 
   private async handle(frame: SDKMessage): Promise<void> {
     if (this.stopping) return;
+    if (!("parent_tool_use_id" in frame && frame.parent_tool_use_id) && (frame.type === "assistant" || frame.type === "stream_event")) this.replyFinished = false;
     if (!("parent_tool_use_id" in frame && frame.parent_tool_use_id) && !this.turnOpen && !this.interrupted &&
       (frame.type === "assistant" || frame.type === "stream_event" && frame.event.type === "message_start")) {
       this.options.providerSession?.continueTurn(frame.uuid);
@@ -417,6 +421,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     const queued = [...this.sent.values()].filter(input => input.attemptId !== undefined).map(input => input.id);
     const stopped = this.interrupted || !success; this.interrupted = false;
     if (this.mapper.hasBackgroundWork() || (queued.length && !stopped)) {
+      this.replyFinished = true;
       if (queued.length && !stopped) this.boundQueuedInputs(queued);
       await this.publishStatus();
       return;

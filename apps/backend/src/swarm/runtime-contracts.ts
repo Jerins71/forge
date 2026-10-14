@@ -295,6 +295,8 @@ export interface SwarmAgentRuntime {
   hasPendingInputDispatch?(): boolean;
   setPinnedContent?(content: string | undefined, options?: SetPinnedContentOptions): void | Promise<void>;
   isContextRecoveryInProgress?(): boolean;
+  /** The reply is finished and the turn stays open only for the agent's own background commands or wake-ups. */
+  isAwaitingBackgroundWork?(): boolean;
   isContextRecoveryActive?(): boolean;
 
   sendMessage(

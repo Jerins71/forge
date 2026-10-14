@@ -57,6 +57,29 @@ it("observes controlled health deadlines without reconciling or retrying results
   await writeFile(path.join(evidenceDir, "worker-health.json"), JSON.stringify({ warningAtMs: 5 * 60_000, stopAtMs: 30 * 60_000, messages, terminations, parentState: loadState(f.db).runs.parent.state }, null, 2));
 });
 
+it("does not read a worker waiting on its own background work as stalled, and times a real stall from when it resumes", async () => {
+  const f = await fixture(); const messages: string[] = []; const terminations: string[] = [];
+  const corePort = { ...f.port, stopWorker: async (input: { managerId: string; workerId: string }) => { terminations.push(input.workerId); } };
+  // The one-time assignment review at ten minutes is not a stall verdict.
+  const stalls = () => messages.filter(message => message.includes("STALL"));
+  let waiting = true;
+  const runtimes = new Map([["worker", { isAwaitingBackgroundWork: () => waiting }]]) as never;
+  const health = new SwarmWorkerHealthService({ descriptors: f.descriptors, runtimes,
+    sendMessage: async (_from, _target, message) => { messages.push(message); }, publishToUser: async () => {},
+    saveStore: async () => {}, reportAttentionStatusTransition: async () => {}, emitAgentsSnapshot: () => {},
+    isRuntimeInContextRecovery: () => false, now: () => new Date(f.now()).toISOString(), logDebug: () => {},
+  });
+  health.installCoreAgentMessages(corePort);
+  health.workerStallState.set("worker", { lastProgressAt: f.now(), nudgeSent: false, nudgeSentAt: null, lastToolName: null, lastToolInput: null, lastToolOutput: null, lastDetailedReportAt: null });
+  // A 40-minute scheduled wait: no warning and no automatic stop.
+  for (let minute = 0; minute < 40; minute++) { f.advance(60_000); await health.checkForStalledWorkers(); }
+  expect(stalls()).toEqual([]); expect(terminations).toEqual([]);
+  // It resumes and then hangs: the warning comes five minutes after it resumed.
+  waiting = false;
+  f.advance(5 * 60_000 - 1); await health.checkForStalledWorkers(); expect(stalls()).toEqual([]);
+  f.advance(1); await health.checkForStalledWorkers(); expect(stalls()).toHaveLength(1);
+});
+
 it("never retries a possibly delivered health advisory after the sender loses its acknowledgement", async () => {
   const f = await fixture(); let attemptedMessages = 0;
   const health = new SwarmWorkerHealthService({ descriptors: f.descriptors, runtimes: new Map(),

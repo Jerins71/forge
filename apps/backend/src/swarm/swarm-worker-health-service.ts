@@ -411,7 +411,9 @@ export class SwarmWorkerHealthService {
         continue;
       }
 
-      if (this.isWorkerStallRecoveryActive(agentId, descriptor)) {
+      // Recovery and a finished reply waiting on its own background work are not stalls;
+      // the clock starts again when the worker resumes.
+      if (this.isWorkerStallRecoveryActive(agentId, descriptor) || this.options.runtimes.get(agentId)?.isAwaitingBackgroundWork?.() === true) {
         this.resetWorkerStallProgressDuringRecovery(agentId);
         continue;
       }
