@@ -134,6 +134,8 @@ Caps are applied with `min`, not replacement. The effective maximum is `min(adve
 
 For checked-in catalog models, overrides can reduce limits but never increase them above the checked-in catalog value. For user-added OpenRouter models, the advertised OpenRouter window is the ceiling; advertised metadata and max-output capability remain unchanged while the runtime request budget uses the effective context. OpenRouter manager-enabled and routing settings stay independent of the cap. A saved cap applies when an agent next starts; running agents keep their current snapshot.
 
+Native harnesses manage their own context, so Forge hands them the cap. Claude native runs Claude Code with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set to the cap, and its context meter shows at most the cap. Codex native starts each thread with `model_context_window` set to the cap and `model_auto_compact_token_limit` at 90% of it.
+
 ## Audit workflow
 
 When upgrading Pi model dependencies, run:

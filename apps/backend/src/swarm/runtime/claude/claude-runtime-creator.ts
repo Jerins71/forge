@@ -9,7 +9,7 @@ import type { SwarmToolHost } from "../../swarm-tool-host.js";
 import type { AgentDescriptor, SwarmConfig } from "../../types.js";
 import type { SkillMetadata } from "../../skills/skill-metadata-service.js";
 import { isInternalSessionPurpose, planRuntimeTools, bindRuntimeToolHost } from "../runtime-tool-plan.js";
-import { assertClaudeSetup, claudeRuntimeEnvironment, resolveClaudeExecutable } from "./claude-runtime-environment.js";
+import { assertClaudeSetup, claudeContextWindowEnvironment, claudeRuntimeEnvironment, resolveClaudeExecutable } from "./claude-runtime-environment.js";
 import { ClaudeAgentRuntime } from "./claude-agent-runtime.js";
 import { TaskNotesStore } from "../../task-notes-store.js";
 import { createTaskNotesTool } from "../../task-notes-tool.js";
@@ -65,7 +65,7 @@ export class ClaudeRuntimeCreator {
     const toolHostBinding = bindRuntimeToolHost({ descriptor, tools, forgeExtensionHost: this.deps.forgeExtensionHost,
       preparedForgeBindings: prepared, secureRuntimeBinding: options.creationOptions?.secureRuntimeBinding, mechanism: "in_process_mcp", scope: providerScope });
     const creationOptions = { ...options.creationOptions, providerScope, instructionBundle, toolHostBinding };
-    const env = await claudeRuntimeEnvironment(this.deps.config);
+    const env = { ...await claudeRuntimeEnvironment(this.deps.config), ...claudeContextWindowEnvironment(descriptor.model.modelId) };
     const executable = await resolveClaudeExecutable(process.env, process.platform, process.arch, this.deps.config.paths.dataDir);
     await assertClaudeSetup(executable, env, descriptor.cwd);
     const runtime = await ClaudeAgentRuntime.create({ descriptor, callbacks: options.callbacks,

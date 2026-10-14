@@ -25,7 +25,7 @@ import { ClaudeAgentRuntime } from "../runtime/claude/claude-agent-runtime.js";
 
 const nativeSetup = vi.hoisted(() => ({ env: {} as NodeJS.ProcessEnv, executable: "" }));
 vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({
-  claudeRuntimeEnvironment: async () => nativeSetup.env, resolveClaudeExecutable: async () => nativeSetup.executable, assertClaudeSetup: async () => {},
+  claudeRuntimeEnvironment: async () => nativeSetup.env, resolveClaudeExecutable: async () => nativeSetup.executable, assertClaudeSetup: async () => {}, claudeContextWindowEnvironment: () => ({}),
 }));
 
 const here = fileURLToPath(new URL("../runtime/claude/", import.meta.url));

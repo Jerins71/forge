@@ -6,7 +6,7 @@ import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { query, type Options as QueryOptions, type Query, type SDKMessage, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { getCatalogContextWindow } from "@forge/protocol";
+import { modelCatalogService } from "../../catalog/model-catalog-service.js";
 import type { ProviderScope, ProviderTurnRef } from "@forge/protocol";
 import { ProviderDispatchRejectedError, type ProviderBinding, type ProviderOpenInput } from "../provider-contract.js";
 import { createInstructionBundle, renderProviderInstructions } from "../instruction-bundle.js";
@@ -358,7 +358,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     if (frame.type === "stream_event" && frame.event.type === "message_start") {
       const usage = frame.event.message.usage;
       const tokens = contextInputTokens(usage);
-      const contextWindow = this.contextWindow ?? getCatalogContextWindow(this.descriptor.model.modelId, this.descriptor.model.provider) ?? 200_000;
+      const contextWindow = this.contextWindow ?? modelCatalogService.getEffectiveContextWindow(this.descriptor.model.modelId, this.descriptor.model.provider) ?? 200_000;
       this.usage = { tokens, contextWindow, percent: tokens / contextWindow * 100 }; await this.publishStatus();
     }
     if (frame.type !== "result") return;
@@ -377,7 +377,8 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     const nativeUsage = frame.modelUsage[this.descriptor.model.modelId]
       ?? (Object.keys(frame.modelUsage).length === 1 ? Object.values(frame.modelUsage)[0] : undefined);
     if (nativeUsage && Number.isFinite(nativeUsage.contextWindow) && nativeUsage.contextWindow > 0) {
-      this.contextWindow = nativeUsage.contextWindow;
+      // A user cap is the window Claude Code compacts against, so it is the one to show.
+      this.contextWindow = Math.min(nativeUsage.contextWindow, modelCatalogService.getContextWindowCap(this.descriptor.model.modelId, this.descriptor.model.provider) ?? Infinity);
       if (this.usage) this.usage = { ...this.usage, contextWindow: this.contextWindow,
         percent: this.usage.tokens / this.contextWindow * 100 };
     }
@@ -385,7 +386,7 @@ export class ClaudeAgentRuntime implements SwarmAgentRuntime {
     // result usage; cumulative modelUsage above is for billing, not context size.
     if (this.turnCompaction) {
       const tokens = contextInputTokens(frame.usage);
-      const contextWindow = this.contextWindow ?? getCatalogContextWindow(this.descriptor.model.modelId, this.descriptor.model.provider) ?? 200_000;
+      const contextWindow = this.contextWindow ?? modelCatalogService.getEffectiveContextWindow(this.descriptor.model.modelId, this.descriptor.model.provider) ?? 200_000;
       this.usage = { tokens, contextWindow, percent: tokens / contextWindow * 100 };
       await this.publishStatus();
     }

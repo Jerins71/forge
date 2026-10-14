@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { modelCatalogService } from "../../catalog/model-catalog-service.js";
 import { isAbsolute, win32 } from "node:path";
 import { access, stat } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -64,6 +65,12 @@ export async function claudeRuntimeEnvironment(config: SwarmConfig, source = pro
   }
   if (access.baseUrl) env.ANTHROPIC_BASE_URL = access.baseUrl;
   return env;
+}
+
+/** A user context window cap makes Claude Code compact against it instead of the model's full window. */
+export function claudeContextWindowEnvironment(modelId: string): NodeJS.ProcessEnv {
+  const cap = modelCatalogService.getContextWindowCap(modelId, "claude-native");
+  return cap ? { CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(cap) } : {};
 }
 
 export async function assertClaudeSetup(executable: string, env: NodeJS.ProcessEnv, cwd: string): Promise<void> {

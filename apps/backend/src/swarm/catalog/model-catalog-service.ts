@@ -249,6 +249,13 @@ export class ModelCatalogService {
     return this.getEffectiveContextWindow(modelId, provider);
   }
 
+  /** The user's context window cap for a catalog model, when it is below the model's own window. */
+  getContextWindowCap(modelId: string, provider?: string): number | undefined {
+    const model = this.getModel(modelId.trim(), provider);
+    const cap = model ? this.overrides[getOverrideKey(model)]?.contextWindowCap : undefined;
+    return model && cap !== undefined && cap < model.contextWindow ? cap : undefined;
+  }
+
   getEffectiveContextWindow(modelId: string, provider?: string): number | undefined {
     const normalizedModelId = modelId.trim();
     const model = this.getModel(normalizedModelId, provider);
