@@ -52,6 +52,8 @@ import type {
   SessionContextArtifacts,
   ChatArtifactReadRequest,
   ChatArtifactReadResponse,
+  MobilePushDevice,
+  MobilePushRegisterRequest,
 } from '@forge/protocol'
 import type {
   Method,
@@ -341,6 +343,12 @@ export interface EnvironmentFeatureClients {
     ): Promise<TerminalIssueTicketResponse>
   }
   browserEngine: ReturnType<typeof createBrowserEngineClient>
+  /** Expo push tokens owned by this paired device session. */
+  push: {
+    register(input: MobilePushRegisterRequest, signal?: AbortSignal): Promise<MobilePushDevice>
+    unregister(token: string, signal?: AbortSignal): Promise<boolean>
+    test(signal?: AbortSignal): Promise<{ ok: boolean; ticketId?: string; error?: string }>
+  }
 
 }
 export interface HttpFeatureTransport {
@@ -692,6 +700,13 @@ export function createFeatureClients(
         post(`/api/terminals/${encodeURIComponent(terminalId)}/ticket`, i),
     },
     browserEngine: createBrowserEngineClient(rpc),
+    push: {
+      register: async (input, signal) =>
+        (await send<{ device: MobilePushDevice }>('POST', '/api/mobile/push/register', input, signal)).device,
+      unregister: async (token, signal) =>
+        (await send<{ removed: boolean }>('POST', '/api/mobile/push/unregister', { token }, signal)).removed,
+      test: (signal) => send('POST', '/api/mobile/push/test', undefined, signal),
+    },
 
   }
 }
