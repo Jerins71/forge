@@ -496,10 +496,12 @@ export function createEnvironmentAccess({
       !row ||
       row.expiresAt <= clock() ||
       row.audience !== input.audience ||
-      row.origin !== input.origin ||
+      // A browser's ticket is bound to the origin that asked for it. A ticket asked for without an
+      // Origin came from a native client holding its own bearer token (browsers always send Origin
+      // on POST); its socket may name the address it dialed, as React Native sockets always do.
+      (row.origin !== null && (row.origin !== input.origin || !exposure.allowsOrigin(input.origin))) ||
       row.protocolVersion !== input.protocolVersion ||
-      row.environmentId !== identity.environmentId ||
-      !exposure.allowsOrigin(input.origin)
+      row.environmentId !== identity.environmentId
     )
       throw invalid();
     return principal(current(row.deviceId));

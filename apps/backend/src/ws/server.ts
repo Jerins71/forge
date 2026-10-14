@@ -850,11 +850,12 @@ export class SwarmWebSocketServer {
     try {
       if (!this.environment) throw new AccessError("UNAUTHENTICATED", "Environment authentication unavailable");
       this.environment.exposure.validateForwarding(request);
-      if (!this.environment.exposure.allowsOrigin(request.headers.origin ?? null)) throw new AccessError("FORBIDDEN", "Origin is not allowed");
+      // RPC sockets prove access with a ticket, and ticket consumption enforces its origin binding.
       if (requestUrl.pathname === "/api/v2/rpc") {
         await this.environmentTransport!.rpc.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
       }
+      if (!this.environment.exposure.allowsOrigin(request.headers.origin ?? null)) throw new AccessError("FORBIDDEN", "Origin is not allowed");
       if (this.terminalWsProxy?.canHandleUpgrade(requestUrl.pathname)) {
         await this.terminalWsProxy.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;

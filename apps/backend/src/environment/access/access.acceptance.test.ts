@@ -206,6 +206,28 @@ it("cookie mutations enforce CSRF and exact Origin; public descriptor and unclas
   expect(await (await fetch(`${h.base}/api/v2/environment`)).json()).not.toHaveProperty("projects");
 });
 
+it("a ticket issued without an Origin opens from a phone socket naming its own address; browser tickets stay bound to their origin", async () => {
+  // React Native's iOS and Android sockets always send Origin = the address they dial, which is neither
+  // the backend's base URL nor an allowlisted browser origin. Their ticket request carries no Origin.
+  const h = await harness();
+  const first = await paired(h);
+  const principal: Principal = { deviceSessionId: first.payload.deviceSession.deviceSessionId, scopes: new Set(all) };
+  const phoneOrigin = "http://my-mac.tailnet.ts.net:47287";
+
+  const native = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, null);
+  await expect(h.access.consumeWsTicket({ ticket: native.ticket, audience: "rpc", origin: phoneOrigin, protocolVersion: 2 }))
+    .resolves.toMatchObject({ deviceSessionId: principal.deviceSessionId });
+
+  const browser = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, "https://client.test");
+  await expect(h.access.consumeWsTicket({ ticket: browser.ticket, audience: "rpc", origin: phoneOrigin, protocolVersion: 2 }))
+    .rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  const browserNull = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, "https://client.test");
+  await expect(h.access.consumeWsTicket({ ticket: browserNull.ticket, audience: "rpc", origin: null, protocolVersion: 2 }))
+    .rejects.toMatchObject({ code: "UNAUTHENTICATED" });
+  await expect(h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, "https://evil.test"))
+    .rejects.toMatchObject({ code: "FORBIDDEN" });
+});
+
 it("tickets use real sockets, replay fails, revocation commits then closes resources and other devices survive", async () => {
   const h = await harness();
   const first = await paired(h);
