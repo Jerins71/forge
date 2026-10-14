@@ -137,6 +137,8 @@ export function createElectronDevelopmentSetupCommands({
     ]),
     ...streamDeckCommands,
     pnpmCommand('Protocol build', ['--filter', '@forge/protocol', 'build']),
+    // Electron main bundles the shared client from its build; keep it current on every start.
+    pnpmCommand('Client runtime build', ['--filter', '@forge/client-runtime', 'build']),
     nodeScript('Electron runtime verification', ['apps', 'electron', 'scripts', 'verify-electron-runtime.mjs']),
     nodeScript('Electron native preparation', ['apps', 'electron', 'scripts', 'prepare-dev-native.mjs']),
     nodeScript('Electron main-process build', ['apps', 'electron', 'esbuild.config.mjs']),
