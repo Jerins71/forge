@@ -67,6 +67,8 @@ const config = defineConfig(({ mode }) => {
         { find: /^@\//, replacement: `${uiSourceDir}/` },
         { find: /^@forge\/protocol\/environment-v2$/, replacement: resolve(uiRootDir, '../../packages/protocol/src/environment-v2.ts') },
         { find: /^@forge\/protocol$/, replacement: protocolSourceEntry },
+        // Like protocol: run the shared client from source, so a stale dist build can never shadow a fix.
+        { find: /^@forge\/client-runtime$/, replacement: resolve(uiRootDir, '../../packages/client-runtime/src/index.ts') },
       ],
     },
     plugins: [

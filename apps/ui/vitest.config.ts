@@ -12,6 +12,7 @@ export default defineConfig({
       { find: /^@\//, replacement: `${uiSourceDir}/` },
       { find: /^@forge\/protocol\/environment-v2$/, replacement: resolve(uiRootDir, '../../packages/protocol/src/environment-v2.ts') },
       { find: /^@forge\/protocol$/, replacement: protocolSourceEntry },
+      { find: /^@forge\/client-runtime$/, replacement: resolve(uiRootDir, '../../packages/client-runtime/src/index.ts') },
     ],
   },
   test: {
