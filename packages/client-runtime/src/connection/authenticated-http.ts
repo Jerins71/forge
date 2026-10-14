@@ -21,17 +21,6 @@ export function normalizeBaseUrl(value: string): string {
     url.hash
   )
     throw new Error('Invalid environment URL')
-  if (
-    url.protocol === 'http:' &&
-    !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)
-  )
-    throw new EnvironmentRuntimeError(
-      'UNAVAILABLE',
-      'HTTPS is required for remote environments',
-      false,
-      undefined,
-      'https-required',
-    )
   return url.origin
 }
 export class AuthenticatedHttp {
