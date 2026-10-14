@@ -228,6 +228,23 @@ it("a ticket issued without an Origin opens from a phone socket naming its own a
     .rejects.toMatchObject({ code: "FORBIDDEN" });
 });
 
+it("a shutting-down environment answers paired devices with a retryable 503, never a 401 that reads as revoked", async () => {
+  // Clients delete their credential on 401. During shutdown the access layer is disposed while the HTTP
+  // server still answers; a 401 there logged phones out on every Forge restart.
+  const h = await harness();
+  const device = await paired(h);
+  const headers = { Authorization: `Bearer ${device.payload.bearerToken}` };
+  const principal: Principal = { deviceSessionId: device.payload.deviceSession.deviceSessionId, scopes: new Set(all) };
+  const ticket = await h.access.issueWsTicket(principal, { audience: "rpc", protocolVersion: 2 }, null);
+  h.access.dispose();
+
+  const response = await fetch(`${h.base}/api/v2/access/session`, { headers });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ error: { code: "UNAVAILABLE", retryable: true } });
+  await expect(h.access.consumeWsTicket({ ticket: ticket.ticket, audience: "rpc", origin: null, protocolVersion: 2 }))
+    .rejects.toMatchObject({ code: "UNAVAILABLE", retryable: true });
+});
+
 it("tickets use real sockets, replay fails, revocation commits then closes resources and other devices survive", async () => {
   const h = await harness();
   const first = await paired(h);

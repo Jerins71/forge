@@ -75,6 +75,11 @@ export class AuthenticatedHttp {
       )
     return value
   }
+  /** Drops the in-memory credential so the next request reads the stored one (after purge or re-pairing). */
+  forget(): void {
+    this.credential = null
+    this.deviceSession = null
+  }
   async fetch(path: string, init: RequestInit = {}): Promise<Response> {
     return this.request(path, init)
   }
@@ -89,6 +94,11 @@ export class AuthenticatedHttp {
       new URL(path, this.entry.baseUrl).origin !== this.entry.baseUrl
     )
       throw new Error('Invalid feature endpoint')
+    // A feature call can come before the connection's first probe (an app registering for push at
+    // launch). Without the stored credential it would go out unauthenticated, and its 401 would be
+    // taken as revocation.
+    if (!this.credential && !this.ports.platform)
+      this.credential = await this.ports.credentials.load(this.entry.environmentId)
     const headers = new Headers(init.headers)
     headers.set(
       ENVIRONMENT_PROTOCOL_HEADER,

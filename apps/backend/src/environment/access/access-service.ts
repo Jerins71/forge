@@ -49,12 +49,15 @@ export class AccessError extends Error implements RpcError {
   }
 }
 const invalid = () => new AccessError("UNAUTHENTICATED", "Invalid or expired credential");
+/** Shutdown is not a credential verdict: clients delete their credential on 401, so say "retry". */
+const stopping = () => new AccessError("UNAVAILABLE", "Environment is restarting", true, 1_000);
 export function accessHttpStatus(error: unknown): number {
   return error instanceof AccessError
     ? ((
         {
           UNAUTHENTICATED: 401,
           FORBIDDEN: 403,
+          UNAVAILABLE: 503,
           RATE_LIMITED: 429,
           PROTOCOL_MISMATCH: 409,
           INVALID_INPUT: 400,
@@ -200,7 +203,7 @@ export function createEnvironmentAccess({
       throw new AccessError("RATE_LIMITED", "Pairing rate limit reached", true, Math.max(0, 60_000 - (now - row.start)));
   }
   function current(id: string): DeviceRow {
-    if (disposed) throw invalid();
+    if (disposed) throw stopping();
     const row = devices.get(id) ?? store.device(id);
     if (!row || row.revoked_at !== null || row.expires_at <= clock()) {
       devices.delete(id);
@@ -490,6 +493,7 @@ export function createEnvironmentAccess({
     return { ticket, expiresAt: new Date(expiresAt).toISOString() };
   }
   async function consumeWsTicket(input: { ticket: string; audience: "rpc"; origin: string | null; protocolVersion: number }) {
+    if (disposed) throw stopping();
     const hash = secretHash("ticket", input.ticket);
     const row = tickets.get(hash);
     tickets.delete(hash);
@@ -549,7 +553,7 @@ export function createEnvironmentAccess({
     label: string;
     scopes: Scope[];
   }): Principal {
-    if (disposed) throw invalid();
+    if (disposed) throw stopping();
     if (
       !input ||
       !["cli", "stream-deck"].includes(input.integration) ||

@@ -609,6 +609,7 @@ export class RuntimeEnvironmentClient implements EnvironmentClient {
     this.urls.clear()
     for (const release of this.platformAssets) release()
     await this.ports.credentials.delete(this.environmentId)
+    this.http.forget()
     await Promise.all([
       this.cacheWrite.catch(() => {}),
       this.pendingWrite.catch(() => {}),
