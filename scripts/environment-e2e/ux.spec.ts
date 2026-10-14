@@ -1,7 +1,7 @@
 // Core UX in the built UI against real backends and the scripted Codex peer: a new thread starts
 // from its composer, a worker preset persists, a spawned worker leaves one result in the manager chat (live and
 // after reload), admission never surfaces a "still settling" error, a running turn can be stopped from
-// the composer, and the session in view stays read and out of "Needs you".
+// the composer, and the session in view stays read but stays in "Needs you" until Done.
 //   pnpm exec playwright test scripts/environment-e2e/ux.spec.ts --config scripts/environment-e2e/playwright.config.ts --project=chromium
 import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
@@ -584,10 +584,11 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   await page.reload()
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
   await expect(transcript(page)).toContainText(/Ran \d+ commands?/)
+  // The finished turn the user sent waits in Needs you, even though its thread is open, until Done.
   await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
-  await expect(page.locator(`[data-testid="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(0)
+  await expect(page.locator(`[data-inbox-section="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(1)
   await shot(page, 'new-project-clean')
-  assertions.newProject = { sessionId, alerts: 0, needsYou: 0, providerTurnsBeforeSend: 0, firstReplyLiveAndReload: true, userTurnActivityRows: true }
+  assertions.newProject = { sessionId, alerts: 0, needsYouBeforeSend: 0, needsYouAfterTurn: 1, providerTurnsBeforeSend: 0, firstReplyLiveAndReload: true, userTurnActivityRows: true }
 })
 
 test('a running turn is stopped from the composer button and with Escape', async ({ page }) => {
@@ -622,22 +623,28 @@ test('a running turn is stopped from the composer button and with Escape', async
   assertions.stop = { button: true, escape: true, resumed: true }
 })
 
-test('the session in view stays read and out of Needs you across turns', async ({ page }) => {
+test('the session in view stays read, and stays in Needs you until Done', async ({ page }) => {
   const { a } = fleet
   await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(viewedSession())}`)
   await expect(transcript(page)).toBeVisible()
   expect(await page.evaluate(() => document.hasFocus())).toBe(true)
-  const state = async () => { const summary = await shellSession(a, viewedSession()); return { status: summary?.status, unread: summary?.unread, attention: summary?.attentionOccurrence ?? null } }
+  const state = async () => { const summary = await shellSession(a, viewedSession()); return { status: summary?.status, unread: summary?.unread, attention: summary?.attentionOccurrence?.reason ?? null } }
   for (const text of ['Viewed turn one', 'Viewed turn two', 'Viewed turn three']) {
     await send(page, text)
-    await expect.poll(state, { timeout: 30_000 }).toEqual({ status: 'idle', unread: 0, attention: null })
+    await expect.poll(state, { timeout: 30_000 }).toEqual({ status: 'idle', unread: 0, attention: 'work_settled' })
   }
-  // Attention is raised after the turn settles; it must not come back once the view has cleared it.
+  // Reading the thread never clears Needs you.
   await page.waitForTimeout(2_000)
-  expect(await state()).toEqual({ status: 'idle', unread: 0, attention: null })
+  expect(await state()).toEqual({ status: 'idle', unread: 0, attention: 'work_settled' })
   await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
-  await expect(page.locator(`[data-testid="needs-you"] [data-inbox-row$="::${viewedSession()}"]`)).toHaveCount(0)
-  await shot(page, 'viewed-session-read')
+  const done = page.locator('[data-inbox-section="needs-you"]').getByRole('button', { name: new RegExp(`^Mark .* done .*\\(${viewedSession()}\\)$`) })
+  await expect(done).toHaveCount(1)
+  await shot(page, 'viewed-session-needs-you')
+  await done.locator('..').hover()
+  await done.click()
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ status: 'idle', unread: 0, attention: null })
+  await expect(done).toHaveCount(0)
+  await shot(page, 'viewed-session-done')
   assertions.viewedSession = await state()
   expect(renderErrors).toEqual([])
 })

@@ -246,9 +246,9 @@ export class ManagerWsClient {
   }
 
   /**
-   * The session on screen is being read. While the page is visible and focused, its unread count and
-   * its "work finished" attention are cleared as they appear; streams never mark anything read.
-   * A decision or failure keeps its attention until the user acts on it.
+   * The session on screen is being read. While the page is visible and focused, its unread count is
+   * cleared as it appears; streams never mark anything read. Reading never clears Needs you: only
+   * Done/Clear dismisses an attention item.
    */
   private keepViewedSessionRead(): void {
     const client = this.environmentClient
@@ -264,9 +264,6 @@ export class ManagerWsClient {
       void send().then(() => true, () => false).then(done => { this.viewedSessionRequests.delete(key); if (done) this.keepViewedSessionRead() })
     }
     if (summary.unread > 0 && this.keptUnreadSessionId !== sessionId) clear(`read:${sessionId}`, () => this.sessionState('session.readState.set', { sessionId, read: true }))
-    const occurrence = summary.attentionOccurrence
-    if (occurrence && ['work_settled', 'plan_completed', 'work_graph_completed'].includes(occurrence.reason))
-      clear(`attention:${occurrence.attentionId}`, () => this.sessionState('session.attention.dismiss', { occurrenceIds: [occurrence.attentionId] }))
   }
 
   private async sessionState<M extends 'session.update' | 'session.message.pin' | 'session.pins.clear' | 'session.readState.set' | 'project.readState.clear' | 'session.attention.dismiss'>(method: M, input: Omit<RpcInput<M>, 'commandId'>): Promise<CommandReceipt> {
