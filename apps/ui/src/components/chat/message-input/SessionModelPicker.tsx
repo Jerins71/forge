@@ -26,24 +26,15 @@ import { formatReasoningLevel } from '@/lib/reasoning-level-labels'
 import { compareModelPickerRows, toModelPickerRow, type ModelPickerRow, type ModelPickerTab } from './model-picker-catalog'
 import { ClaudeIcon, OpenAIIcon } from './provider-icons'
 import { ProviderHandoffDialog } from './ProviderHandoffDialog'
+import { useSharedModelFavorites } from '@/lib/use-shared-model-favorites'
+import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import type { SessionModelPickerConfig } from './types'
-
-const FAVORITES_KEY = 'forge.modelPicker.favorites'
 
 function asManagerReasoningLevel(level: string): ManagerReasoningLevel {
   if (level === 'x-high') return 'xhigh'
   return MANAGER_REASONING_LEVELS.includes(level as ManagerReasoningLevel)
     ? level as ManagerReasoningLevel
     : 'high'
-}
-
-function readFavorites(): string[] {
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(FAVORITES_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter((key): key is string => typeof key === 'string') : []
-  } catch {
-    return []
-  }
 }
 
 function ProviderMark({ tab, className }: { tab: ModelPickerRow['tab']; className?: string }) {
@@ -175,6 +166,7 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
         <PopoverContent align="start" side="top" collisionPadding={12} className="w-[22rem] overflow-hidden p-0">
           {open ? (
             <ModelPickerPanel
+              favoritesClient={config.httpClientRef.current}
               rows={rows}
               currentKey={currentKey}
               initialTab={currentTab}
@@ -233,7 +225,8 @@ export function SessionModelPicker({ config }: { config: SessionModelPickerConfi
   )
 }
 
-function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetry, onSelect, projectDefault }: {
+function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetry, onSelect, projectDefault, favoritesClient }: {
+  favoritesClient: SettingsApiClient | null
   rows: ModelPickerRow[]
   currentKey: string
   initialTab: ModelPickerRow['tab']
@@ -243,7 +236,7 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
   onSelect: (row: ModelPickerRow) => void
   projectDefault: { label: string; onSelect: () => void } | null
 }) {
-  const [favorites, setFavorites] = useState(readFavorites)
+  const [favorites, toggleFavorite] = useSharedModelFavorites(favoritesClient)
   const favoriteSet = useMemo(() => new Set(favorites), [favorites])
   const [tab, setTab] = useState<ModelPickerTab>(() => (favorites.length > 0 ? 'favorites' : 'all'))
   const [query, setQuery] = useState('')
@@ -252,11 +245,6 @@ function ModelPickerPanel({ rows, currentKey, initialTab, loading, error, onRetr
   const [highlight, setHighlight] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const toggleFavorite = (key: string) => {
-    const next = favoriteSet.has(key) ? favorites.filter((candidate) => candidate !== key) : [...favorites, key]
-    setFavorites(next)
-    try { window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(next)) } catch { /* Favorites are a convenience. */ }
-  }
 
   const tabs = useMemo(() => {
     const present = new Set(rows.map((row) => row.tab))

@@ -66,3 +66,9 @@ export interface ManagerSelectionCatalogResponse {
   models: ManagerModelOption[]
   defaults: ManagerSelectionCatalogDefaults
 }
+
+/** Favorite models, by `provider::modelId` key, in the user's order. Shared by every client of a machine. */
+export interface ModelFavoritesResponse {
+  favorites: string[]
+}
+export const MODEL_FAVORITES_LIMITS = { maxFavorites: 64, maxKeyLength: 330 } as const

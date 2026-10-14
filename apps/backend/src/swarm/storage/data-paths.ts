@@ -437,6 +437,11 @@ export function getSharedMobileDevicesPath(dataDir: string): string {
   return join(getSharedStateDir(dataDir), "mobile-devices.json");
 }
 
+/** Favorite models (`provider::modelId`), shared by every client of this machine. */
+export function getSharedModelFavoritesPath(dataDir: string): string {
+  return join(getSharedConfigDir(dataDir), "model-favorites.json");
+}
+
 export function getSharedMobileNotificationPreferencesPath(dataDir: string): string {
   return join(getSharedConfigDir(dataDir), "mobile-notification-prefs.json");
 }

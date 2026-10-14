@@ -54,6 +54,7 @@ import type {
   ChatArtifactReadResponse,
   MobilePushDevice,
   MobilePushRegisterRequest,
+  ModelFavoritesResponse,
 } from '@forge/protocol'
 import type {
   Method,
@@ -272,6 +273,9 @@ export interface EnvironmentFeatureClients {
       profileId?: string,
       signal?: AbortSignal,
     ): Promise<ManagerSelectionCatalogResponse>
+    /** Favorite models shared by every client of this machine. */
+    favorites(signal?: AbortSignal): Promise<string[]>
+    setFavorites(favorites: readonly string[], signal?: AbortSignal): Promise<string[]>
   }
   settings: FeatureRequest
   sessions: {
@@ -611,6 +615,8 @@ export function createFeatureClients(
     models: {
       catalog: (p, s) =>
         get('/api/settings/manager-selection-catalog', { profileId: p }, s),
+      favorites: async (s) => (await json<ModelFavoritesResponse>('/api/settings/model-favorites', { signal: s })).favorites,
+      setFavorites: async (favorites, s) => (await send<ModelFavoritesResponse>('PUT', '/api/settings/model-favorites', { favorites }, s)).favorites,
     },
     settings: {
       fetch: settingsFetch,
