@@ -39,7 +39,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       const principal: Principal = { deviceSessionId: authenticated.deviceSessionId, scopes: authenticated.scopes, integration: authenticated.integration };
       server.handleUpgrade(request, socket, head, client => connect(client, principal));
     } catch (error) {
-      const wire = rpcError(error);
+      const wire = rpcError(error, "socket upgrade");
       const status = wire.code === "UNAUTHENTICATED" ? 401 : wire.code === "PROTOCOL_MISMATCH" ? 426 : 403;
       const body = JSON.stringify({ error: wire });
       socket.end(`HTTP/1.1 ${status} Rejected\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`);
@@ -161,7 +161,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
           }
         }
       } catch (error) {
-        if (!controller?.signal.aborted && live) queue.enqueue({ type: "error", requestId, error: rpcError(error) });
+        if (!controller?.signal.aborted && live) queue.enqueue({ type: "error", requestId, error: rpcError(error, method) });
       } finally { if (controller && pending.get(requestId)?.controller === controller) pending.delete(requestId); }
     }
 
@@ -181,7 +181,7 @@ export function createEnvironmentRpcServer(deps: RpcDependencies) {
       } catch (error) {
         if (!controller.signal.aborted && live) {
           queue.discard(id);
-          queue.enqueue({ type: "stream.error", subscriptionId: id, error: rpcError(error) });
+          queue.enqueue({ type: "stream.error", subscriptionId: id, error: rpcError(error, method) });
         }
       } finally {
         controller.abort();

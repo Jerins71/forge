@@ -41,6 +41,7 @@ export function classifyHttpRoute(inventory: readonly RouteInventoryEntry[], met
   return entries[0]!.access;
 }
 export function sendAccessError(response: ServerResponse, error: unknown): void {
+  if (!(error instanceof AccessError)) console.error("[http] environment request failed unexpectedly", error);
   const safe =
     error instanceof AccessError
       ? {
