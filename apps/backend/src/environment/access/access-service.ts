@@ -358,7 +358,8 @@ export function createEnvironmentAccess({
   async function pairingAddressInfo(p: Principal): Promise<RpcOutput<"access.pairing.address">> {
     authorize(p, ["access:admin"]);
     const address = await pairingAddress();
-    return { ...address, ...(address.loopbackOnly ? await detectExposureSuggestions() : { tailscaleUrl: null, lanAddresses: [] }) };
+    // Always report where this machine can be reached, so the user can pick the address a link names.
+    return { ...address, ...(await detectExposureSuggestions()) };
   }
   /** Local data-directory owner only (the local pairing channel). Never route this publicly. */
   async function createLocalGrant(input: LocalPairingRequest): Promise<LocalPairingResult> {

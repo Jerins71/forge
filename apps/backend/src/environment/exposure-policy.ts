@@ -117,9 +117,24 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
  * Addresses this machine could be reached on if it were exposed: its Tailscale HTTPS name and private
  * LAN IPv4 addresses. Hints for a loopback-only environment's pairing copy, never a pairing address.
  */
+/** The Mac App Store and standalone Tailscale apps do not put `tailscale` on PATH; their CLI lives in the bundle. */
+export const TAILSCALE_CLI_CANDIDATES = ["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"] as const;
+export async function tailscaleStatusJson(
+  exec: (file: string, args: string[]) => Promise<string> = async (file, args) =>
+    (await promisify(execFile)(file, args, { windowsHide: true, timeout: 2000 })).stdout,
+): Promise<string> {
+  let failure: unknown;
+  for (const file of TAILSCALE_CLI_CANDIDATES) {
+    try {
+      return await exec(file, ["status", "--json"]);
+    } catch (error) {
+      failure = error;
+    }
+  }
+  throw failure;
+}
 export async function detectExposureSuggestions(
-  run: () => Promise<string> = async () =>
-    (await promisify(execFile)("tailscale", ["status", "--json"], { windowsHide: true, timeout: 2000 })).stdout,
+  run: () => Promise<string> = () => tailscaleStatusJson(),
   interfaces: ReturnType<typeof networkInterfaces> = networkInterfaces(),
 ): Promise<{ tailscaleUrl: string | null; lanAddresses: string[] }> {
   let tailscaleUrl: string | null = null;

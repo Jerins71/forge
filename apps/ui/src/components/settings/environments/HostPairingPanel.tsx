@@ -39,6 +39,9 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
   const [error, setError] = useState<string | null>(null)
   const [grant, setGrant] = useState<CreatedGrant | null>(null)
   const remote = !target?.primary
+  const [chosenBaseUrl, setChosenBaseUrl] = useState<string | null>(null)
+  const addressChoices = useMemo(() => pairingAddressChoices(address), [address])
+  const linkBaseUrl = addressChoices.some((choice) => choice.baseUrl === chosenBaseUrl) ? chosenBaseUrl! : address?.baseUrl
 
   // A grant belongs to the environment that issued it; switching targets discards it. The environment
   // itself says which address its links name (only that one is accepted); an older one falls back to ours.
@@ -72,7 +75,7 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
         label: label.trim() || 'New device',
         scopes,
         expiresInSeconds: minutes * 60,
-        reachableBaseUrl: address.baseUrl,
+        reachableBaseUrl: linkBaseUrl ?? address.baseUrl,
       }))
     } catch (err) {
       setError(grantErrorMessage(err, targetLabel))
@@ -131,9 +134,23 @@ export function HostPairingPanel({ environments, targetEnvironmentId, onTargetCh
           </div>
           <div className="space-y-1.5">
             <Label>Address in the link</Label>
-            <div className="truncate rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-1.5 font-mono text-[12px] text-foreground/90" data-testid="pairing-address">
-              {address?.baseUrl ?? '…'}
-            </div>
+            {addressChoices.length > 1 ? (
+              <Select value={chosenBaseUrl ?? ''} onValueChange={setChosenBaseUrl}>
+                <SelectTrigger className="font-mono text-[12px]" data-testid="pairing-address" aria-label="Address in the link"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {addressChoices.map((choice) => (
+                    <SelectItem key={choice.baseUrl} value={choice.baseUrl}>
+                      <span className="font-mono text-[12px]">{choice.baseUrl}</span>
+                      <span className="ml-2 text-[11px] text-subtle-foreground">{choice.hint}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <div className="truncate rounded-lg border border-hairline bg-foreground/[0.04] px-3 py-1.5 font-mono text-[12px] text-foreground/90" data-testid="pairing-address">
+                {address?.baseUrl ?? '…'}
+              </div>
+            )}
             {address?.loopbackOnly ? <LoopbackWarning address={address} label={remote ? targetLabel : 'this machine'} /> : null}
           </div>
           <ScopePicker value={scopes} onChange={setScopes} legend="Permissions" />
@@ -161,6 +178,22 @@ function LoopbackWarning({ address, label }: { address: PairingAddress; label: s
       </p>
     </div>
   )
+}
+
+/**
+ * Addresses a link may name when the machine listens on every interface: the one it suggests, its
+ * Tailscale name (reachable from anywhere on the tailnet) and its LAN addresses, on the same port.
+ */
+function pairingAddressChoices(address: PairingAddress | null): { baseUrl: string; hint: string }[] {
+  if (!address || address.loopbackOnly) return address ? [{ baseUrl: address.baseUrl, hint: '' }] : []
+  const base = new URL(address.baseUrl)
+  const at = (host: string) => `${base.protocol}//${host}${base.port ? `:${base.port}` : ''}`
+  const choices = [
+    ...(address.tailscaleUrl ? [{ baseUrl: at(new URL(address.tailscaleUrl).hostname), hint: 'Tailscale' }] : []),
+    ...address.lanAddresses.map((ip) => ({ baseUrl: at(ip), hint: 'Local network' })),
+  ]
+  if (!choices.some((choice) => choice.baseUrl === address.baseUrl)) choices.unshift({ baseUrl: address.baseUrl, hint: '' })
+  return choices
 }
 
 /** The pairing link as a QR code, so a phone can pair by scanning it. Drawn as one SVG path. */

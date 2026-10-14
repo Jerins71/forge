@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { hostname, tmpdir } from "node:os";
 import { afterEach, expect, it, vi } from "vitest";
 import { defaultEnvironmentLabel, loadEnvironmentIdentity, recoverEnvironmentIdentity } from "./identity.js";
-import { createExposurePolicy, detectExposureSuggestions, enableTailscaleServe, disableOwnedTailscaleServe } from "./exposure-policy.js";
+import { createExposurePolicy, detectExposureSuggestions, enableTailscaleServe, disableOwnedTailscaleServe, tailscaleStatusJson } from "./exposure-policy.js";
 import { applyAccessMigrations } from "./access/access-migrations.js";
 import { loadConfiguredSqliteDatabaseConstructor } from "../sqlite-database-loader.js";
 import { getHostInstallationStateDir } from "../swarm/storage/data-paths.js";
@@ -132,5 +132,9 @@ it("suggests a loopback environment's Tailscale name and physical LAN addresses,
   const interfaces = { lo0: [{ ...nic("127.0.0.1"), internal: true }], en0: [nic("192.168.1.20"), { ...nic("fe80::1"), family: "IPv6" as const, scopeid: 0 }], utun4: [nic("10.8.0.2")], bridge100: [nic("10.211.55.2")], docker0: [nic("172.17.0.1")], en7: [nic("203.0.113.9")] };
   expect(await detectExposureSuggestions(async () => JSON.stringify({ Self: { DNSName: "dev1.tailnet.ts.net." } }), interfaces)).toEqual({ tailscaleUrl: "https://dev1.tailnet.ts.net", lanAddresses: ["192.168.1.20"] });
   expect(await detectExposureSuggestions(async () => { throw new Error("tailscale: not found"); }, {})).toEqual({ tailscaleUrl: null, lanAddresses: [] });
+  // The macOS app's CLI is found when `tailscale` is not on PATH.
+  const tried: string[] = [];
+  expect(await tailscaleStatusJson(async (file) => { tried.push(file); if (file === "tailscale") throw new Error("ENOENT"); return "{}"; })).toBe("{}");
+  expect(tried).toEqual(["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]);
   expect(await detectExposureSuggestions(async () => JSON.stringify({ Self: { DNSName: "bad name;rm" } }), {})).toMatchObject({ tailscaleUrl: null });
 });
