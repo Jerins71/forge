@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { isElectron } from '@/lib/electron-bridge'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
-import { checkMixedContent, normalizeHostUrl, normalizePairingCode, parsePairingLink } from './pairing-input'
+import { checkMixedContent, normalizeHostUrl, normalizePairingCode, parsePairingLink } from '@forge/client-runtime'
 import { SCOPE_LABELS } from './scope-labels'
 import { ScopePicker } from './ScopePicker'
 

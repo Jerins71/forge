@@ -12,3 +12,4 @@ export * from './receipts.js'
 
 export * from './feature-clients/browser-engine.js'
 export * from './config-sync.js'
+export * from './pairing-input.js'

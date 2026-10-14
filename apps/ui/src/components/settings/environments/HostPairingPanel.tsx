@@ -11,7 +11,7 @@ import { copyTextToClipboard } from '@/lib/clipboard'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { SettingsSection } from '../settings-row'
 import { environmentLabel } from './environment-runtime'
-import { formatPairingCode, isLoopbackBaseUrl } from './pairing-input'
+import { formatPairingCode, isLoopbackBaseUrl } from '@forge/client-runtime'
 import { ScopePicker } from './ScopePicker'
 
 type GrantKind = 'link' | 'code'

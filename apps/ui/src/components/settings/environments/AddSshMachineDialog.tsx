@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { useManagedHosts } from '@/lib/managed-hosts'
 import { useEnvironmentRegistry } from '@/lib/origin-store/environment-provider'
 import { ALL_SCOPES } from './environment-runtime'
-import { parsePairingLink } from './pairing-input'
+import { parsePairingLink } from '@forge/client-runtime'
 
 const PHASE_LABEL: Record<string, string> = {
   installing: 'Installing Forge on the machine…',

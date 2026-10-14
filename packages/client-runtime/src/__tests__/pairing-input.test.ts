@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { checkMixedContent, formatPairingCode, isLoopbackBaseUrl, normalizeHostUrl, normalizePairingCode, parsePairingLink } from './pairing-input'
+import { checkMixedContent, formatPairingCode, isLoopbackBaseUrl, normalizeHostUrl, normalizePairingCode, parsePairingLink } from '../pairing-input.js'
 
 const ENV = '0b5c7a7e-1d2f-4c3b-9a8e-112233445566'
 const GRANT = 'a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d'
