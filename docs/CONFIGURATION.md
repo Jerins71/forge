@@ -9,6 +9,7 @@ Forge is configured through environment variables, a `.env` file, and the dashbo
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FORGE_HOST` | `127.0.0.1` | Backend bind address. Set to `0.0.0.0` for network/remote access. |
+| `FORGE_UI_HMR` | `1` | Development UI only. `0` stops the running window from hot-updating when source files change, which keeps a window you rely on stable while agents work in its checkout. Changes then apply on the next start. Read from the shell or the repository-root `.env`. |
 | `FORGE_PORT` | `47187` (dev) / `47287` (prod) | Backend HTTP + WebSocket port. |
 | `FORGE_INSTALLATION_STATE_DIR` | OS user installation directory | Absolute override for isolated identity registry and Desktop installation manifest; isolated Desktop user-data launches set it automatically. Tests refuse the real host installation directory. |
 | `FORGE_DATA_DIR` | `~/.forge` (macOS/Linux) or `%LOCALAPPDATA%\forge` (Windows) | Data directory for all persistent state. |

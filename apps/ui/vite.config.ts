@@ -36,6 +36,9 @@ function parsePort(value: string | undefined): number | undefined {
 
 const config = defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  // FORGE_UI_HMR=0 (shell or repository-root .env) keeps a running window from hot-patching when files
+  // change, e.g. when agents work in the checkout the window runs from. Changes apply on the next start.
+  const hotUpdates = parseBooleanFlag(process.env.FORGE_UI_HMR ?? loadEnv(mode, resolve(uiRootDir, '../..'), 'FORGE_UI_').FORGE_UI_HMR ?? 'true')
   const host = process.env.FORGE_HOST ?? process.env.MIDDLEMAN_HOST ?? env.MIDDLEMAN_HOST ?? '127.0.0.1'
   const disableTanStackDevtools = parseBooleanFlag(
     process.env.FORGE_DISABLE_TANSTACK_DEVTOOLS ??
@@ -52,6 +55,7 @@ const config = defineConfig(({ mode }) => {
     base: mode === 'production' ? './' : '/',
     server: {
       host,
+      ...(hotUpdates ? {} : { hmr: false, watch: null }),
     },
     preview: {
       host,
