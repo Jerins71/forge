@@ -850,12 +850,16 @@ export class SwarmWebSocketServer {
     try {
       if (!this.environment) throw new AccessError("UNAUTHENTICATED", "Environment authentication unavailable");
       this.environment.exposure.validateForwarding(request);
-      // RPC sockets prove access with a ticket, and ticket consumption enforces its origin binding.
+      const origin = request.headers.origin ?? null;
+      // React Native sockets always send Origin = the address they dialed, which is this request's own
+      // origin. RPC sockets still need a ticket, and ticket consumption enforces its origin binding.
+      const ownOrigin = origin !== null && origin === `${this.environment.exposure.secure ? "https" : "http"}://${request.headers.host}`;
+      if (!this.environment.exposure.allowsOrigin(origin) && !(requestUrl.pathname === "/api/v2/rpc" && ownOrigin))
+        throw new AccessError("FORBIDDEN", "Origin is not allowed");
       if (requestUrl.pathname === "/api/v2/rpc") {
         await this.environmentTransport!.rpc.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
       }
-      if (!this.environment.exposure.allowsOrigin(request.headers.origin ?? null)) throw new AccessError("FORBIDDEN", "Origin is not allowed");
       if (this.terminalWsProxy?.canHandleUpgrade(requestUrl.pathname)) {
         await this.terminalWsProxy.handleUpgrade(request, socket, head, requestUrl.pathname);
         return;
