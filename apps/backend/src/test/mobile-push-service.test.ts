@@ -128,150 +128,117 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+const ENVIRONMENT_ID = '7d1c2c51-5b0e-4f8e-9a51-0e0b6f7f2a10'
+
+/** Device sessions the fake access layer considers paired and unexpired. */
+function createService(
+  manager: FakeSwarmManager,
+  dataDir: string,
+  activeDeviceSessions: Set<string>,
+  send = vi.fn(async () => ({ ok: true, retryable: false, ticketId: 'ticket' })),
+) {
+  const service = new MobilePushService({
+    swarmManager: manager as unknown as SwarmManager,
+    dataDir,
+    expoPushClient: { send, getReceipts: vi.fn(async () => ({})) } as unknown as ExpoPushClient,
+    environmentId: () => ENVIRONMENT_ID,
+    isDeviceSessionActive: (id) => activeDeviceSessions.has(id),
+    receiptPollIntervalMs: 60_000,
+  })
+  return { service, send }
+}
+
+function sentTokens(send: ReturnType<typeof vi.fn>): string[] {
+  return send.mock.calls.map((call) => (call[0] as { to: string }).to).sort()
+}
+
 describe('MobilePushService', () => {
-  it('pushes a Needs-you attention with contextual session titles, reason copy and routing data', async () => {
+  it('pushes a Needs-you attention with session titles and V2 routing data', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
     const manager = new FakeSwarmManager(
-      [
-        {
-          ...createManagerDescriptor(),
-          sessionLabel: 'Release Notes',
-        },
-      ],
+      [{ ...createManagerDescriptor(), sessionLabel: 'Release Notes' }],
       [createTestProfile('profile-a', 'Forge')],
     )
-
-    const sendMock = vi.fn(async () => ({ ok: true, retryable: false, ticketId: 'ticket-1' }))
-    const receiptsMock = vi.fn(async () => ({}))
-
-    const service = new MobilePushService({
-      swarmManager: manager as unknown as SwarmManager,
-      dataDir,
-      expoPushClient: {
-        send: sendMock,
-        getReceipts: receiptsMock,
-      } as unknown as ExpoPushClient,
-      isSessionActive: () => false,
-      receiptPollIntervalMs: 60_000,
-    })
-
-    await service.registerDevice({
-      token: 'ExpoPushToken[test-device]',
-      platform: 'ios',
-      deviceName: 'iPhone',
-    })
+    const { service, send } = createService(manager, dataDir, new Set(['device-a']))
+    await service.registerDevice('device-a', { token: 'ExpoPushToken[a]', platform: 'ios', deviceName: 'iPhone' })
 
     await service.start()
     emitAttention(manager, 'manager')
-
-    await waitForCondition(() => sendMock.mock.calls.length === 1)
+    await waitForCondition(() => send.mock.calls.length === 1)
     await service.stop()
 
-    expect(sendMock).toHaveBeenCalledTimes(1)
-
-    const calls = sendMock.mock.calls as unknown as Array<Array<unknown>>
-    const payload = (calls[0]?.[0] as Record<string, unknown> | undefined) ?? {}
-    expect(calls[0]).toBeDefined()
-    expect(payload.to).toBe('ExpoPushToken[test-device]')
+    const payload = send.mock.calls[0]![0] as unknown as Record<string, unknown>
+    expect(payload.to).toBe('ExpoPushToken[a]')
     expect(payload.title).toBe('Forge / Release Notes')
     expect(payload.body).toBe('Finished — ready for you')
     const data = payload.data as Record<string, unknown>
-    expect(data.reason).toBeUndefined()
-    expect(data.eventId).toMatch(/^attention-/)
-    expect(payload.data).toMatchObject({
-      v: 1,
+    expect(data).toEqual({
+      v: 2,
       type: 'attention',
-      agentId: 'manager',
-      sessionAgentId: 'manager',
-      profileId: 'profile-a',
-      route: '/profiles/profile-a/sessions/manager',
+      environmentId: ENVIRONMENT_ID,
+      projectId: 'profile-a',
+      sessionId: 'manager',
+      eventId: expect.stringMatching(/^attention-/),
     })
   })
 
-  it('reloads persisted origin records after restart and keeps legacy records fail-closed without origin', async () => {
+  it('stops pushing to a revoked or expired device session and never pushes to records without one', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
     const manager = new FakeSwarmManager([createManagerDescriptor()])
-    const sendMock = vi.fn(async () => ({ ok: true, retryable: false, ticketId: 'ticket-restart-1' }))
+    const active = new Set(['device-a', 'device-b'])
+    const first = createService(manager, dataDir, active)
+    await first.service.registerDevice('device-a', { token: 'ExpoPushToken[a]', platform: 'ios' })
+    await first.service.registerDevice('device-b', { token: 'ExpoPushToken[b]', platform: 'android' })
+    await first.service.stop()
 
-    const firstService = new MobilePushService({
-      swarmManager: manager as unknown as SwarmManager,
-      dataDir,
-      expoPushClient: {
-        send: sendMock,
-        getReceipts: vi.fn(async () => ({})),
-      } as unknown as ExpoPushClient,
-      isSessionActive: () => false,
-      receiptPollIntervalMs: 60_000,
-    })
-    await firstService.registerDevice({
-      token: 'ExpoPushToken[persisted-origin]',
-      platform: 'ios',
-      deviceName: 'Persisted Phone',
-      originId: 'server-persisted',
-    })
-    await firstService.stop()
-
+    // A Forge 1 registration carries no paired device session.
     const devicesPath = getSharedMobileDevicesPath(dataDir)
-    const existing = JSON.parse(await readFile(devicesPath, 'utf8')) as {
-      version: number
-      updatedAt: string
-      devices: Array<Record<string, unknown>>
-    }
-    existing.devices.push({
-      token: 'ExpoPushToken[legacy-device]',
-      platform: 'ios',
-      deviceName: 'Legacy Phone',
-      registeredAt: '2026-01-01T00:00:00.000Z',
-      enabled: true,
-    })
-    await writeFile(devicesPath, JSON.stringify(existing), 'utf8')
+    const file = JSON.parse(await readFile(devicesPath, 'utf8')) as { devices: Array<Record<string, unknown>> }
+    file.devices.push({ token: 'ExpoPushToken[legacy]', platform: 'ios', deviceName: 'Legacy', registeredAt: '2026-01-01T00:00:00.000Z', enabled: true })
+    await writeFile(devicesPath, JSON.stringify(file), 'utf8')
 
-    const restarted = new MobilePushService({
-      swarmManager: manager as unknown as SwarmManager,
-      dataDir,
-      expoPushClient: {
-        send: sendMock,
-        getReceipts: vi.fn(async () => ({})),
-      } as unknown as ExpoPushClient,
-      isSessionActive: () => false,
-      receiptPollIntervalMs: 60_000,
-    })
-
-    await restarted.start()
+    const restarted = createService(manager, dataDir, active)
+    await restarted.service.start()
     emitAttention(manager, 'manager')
+    await waitForCondition(() => restarted.send.mock.calls.length === 2)
+    expect(sentTokens(restarted.send)).toEqual(['ExpoPushToken[a]', 'ExpoPushToken[b]'])
 
-    await waitForCondition(() => sendMock.mock.calls.length === 2)
-    await restarted.stop()
-
-    const payloads = sendMock.mock.calls.map((call) => call[0] as Record<string, unknown>)
-    const persisted = payloads.find((payload) => payload.to === 'ExpoPushToken[persisted-origin]')
-    const legacy = payloads.find((payload) => payload.to === 'ExpoPushToken[legacy-device]')
-    expect((persisted?.data as Record<string, unknown>).originId).toBe('server-persisted')
-    expect((legacy?.data as Record<string, unknown>).originId).toBeUndefined()
+    active.delete('device-b')
+    restarted.send.mockClear()
+    emitAttention(manager, 'manager')
+    await waitForCondition(() => restarted.send.mock.calls.length === 1)
+    await flushAsync()
+    await restarted.service.stop()
+    expect(sentTokens(restarted.send)).toEqual(['ExpoPushToken[a]'])
   })
 
-  it('rejects credential-bearing URL origin identities instead of storing them on the device record', async () => {
+  it('moves a token to the device session that registers it last; only the owner unregisters it', async () => {
     const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
     const manager = new FakeSwarmManager([createManagerDescriptor()])
-    const service = new MobilePushService({
-      swarmManager: manager as unknown as SwarmManager,
-      dataDir,
-      expoPushClient: {
-        send: vi.fn(async () => ({ ok: true, retryable: false, ticketId: 'ticket-url' })),
-        getReceipts: vi.fn(async () => ({})),
-      } as unknown as ExpoPushClient,
-      isSessionActive: () => false,
-      receiptPollIntervalMs: 60_000,
-    })
+    const { service } = createService(manager, dataDir, new Set(['device-a', 'device-b']))
 
-    await expect(
-      service.registerDevice({
-        token: 'ExpoPushToken[url-origin]',
-        platform: 'ios',
-        deviceName: 'Phone',
-        originId: 'http://user:secret@host.test',
-      }),
-    ).rejects.toThrow(/origin identity, not a URL/)
+    await service.registerDevice('device-a', { token: 'ExpoPushToken[shared]', platform: 'ios' })
+    const moved = await service.registerDevice('device-b', { token: 'ExpoPushToken[shared]', platform: 'ios' })
+    expect(moved.deviceSessionId).toBe('device-b')
+
+    expect(await service.unregisterDevice('device-a', { token: 'ExpoPushToken[shared]' })).toBe(false)
+    expect(await service.unregisterDevice('device-b', { token: 'ExpoPushToken[shared]' })).toBe(true)
+    await service.stop()
+  })
+
+  it('sends a test push only to the calling device session', async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), 'mobile-push-service-'))
+    const manager = new FakeSwarmManager([createManagerDescriptor()])
+    const { service, send } = createService(manager, dataDir, new Set(['device-a', 'device-b']))
+    await service.registerDevice('device-a', { token: 'ExpoPushToken[a]', platform: 'ios' })
+    await service.registerDevice('device-b', { token: 'ExpoPushToken[b]', platform: 'ios' })
+
+    const result = await service.sendTestNotification('device-a')
+    expect(result.ok).toBe(true)
+    expect(sentTokens(send)).toEqual(['ExpoPushToken[a]'])
+    expect((send.mock.calls[0]![0] as { data: Record<string, unknown> }).data).toEqual({ v: 2, type: 'test', environmentId: ENVIRONMENT_ID })
+
+    expect((await service.sendTestNotification('device-c')).ok).toBe(false)
     await service.stop()
   })
 })

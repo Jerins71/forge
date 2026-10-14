@@ -415,6 +415,8 @@ export class SwarmWebSocketServer {
       swarmManager: this.swarmManager,
       dataDir: this.swarmManager.getConfig().paths.dataDir,
       notificationSettingsService: this.notificationSettingsService,
+      environmentId: () => this.environment?.descriptor().environmentId,
+      isDeviceSessionActive: (id) => this.environment?.access.isDeviceSessionActive(id) ?? false,
     });
     this.controlPidFile = getControlPidFilePath(
       this.swarmManager.getConfig().paths.rootDir,

@@ -210,6 +210,12 @@ export function createEnvironmentAccess({
     devices.set(id, row);
     return row;
   }
+  /** Non-throwing liveness check for state keyed by a device session, such as push tokens. */
+  function isDeviceSessionActive(id: string): boolean {
+    if (disposed) return false;
+    const row = devices.get(id) ?? store.device(id);
+    return !!row && row.revoked_at === null && row.expires_at > clock();
+  }
   function principal(row: DeviceRow): Principal {
     const mapping = row.kind === "cli" ? database.prepare("SELECT integration FROM integration_device_sessions WHERE device_session_id=?").get(row.device_session_id) as { integration: "cli" | "stream-deck" } | undefined : undefined;
     return { deviceSessionId: row.device_session_id, scopes: new Set(JSON.parse(row.scopes_json) as Scope[]), ...(row.kind === "cli" ? { integration: mapping?.integration ?? "cli" } : {}) };
@@ -644,6 +650,7 @@ export function createEnvironmentAccess({
     createGrant,
     listDevices,
     revokeDevice,
+    isDeviceSessionActive,
     consumeWsTicket,
     registerResource,
     issueWsTicket,

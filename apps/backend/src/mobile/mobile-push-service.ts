@@ -1,6 +1,7 @@
 import {
   MOBILE_PUSH_ANDROID_CHANNEL_ID,
   MOBILE_PUSH_DATA_VERSION,
+  type MobilePushData,
   type MobilePushDevice,
   type ServerEvent,
   type SessionAttention,
@@ -40,7 +41,6 @@ interface AgentRoutingContext {
   agentDisplayName: string;
   sessionDisplayName: string;
   projectDisplayName?: string;
-  route: string;
 }
 
 interface PendingReceiptRecord {
@@ -52,7 +52,8 @@ export class MobilePushService {
   private readonly swarmManager: SwarmManager;
   private readonly store: MobilePushStore;
   private readonly expoPushClient: ExpoPushClient;
-  private readonly isSessionActive: (sessionAgentId: string) => boolean;
+  private readonly environmentId: () => string | undefined;
+  private readonly isDeviceSessionActive: (deviceSessionId: string) => boolean;
   private readonly notificationSettingsService: NotificationSettingsService;
   private readonly receiptPollIntervalMs: number;
   private readonly sendRetryBackoffMs: readonly number[];
@@ -80,7 +81,10 @@ export class MobilePushService {
   constructor(options: {
     swarmManager: SwarmManager;
     dataDir: string;
-    isSessionActive?: (sessionAgentId: string) => boolean;
+    /** The environment pushes are delivered for; nothing is pushed until it is known. */
+    environmentId: () => string | undefined;
+    /** Whether the paired device session that registered a token is still active. */
+    isDeviceSessionActive: (deviceSessionId: string) => boolean;
     notificationSettingsService?: NotificationSettingsService;
     expoPushClient?: ExpoPushClient;
     now?: () => Date;
@@ -90,7 +94,8 @@ export class MobilePushService {
     this.swarmManager = options.swarmManager;
     this.store = new MobilePushStore({ dataDir: options.dataDir, now: options.now });
     this.expoPushClient = options.expoPushClient ?? new ExpoPushClient();
-    this.isSessionActive = options.isSessionActive ?? (() => false);
+    this.environmentId = options.environmentId;
+    this.isDeviceSessionActive = options.isDeviceSessionActive;
     this.notificationSettingsService =
       options.notificationSettingsService ?? new NotificationSettingsService({ dataDir: options.dataDir, now: options.now });
     this.receiptPollIntervalMs = options.receiptPollIntervalMs ?? DEFAULT_RECEIPT_POLL_INTERVAL_MS;
@@ -134,35 +139,24 @@ export class MobilePushService {
     }
   }
 
-  async registerDevice(payload: unknown): Promise<MobilePushDevice> {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error("Request body must be a JSON object");
-    }
-
-    const maybe = payload as {
+  async registerDevice(deviceSessionId: string, payload: unknown): Promise<MobilePushDevice> {
+    const maybe = requireObject(payload) as {
       token?: unknown;
       platform?: unknown;
       deviceName?: unknown;
       enabled?: unknown;
-      originId?: unknown;
     };
 
-    return this.store.registerDevice({
+    return this.store.registerDevice(deviceSessionId, {
       token: maybe.token,
       platform: maybe.platform,
       deviceName: maybe.deviceName,
       enabled: maybe.enabled,
-      originId: maybe.originId,
     });
   }
 
-  async unregisterDevice(payload: unknown): Promise<boolean> {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error("Request body must be a JSON object");
-    }
-
-    const maybe = payload as { token?: unknown };
-    return this.store.unregisterDevice(maybe.token);
+  async unregisterDevice(deviceSessionId: string, payload: unknown): Promise<boolean> {
+    return this.store.unregisterDevice(deviceSessionId, (requireObject(payload) as { token?: unknown }).token);
   }
 
   async getNotificationPreferences(): Promise<MobileNotificationPreferences> {
@@ -178,67 +172,32 @@ export class MobilePushService {
     return this.store.updatePreferences(maybe);
   }
 
-  async sendTestNotification(payload: unknown): Promise<{
+  /** Sends a test push to the enabled tokens the calling device session registered. */
+  async sendTestNotification(deviceSessionId: string): Promise<{
     ok: boolean;
     ticketId?: string;
     error?: string;
   }> {
-    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-      throw new Error("Request body must be a JSON object");
+    const environmentId = this.environmentId();
+    const tokens = (await this.store.getEnabledDevices())
+      .filter((device) => device.deviceSessionId === deviceSessionId)
+      .map((device) => device.token);
+    if (!environmentId || tokens.length === 0) {
+      return { ok: false, error: "This device has no push token registered" };
     }
 
-    const maybe = payload as {
-      token?: unknown;
-      title?: unknown;
-      body?: unknown;
-      route?: unknown;
-      profileId?: unknown;
-      agentId?: unknown;
-      originId?: unknown;
-    };
-
-    const token = normalizeRequiredString(maybe.token, "token");
-    const title = normalizeOptionalString(maybe.title) ?? DEFAULT_PUSH_TITLE;
-    const body = normalizeOptionalString(maybe.body) ?? DEFAULT_TEST_BODY;
-    const profileId = normalizeOptionalString(maybe.profileId) ?? "mobile";
-    const agentId = normalizeOptionalString(maybe.agentId) ?? "mobile";
-    const requestedOriginId = normalizeOptionalString(maybe.originId);
-    const devices = await this.store.listDevices();
-    const registeredDevice = devices.find((device) => device.token === token);
-    const originId = requestedOriginId ?? registeredDevice?.originId;
-    const route =
-      normalizeOptionalString(maybe.route) ??
-      buildSessionRoute({
-        profileId,
-        sessionAgentId: agentId
+    let last: { ok: boolean; ticketId?: string; error?: string } = { ok: false };
+    for (const token of tokens) {
+      last = await this.sendToDeviceWithRetry(token, {
+        title: DEFAULT_PUSH_TITLE,
+        body: DEFAULT_TEST_BODY,
+        sound: "default",
+        channelId: MOBILE_PUSH_ANDROID_CHANNEL_ID,
+        data: { v: MOBILE_PUSH_DATA_VERSION, type: "test", environmentId } satisfies MobilePushData,
       });
-
-    const result = await this.sendToDeviceWithRetry(token, {
-      title,
-      body,
-      sound: "default",
-      channelId: MOBILE_PUSH_ANDROID_CHANNEL_ID,
-      data: {
-        v: MOBILE_PUSH_DATA_VERSION,
-        type: "test",
-        agentId,
-        profileId,
-        route,
-        ...(originId ? { originId } : {}),
-      }
-    });
-
-    if (!result.ok) {
-      return {
-        ok: false,
-        error: result.error ?? "Failed to send Expo push notification"
-      };
+      if (!last.ok) return { ok: false, error: last.error ?? "Failed to send Expo push notification" };
     }
-
-    return {
-      ok: true,
-      ticketId: result.ticketId
-    };
+    return { ok: true, ticketId: last.ticketId };
   }
 
   private readBaselineAttentionIds(): Set<string> | null {
@@ -289,38 +248,30 @@ export class MobilePushService {
       return;
     }
 
-    if (preferences.suppressWhenActive && this.isSessionActive(context.sessionAgentId)) {
+    const environmentId = this.environmentId();
+    if (!environmentId) {
       return;
     }
 
-    const devices = await this.store.getEnabledDevices();
-    if (devices.length === 0) {
-      return;
-    }
-
-    const payload: Omit<ExpoPushMessage, "to"> = {
-      title: buildMessageNotificationTitle(context),
-      body: notification.body,
-      sound: "default",
-      channelId: MOBILE_PUSH_ANDROID_CHANNEL_ID,
-      data: {
-        v: MOBILE_PUSH_DATA_VERSION,
-        type: "attention",
-        agentId: notification.agentId,
-        sessionAgentId: context.sessionAgentId,
-        profileId: context.profileId,
-        route: context.route,
-        eventId: notification.eventId,
-      }
+    const devices = (await this.store.getEnabledDevices()).filter(
+      (device) => device.deviceSessionId !== undefined && this.isDeviceSessionActive(device.deviceSessionId),
+    );
+    const data: MobilePushData = {
+      v: MOBILE_PUSH_DATA_VERSION,
+      type: "attention",
+      environmentId,
+      projectId: context.profileId,
+      sessionId: context.sessionAgentId,
+      eventId: notification.eventId,
     };
 
     for (const device of devices) {
       const sendResult = await this.sendToDeviceWithRetry(device.token, {
-        ...payload,
-        data: {
-          ...payload.data,
-          ...(device.originId ? { originId: device.originId } : {}),
-        },
+        title: buildMessageNotificationTitle(context),
+        body: notification.body,
+        sound: "default",
+        channelId: MOBILE_PUSH_ANDROID_CHANNEL_ID,
+        data,
       });
       if (!sendResult.ok) {
         this.logError("send_push", sendResult.error ?? "Unknown Expo send error");
@@ -436,11 +387,7 @@ export class MobilePushService {
         profileId,
         agentDisplayName: descriptor.displayName,
         sessionDisplayName: getSessionDisplayName(descriptor),
-        projectDisplayName: this.resolveProjectDisplayName(profileId),
-        route: buildSessionRoute({
-          profileId,
-          sessionAgentId: descriptor.agentId
-        })
+        projectDisplayName: this.resolveProjectDisplayName(profileId)
       };
     }
 
@@ -456,11 +403,7 @@ export class MobilePushService {
         profileId,
         agentDisplayName: descriptor.displayName,
         sessionDisplayName: managerDescriptor ? getSessionDisplayName(managerDescriptor) : descriptor.managerId,
-        projectDisplayName: this.resolveProjectDisplayName(profileId),
-        route: buildSessionRoute({
-          profileId,
-          sessionAgentId: descriptor.managerId
-        })
+        projectDisplayName: this.resolveProjectDisplayName(profileId)
       };
     }
 
@@ -468,11 +411,7 @@ export class MobilePushService {
       sessionAgentId: agentId,
       profileId: agentId,
       agentDisplayName: agentId,
-      sessionDisplayName: agentId,
-      route: buildSessionRoute({
-        profileId: agentId,
-        sessionAgentId: agentId
-      })
+      sessionDisplayName: agentId
     };
   }
 
@@ -513,21 +452,11 @@ function getSessionDisplayName(descriptor: { agentId: string; displayName: strin
   return normalizeOptionalString(descriptor.sessionLabel) ?? normalizeOptionalString(descriptor.displayName) ?? descriptor.agentId;
 }
 
-function buildSessionRoute(options: { profileId: string; sessionAgentId: string }): string {
-  return `/profiles/${encodeURIComponent(options.profileId)}/sessions/${encodeURIComponent(options.sessionAgentId)}`;
-}
-
-function normalizeRequiredString(value: unknown, fieldName: string): string {
-  if (typeof value !== "string") {
-    throw new Error(`${fieldName} must be a string`);
+function requireObject(payload: unknown): object {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Request body must be a JSON object");
   }
-
-  const trimmed = value.trim();
-  if (trimmed.length === 0) {
-    throw new Error(`${fieldName} must be a non-empty string`);
-  }
-
-  return trimmed;
+  return payload;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {

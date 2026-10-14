@@ -1,3 +1,4 @@
+import { requireHttpPrincipal } from "../../rpc/http-principal.js";
 import { withEnvironmentRouteAccess } from "../../rpc/http-route-access.js";
 import type { MobilePushService } from "../../../mobile/mobile-push-service.js";
 import { applyCorsHeaders, readJsonBody, sendJson } from "../../http-utils.js";
@@ -35,7 +36,7 @@ export function createMobileRoutes(options: { mobilePushService: MobilePushServi
 
         applyCorsHeaders(request, response, POST_METHODS);
         const payload = await readJsonBody(request);
-        const device = await mobilePushService.registerDevice(payload);
+        const device = await mobilePushService.registerDevice(requireHttpPrincipal(request).deviceSessionId, payload);
         sendJson(response, 200, { ok: true, device });
       }
     },
@@ -59,7 +60,7 @@ export function createMobileRoutes(options: { mobilePushService: MobilePushServi
 
         applyCorsHeaders(request, response, POST_METHODS);
         const payload = await readJsonBody(request);
-        const removed = await mobilePushService.unregisterDevice(payload);
+        const removed = await mobilePushService.unregisterDevice(requireHttpPrincipal(request).deviceSessionId, payload);
         sendJson(response, 200, { ok: true, removed });
       }
     },
@@ -112,8 +113,7 @@ export function createMobileRoutes(options: { mobilePushService: MobilePushServi
         }
 
         applyCorsHeaders(request, response, POST_METHODS);
-        const payload = await readJsonBody(request);
-        const result = await mobilePushService.sendTestNotification(payload);
+        const result = await mobilePushService.sendTestNotification(requireHttpPrincipal(request).deviceSessionId);
 
         if (!result.ok) {
           sendJson(response, 502, {
