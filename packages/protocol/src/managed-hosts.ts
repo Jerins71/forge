@@ -7,6 +7,8 @@ export interface ManagedHostRecord {
   serviceName: string
   remotePort: number
   environmentId: string | null
+  /** Tailnet HTTPS origin that serves this host to the user's other devices; null or absent when off. */
+  tailnetUrl?: string | null
 }
 export interface ManagedHostStatus extends ManagedHostRecord {
   phase:
@@ -71,6 +73,8 @@ export interface ManagedHostsBridge {
   status(hostAlias?: string): Promise<ManagedHostResult<ManagedHostStatus[]>>
   repair(hostAlias: string): Promise<ManagedHostResult<ManagedHostStatus>>
   update(hostAlias: string): Promise<ManagedHostResult<ManagedHostStatus>>
+  /** Serves the host on its tailnet HTTPS origin so other devices (such as a phone) can pair with it. Restarts the service. */
+  setTailnetAccess(hostAlias: string, enabled: boolean): Promise<ManagedHostResult<ManagedHostStatus>>
   /** Removes this Desktop connection and device credentials; leaves the host service running. */
   removeConnection(hostAlias: string): Promise<
     ManagedHostResult<{

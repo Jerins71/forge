@@ -34,10 +34,11 @@ export function installManagedHostsIpc(options: {
       input?: ManagedHostAddInput
       hostAlias?: string
       dataDir?: string
+      enabled?: boolean
     }
     if (
       options.supported === false &&
-      ['add', 'repair', 'update', 'detect', 'pairingLink'].includes(r?.operation ?? '')
+      ['add', 'repair', 'update', 'setTailnetAccess', 'detect', 'pairingLink'].includes(r?.operation ?? '')
     )
       return {
         ok: false,
@@ -57,6 +58,8 @@ export function installManagedHostsIpc(options: {
         return options.service.repair(r.hostAlias!)
       case 'update':
         return options.service.update(r.hostAlias!)
+      case 'setTailnetAccess':
+        return options.service.setTailnetAccess(r.hostAlias!, r.enabled === true)
       case 'removeConnection':
         return options.service.removeConnection(r.hostAlias!)
       case 'detect':
@@ -94,6 +97,8 @@ export function createManagedHostsBridge(ipc: {
     status: (hostAlias) => invoke({ operation: 'status', hostAlias }),
     repair: (hostAlias) => invoke({ operation: 'repair', hostAlias }),
     update: (hostAlias) => invoke({ operation: 'update', hostAlias }),
+    setTailnetAccess: (hostAlias, enabled) =>
+      invoke({ operation: 'setTailnetAccess', hostAlias, enabled }),
     removeConnection: (hostAlias) =>
       invoke({ operation: 'removeConnection', hostAlias }),
     detect: (hostAlias) => invoke({ operation: 'detect', hostAlias }),

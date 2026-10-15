@@ -22,7 +22,9 @@ async function fixture() {
   let hostFailure: Error | null = null,
     timeout = false,
     revoked = false,
-    interrupted = false
+    interrupted = false,
+    tailnetMissing = false,
+    failTailnetRestart = false
   let uploads = 0,
     grants = 0,
     tunnels = 0,
@@ -33,6 +35,11 @@ async function fixture() {
       scripts.push(script)
       if (hostFailure) throw hostFailure
       if (script.includes('# forge:preflight')) return '/home/test\n'
+      if (script.includes('# forge:tailnet-enable')) {
+        if (tailnetMissing) throw new Error('FORGE_TAILSCALE')
+        return 'https://dev1.tail.ts.net:8443\n'
+      }
+      if (script.includes('# forge:steady') && failTailnetRestart && script.includes('--tailscale-serve')) throw new Error('restart failed')
       if (script.includes('# forge:install')) {
         if (interrupted) {
           interrupted = false
@@ -138,6 +145,15 @@ async function fixture() {
     },
     busy: () => {
       busy = true
+    },
+    idle: () => {
+      busy = false
+    },
+    tailnetMissing: () => {
+      tailnetMissing = true
+    },
+    failTailnetRestart: () => {
+      failTailnetRestart = true
     },
   }
 }
@@ -405,3 +421,55 @@ it.each([1, 2])(
     }
   },
 )
+
+describe('other devices over Tailscale', () => {
+  const steadyUnits = (scripts: string[]) => scripts.filter((s) => s.includes('# forge:steady'))
+  it('serves the host on its tailnet HTTPS origin, keeps it across restart and repair, and stops it again', async () => {
+    const f = await fixture()
+    await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+    f.scripts.length = 0
+    const on = await f.service.setTailnetAccess('dev1', true)
+    expect(on).toMatchObject({ ok: true, value: { tailnetUrl: 'https://dev1.tail.ts.net:8443', phase: 'ready' } })
+    expect(f.scripts.findIndex((s) => s.includes('# forge:tailnet-enable'))).toBeLessThan(f.scripts.findIndex((s) => s.includes('# forge:steady')))
+    expect(steadyUnits(f.scripts).at(-1)).toContain('serve --host 127.0.0.1 --port 47788')
+    expect(steadyUnits(f.scripts).at(-1)).toContain('--public-url "https://dev1.tail.ts.net:8443" --tailscale-serve')
+    expect(JSON.parse(await readFile(f.storePath, 'utf8'))[0].tailnetUrl).toBe('https://dev1.tail.ts.net:8443')
+    // Desktop restart and Repair rewrite the unit from the record, so the setting survives both.
+    await f.service.dispose()
+    const reopened = createManagedHostService(f.options)
+    cleanups.push(() => reopened.dispose())
+    await reopened.start()
+    f.scripts.length = 0
+    expect((await reopened.repair('dev1')).ok).toBe(true)
+    expect(steadyUnits(f.scripts).at(-1)).toContain('--tailscale-serve')
+    f.scripts.length = 0
+    const off = await reopened.setTailnetAccess('dev1', false)
+    expect(off).toMatchObject({ ok: true, value: { tailnetUrl: null } })
+    expect(steadyUnits(f.scripts).at(-1)).not.toContain('--tailscale-serve')
+    expect(f.scripts.some((s) => s.includes('# forge:tailnet-disable') && s.includes('8443'))).toBe(true)
+    expect(JSON.parse(await readFile(f.storePath, 'utf8'))[0].tailnetUrl).toBeNull()
+  })
+  it('changes nothing while the host is busy or Tailscale is not ready', async () => {
+    const f = await fixture()
+    await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+    f.busy()
+    f.scripts.length = 0
+    expect(await f.service.setTailnetAccess('dev1', true)).toMatchObject({ ok: false, error: { code: 'BUSY_OR_UNKNOWN' } })
+    expect(f.scripts.some((s) => s.includes('# forge:tailnet-enable') || s.includes('# forge:steady'))).toBe(false)
+    f.idle()
+    f.tailnetMissing()
+    expect(await f.service.setTailnetAccess('dev1', true)).toMatchObject({ ok: false, error: { code: 'PREREQUISITE' } })
+    expect(steadyUnits(f.scripts)).toEqual([])
+    expect(JSON.parse(await readFile(f.storePath, 'utf8'))[0].tailnetUrl ?? null).toBeNull()
+  })
+  it('restores the previous service and removes the new rule when the restart fails', async () => {
+    const f = await fixture()
+    await f.service.add({ hostAlias: 'dev1', remotePort: 47788 })
+    f.failTailnetRestart()
+    f.scripts.length = 0
+    expect(await f.service.setTailnetAccess('dev1', true)).toMatchObject({ ok: false, error: { code: 'UNAVAILABLE' } })
+    expect(steadyUnits(f.scripts).at(-1)).not.toContain('--tailscale-serve')
+    expect(f.scripts.some((s) => s.includes('# forge:tailnet-disable'))).toBe(true)
+    expect(JSON.parse(await readFile(f.storePath, 'utf8'))[0].tailnetUrl ?? null).toBeNull()
+  })
+})

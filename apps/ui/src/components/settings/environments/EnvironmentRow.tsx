@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowUpCircle, Check, Link2, Loader2, Monitor, Pencil, RotateCw, Server, Trash2, Wrench, X } from 'lucide-react'
+import { ArrowUpCircle, Check, Link2, Loader2, Monitor, Pencil, RotateCw, Server, Smartphone, Trash2, Wrench, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { Input } from '@/components/ui/input'
@@ -45,6 +45,11 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
   const managedAction = async (action: 'repair' | 'update') => {
     if (!managedBridge || !managed) return
     const result = await managedBridge[action](managed.hostAlias)
+    if (!result.ok) throw new Error(result.error.message)
+  }
+  const setTailnetAccess = async (enabled: boolean) => {
+    if (!managedBridge || !managed) return
+    const result = await managedBridge.setTailnetAccess(managed.hostAlias, enabled)
     if (!result.ok) throw new Error(result.error.message)
   }
   // A managed host re-pairs itself over SSH (Repair); any other lost pairing takes a new link.
@@ -130,6 +135,11 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
                 Managed over SSH · {managed.hostAlias}{managed.phase !== 'ready' ? ` · ${managed.phase.replace('-', ' ')}` : ''}
               </span>
             ) : null}
+            {managed?.tailnetUrl ? (
+              <span title="Your other devices on Tailscale can pair with this machine at this address.">
+                Other devices: <span className="font-mono text-[11.5px]">{hostOf(managed.tailnetUrl)}</span>
+              </span>
+            ) : null}
             {entry.enabled ? (
               <span className="tabular-nums">
                 {projectCount} {projectCount === 1 ? 'project' : 'projects'} · {sessionCount} {sessionCount === 1 ? 'session' : 'sessions'}
@@ -146,6 +156,19 @@ export function EnvironmentRow({ entry }: { entry: EnvironmentCatalogEntry }) {
                   {busy === 'update' ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUpCircle className="size-3.5" />} Update{managed.desiredVersion ? ` to ${managed.desiredVersion}` : ''}
                 </Button>
               ) : null}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1"
+                disabled={busy !== null}
+                title={managed.tailnetUrl
+                  ? 'Stop serving this machine to your other devices. Restarts its Forge service.'
+                  : 'Serve this machine on your tailnet so your phone and other devices can pair with it. Restarts its Forge service.'}
+                onClick={() => void run('other devices', () => setTailnetAccess(!managed.tailnetUrl))}
+              >
+                {busy === 'other devices' ? <Loader2 className="size-3.5 animate-spin" /> : <Smartphone className="size-3.5" />}
+                {managed.tailnetUrl ? 'Stop other devices' : 'Allow other devices'}
+              </Button>
               <Button size="sm" variant="ghost" className="gap-1" disabled={busy !== null} onClick={() => void run('repair', () => managedAction('repair'))}>
                 {busy === 'repair' ? <Loader2 className="size-3.5 animate-spin" /> : <Wrench className="size-3.5" />} Repair
               </Button>

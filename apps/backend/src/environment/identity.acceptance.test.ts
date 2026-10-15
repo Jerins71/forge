@@ -75,6 +75,21 @@ it("trusts forwarded metadata only from the configured loopback peer", () => {
   ).toThrow();
 });
 
+it("in Tailscale mode, accepts exactly what Tailscale serve forwards on its own HTTPS origin", () => {
+  // Headers recorded from `tailscale serve --https=8447` on a real Linux host.
+  const policy = createExposurePolicy({ host: "127.0.0.1", port: 47787, mode: "tailscale", publicBaseUrl: "https://dev1.tail.ts.net:8447" });
+  const forwarded = (host: string, peer = "127.0.0.1") => ({
+    headers: { host, "x-forwarded-for": "100.105.26.121", "x-forwarded-host": host, "x-forwarded-proto": "https" },
+    socket: { remoteAddress: peer },
+  }) as never;
+  expect(() => policy.validateForwarding(forwarded("dev1.tail.ts.net:8447"))).not.toThrow();
+  expect(policy.sourceIp(forwarded("dev1.tail.ts.net:8447"))).toBe("100.105.26.121");
+  expect(() => policy.validateForwarding(forwarded("other.tail.ts.net:8447"))).toThrow();
+  expect(() => policy.validateForwarding(forwarded("dev1.tail.ts.net:8447", "100.64.0.9"))).toThrow();
+  // The Desktop SSH tunnel reaches the same listener without forwarding metadata.
+  expect(() => policy.validateForwarding({ headers: { host: "127.0.0.1:52000" }, socket: { remoteAddress: "127.0.0.1" } } as never)).not.toThrow();
+});
+
 it("tracks only an absent Tailscale root rule and disables that exact owned path while preserving other routes", async () => {
   root = await mkdtemp(join(tmpdir(), "forge-tailscale-"));
   const ownershipFile = join(root, "owned.json");

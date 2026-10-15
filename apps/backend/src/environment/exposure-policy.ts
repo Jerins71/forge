@@ -63,6 +63,8 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
   const selfHost = wildcard ? "127.0.0.1" : host.includes(":") ? `[${host}]` : host;
   let base = options.publicBaseUrl ? normalizedBase(options.publicBaseUrl).origin : `${scheme}://${selfHost}:${options.port ?? 47187}`;
   if (mode === "tailscale" && new URL(base).protocol !== "https:") throw new Error("Tailscale requires its HTTPS URL");
+  // Tailscale serve proxies its HTTPS origin to this loopback listener and says so in forwarding headers.
+  const trustedProxy = options.trustedProxy ?? (mode === "tailscale" ? { peer: "127.0.0.1", host: new URL(base).host, proto: "https" as const } : undefined);
   const origins = new Set(options.allowedClientOrigins ?? []);
   for (const origin of origins) {
     if (origin !== "app://forge" && normalizedBase(origin).origin !== origin) throw new Error("Client origins must be exact origins");
@@ -70,7 +72,7 @@ export function createExposurePolicy(options: ExposureOptions = {}): ExposurePol
   function validateForwarding(request: IncomingMessage): void {
     const h = request.headers;
     if (!["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto"].some((k) => h[k] !== undefined)) return;
-    const p = options.trustedProxy;
+    const p = trustedProxy;
     if (
       !p ||
       (request.socket.remoteAddress !== p.peer && request.socket.remoteAddress !== `::ffff:${p.peer}`) ||

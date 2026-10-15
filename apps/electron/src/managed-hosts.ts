@@ -78,6 +78,13 @@ function failure(error: unknown): ManagedHostError {
         : 'Host needs Linux x86_64, glibc 2.36+, Git, tar, sha256sum, flock, and a working systemd user manager.',
       retryable: false,
     }
+  if (/FORGE_TAILSCALE/.test(text))
+    return {
+      code: 'PREREQUISITE',
+      message:
+        'Tailscale on the host must be installed, connected, and allowed to serve for this account (sudo tailscale set --operator=$USER), with a free HTTPS port (443, 8443, 10443 or 18443).',
+      retryable: false,
+    }
   if (/FORGE_UNMANAGED/.test(text))
     return {
       code: 'UNMANAGED',
@@ -135,7 +142,9 @@ function validateRecord(record: ManagedHostRecord) {
     record.remotePort > 65535 ||
     (record.environmentId !== null && !uuid.test(record.environmentId)) ||
     !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(record.installedVersion) ||
-    !/^[a-f0-9]{64}$/.test(record.artifactSha256)
+    !/^[a-f0-9]{64}$/.test(record.artifactSha256) ||
+    (record.tailnetUrl != null &&
+      !/^https:\/\/[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.ts\.net(:\d{1,5})?$/.test(record.tailnetUrl))
   )
     fail('INVALID_INPUT', 'Invalid managed installation metadata.')
 }
@@ -159,7 +168,36 @@ function serviceUnit(
     'versions',
     `forge-server-${record.installedVersion}-linux-x64`,
   )
-  return `# Forge managed: ${owner}\n[Unit]\nDescription=Forge managed server\nStartLimitIntervalSec=60\nStartLimitBurst=5\n[Service]\nType=simple\nExecStart=${unitQuote(posix.join(version, 'bin/forge'))} serve --host 127.0.0.1 --port ${record.remotePort} --data-dir ${unitQuote(posix.join(record.installDir, 'data'))}\nEnvironment=${unitQuote('FORGE_ALLOWED_CLIENT_ORIGINS=' + clientOrigin)}\nEnvironment=${unitQuote('XDG_STATE_HOME=' + posix.join(record.installDir, 'host-state'))}\nWorkingDirectory=${record.installDir.replaceAll('%', '%%')}\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=45\nKillMode=control-group\n[Install]\nWantedBy=default.target\n`
+  return `# Forge managed: ${owner}\n[Unit]\nDescription=Forge managed server\nStartLimitIntervalSec=60\nStartLimitBurst=5\n[Service]\nType=simple\nExecStart=${unitQuote(posix.join(version, 'bin/forge'))} serve --host 127.0.0.1 --port ${record.remotePort} --data-dir ${unitQuote(posix.join(record.installDir, 'data'))}${record.tailnetUrl ? ` --public-url ${unitQuote(record.tailnetUrl)} --tailscale-serve` : ''}\nEnvironment=${unitQuote('FORGE_ALLOWED_CLIENT_ORIGINS=' + clientOrigin)}\nEnvironment=${unitQuote('XDG_STATE_HOME=' + posix.join(record.installDir, 'host-state'))}\nWorkingDirectory=${record.installDir.replaceAll('%', '%%')}\nUMask=0077\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=45\nKillMode=control-group\n[Install]\nWantedBy=default.target\n`
+}
+function versionNode(record: ManagedHostRecord): string {
+  return posix.join(record.installDir, 'versions', `forge-server-${record.installedVersion}-linux-x64`, 'node/bin/node')
+}
+/** Reuses this service's rule or takes the first free HTTPS port, then prints the tailnet origin. */
+function tailnetEnableScript(record: ManagedHostRecord, owner: string): string {
+  const target = `http://127.0.0.1:${record.remotePort}`
+  const choose = `const s=JSON.parse(process.env.FORGE_SELF),c=JSON.parse(process.env.FORGE_SERVED||'{}'),w=c.Web||{};if(s.BackendState!=='Running')process.exit(1);const h=((s.Self||{}).DNSName||'').replace(/\\.$/,'');if(!/^[a-zA-Z0-9.-]+\\.ts\\.net$/.test(h))process.exit(1);const used=new Set([...Object.keys(c.TCP||{}),...Object.keys(w).filter(k=>k.startsWith(h+':')).map(k=>k.slice(h.length+1))]);const mine=Object.keys(w).find(k=>k.startsWith(h+':')&&((w[k].Handlers||{})['/']||{}).Proxy===${JSON.stringify(target)});const p=mine?mine.slice(h.length+1):['443','8443','10443','18443'].find(x=>!used.has(x));if(!p)process.exit(1);console.log(p+' https://'+h+(p==='443'?'':':'+p))`
+  return `${remoteOwned(record, owner)}# forge:tailnet-enable
+command -v tailscale >/dev/null || fail TAILSCALE
+self=$(tailscale status --json) || fail TAILSCALE
+served=$(tailscale serve status --json) || fail TAILSCALE
+choice=$(FORGE_SELF="$self" FORGE_SERVED="$served" ${q(versionNode(record))} -e ${q(choose)}) || fail TAILSCALE
+port=\${choice%% *}
+tailscale serve --bg --https="$port" ${q(target)} >/dev/null 2>&1 || fail TAILSCALE
+printf '%s\n' "\${choice#* }"
+`
+}
+/** Removes the rule only while it still points at this service. */
+function tailnetDisableScript(record: ManagedHostRecord, tailnetUrl: string, owner: string): string {
+  const url = new URL(tailnetUrl)
+  const port = url.port || '443'
+  const key = `${url.hostname}:${port}`
+  const check = `const w=(JSON.parse(process.env.FORGE_SERVED||'{}').Web||{})[${JSON.stringify(key)}];process.exit(((w&&w.Handlers||{})['/']||{}).Proxy===${JSON.stringify(`http://127.0.0.1:${record.remotePort}`)}?0:1)`
+  return `${remoteOwned(record, owner)}# forge:tailnet-disable
+command -v tailscale >/dev/null || exit 0
+served=$(tailscale serve status --json) || fail TAILSCALE
+if FORGE_SERVED="$served" ${q(versionNode(record))} -e ${q(check)}; then tailscale serve --https=${port} off >/dev/null; fi
+`
 }
 async function digestFile(path: string): Promise<string> {
   const hash = createHash('sha256')
@@ -836,6 +874,31 @@ export function createManagedHostService(options: {
       )
     return statuses.get(r.hostAlias)!
   }
+  async function setTailnetAccess(r: ManagedHostRecord, enabled: boolean) {
+    const t = await openTunnel(r)
+    await verifyConnection(r, t)
+    // The change restarts the service, so it waits for the same idle state as an update.
+    await idle(r, t.baseUrl)
+    const previous = r.tailnetUrl ?? null
+    const next = !enabled
+      ? null
+      : previous ?? (await driver.run(r.hostAlias, tailnetEnableScript(r, owner))).trim()
+    const candidate = { ...r, tailnetUrl: next }
+    validateRecord(candidate)
+    try {
+      await steady(candidate)
+    } catch {
+      await steady(r).catch(() => undefined)
+      if (next && !previous) await driver.run(r.hostAlias, tailnetDisableScript(r, next, owner)).catch(() => undefined)
+      fail('UNAVAILABLE', 'The host did not restart with the new setting; the previous service was restored.')
+    }
+    if (previous && !next) await driver.run(r.hostAlias, tailnetDisableScript(r, previous, owner))
+    r.tailnetUrl = next
+    await save()
+    await verifyConnection(r, t)
+    set(r, 'ready')
+    return statuses.get(r.hostAlias)!
+  }
   return {
     start: async () => {
       await load()
@@ -940,6 +1003,8 @@ export function createManagedHostService(options: {
       }),
     update: (alias: string) =>
       action(alias, async () => updateHost(record(alias), await desired())),
+    setTailnetAccess: (alias: string, enabled: boolean) =>
+      action(alias, async () => setTailnetAccess(record(alias), enabled)),
     removeConnection: (alias: string) =>
       action(alias, async () => {
         const r = record(alias)
