@@ -68,6 +68,7 @@ import { ProjectAgentReferenceMutationResultSchema } from '@forge/protocol'
 import { decodeEnvironmentValue, type EnvironmentDescriptor } from '@forge/protocol/environment-v2'
 import type { StreamObserver } from '../types.js'
 import { assertEnvironment } from '../types.js'
+import { EnvironmentRuntimeError } from '../errors.js'
 export interface FeatureRequest {
   request<T>(
     path: string,
@@ -645,7 +646,21 @@ export function createFeatureClients(
     },
     sessions: {
       compact: async (agentId, input = {}, _signal) => {
-        const receipt = await rpc.request('session.compact', { commandId: crypto.randomUUID(), sessionId: id(agentId), mode: 'manual', ...input })
+        const commandId = crypto.randomUUID()
+        let receipt
+        try {
+          receipt = await rpc.request('session.compact', { commandId, sessionId: id(agentId), mode: 'manual', ...input })
+        } catch (error) {
+          // Compacting a long conversation outlasts the request timeout; the receipt decides.
+          if (!(error instanceof EnvironmentRuntimeError) || error.code !== 'UNAVAILABLE') throw error
+          receipt = await rpc.request('command.get', { commandId }).catch(() => { throw error })
+        }
+        const deadline = Date.now() + 15 * 60_000
+        while (receipt.state === 'accepted' || receipt.state === 'running') {
+          if (Date.now() >= deadline) throw new EnvironmentRuntimeError('UNAVAILABLE', 'Compaction is still running', true)
+          await new Promise(resolve => setTimeout(resolve, 1_000))
+          receipt = await rpc.request('command.get', { commandId })
+        }
         if (receipt.state !== 'succeeded') throw new Error(receipt.error?.message ?? 'Compaction outcome is unknown')
       },
       systemPrompt: (agentId, signal) =>
