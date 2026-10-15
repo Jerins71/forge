@@ -154,6 +154,16 @@ test('the panel opens from the header, resizes, and keeps its width and open sta
   await shot(page, 'empty')
   // Chat stays usable beside it.
   await expect(page.getByRole('combobox', { name: /^(Message |Send another message to )/ })).toBeVisible()
+  // A new thread is not the thread the panel belongs to: starting one from the sidebar leaves no browser
+  // beside its composer, and going back shows the thread's panel again.
+  await page.getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
+  await expect(page.getByTestId('launch-workspace')).toBeVisible()
+  await expect(panel(page)).toHaveCount(0)
+  await shot(page, 'new-thread-no-panel')
+  await page.goBack()
+  await expect(transcript(page)).toBeVisible()
+  await expect(panel(page)).toBeVisible()
+  assertions.newThreadHidesPanel = true
 
   const before = await panelWidth(page)
   const box = (await page.getByTestId('browser-panel-resize-handle').boundingBox())!

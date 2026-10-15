@@ -2594,7 +2594,8 @@ export function BuilderSurface({
             ) : null}
           </div>
 
-          {activeView === 'chat' && !panels.isInlineDiffViewerOpen && browserPanelPort && browserPanelKey ? (
+          {/* The new-thread screen keeps the previous session active behind it; its tabs are not this view's. */}
+          {activeView === 'chat' && launchGroupKey === null && !panels.isInlineDiffViewerOpen && browserPanelPort && browserPanelKey ? (
             <BrowserDock
               port={browserPanelPort}
               sessionKey={browserPanelKey}
