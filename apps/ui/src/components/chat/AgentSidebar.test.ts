@@ -208,6 +208,11 @@ describe('AgentSidebar', () => {
 
     const sidebar = getDesktopSidebar()
     expect(sidebar.getAttribute('data-sidebar-layout')).toBe('rooms-v2')
+    // The Inbox keeps its project list collapsed until asked.
+    const toggle = sidebar.querySelector<HTMLButtonElement>('[data-inbox-section="projects"] button[aria-expanded]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(sidebar.querySelector('[data-room-card]')).toBeNull()
+    flushSync(() => toggle.click())
     expect(sidebar.querySelector('[data-room-card]')).not.toBeNull()
   })
 
