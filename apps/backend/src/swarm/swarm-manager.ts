@@ -148,16 +148,17 @@ export class SwarmManager extends SwarmManagerFacade implements SwarmToolHost {
   lineage?: import("./lineage-tools.js").CoreLineagePort;
   installCoreLineagePort(port: import("./lineage-tools.js").CoreLineagePort): void { this.lineage=port; this.lifecycleService.installCoreProviderRefresh(agentId => port.refreshContext(agentId)); }
   prepareLineageSession(input: Parameters<SwarmSessionService["prepareLineageSession"]>[0]) { return this.sessionService.prepareLineageSession(input); }
-  private async setControlledProviderModel(threadId:string,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>):Promise<void> {
+  // The core opens a provider only for a thread it runs, so a stop or a recovered failure is over.
+  protected async setControlledProviderModel(threadId:string,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>):Promise<void> {
     const descriptor=this.descriptors.get(threadId);if(!descriptor) throw new Error("Provider target is unavailable");
     if(model && (descriptor.model.provider!==model.provider || descriptor.model.modelId!==model.modelId || model.thinkingLevel!==undefined && descriptor.model.thinkingLevel!==model.thinkingLevel)) {
       if(this.runtimes.has(threadId)) throw new Error("Model replacement requires confirmed provider shutdown");
-      const updated = await replaceModelWithNotice(this.conversationProjector, descriptor, () => this.descriptorStoreAdapter.patchDescriptor(threadId,{model:{...descriptor.model,...model},status:descriptor.status==="stopped"?"idle":descriptor.status}), this.now());
+      const updated = await replaceModelWithNotice(this.conversationProjector, descriptor, () => this.descriptorStoreAdapter.patchDescriptor(threadId,{model:{...descriptor.model,...model},status:descriptor.status==="stopped" || descriptor.status==="error"?"idle":descriptor.status}), this.now());
       if (descriptor.role === "worker") {
         const manager = this.descriptors.get(descriptor.managerId);
         if (manager?.profileId) await this.sessionPlanCoordinator.recordWorkGraphWorkerModelReroute({agentId:manager.agentId,profileId:manager.profileId},threadId,updated.model);
       }
-    } else if(descriptor.status==="stopped") await this.descriptorStoreAdapter.patchDescriptor(threadId,{status:"idle"});
+    } else if(descriptor.status==="stopped" || descriptor.status==="error") await this.descriptorStoreAdapter.patchDescriptor(threadId,{status:"idle"});
   }
   override async acquireControlledProvider(scope: import("@forge/protocol").ProviderScope,conversation?:import("@forge/protocol").ProviderConversationRef,model?:Pick<AgentModelDescriptor,"provider"|"modelId"> & Partial<Pick<AgentModelDescriptor,"thinkingLevel">>) {
     await this.setControlledProviderModel(scope.threadId,model);

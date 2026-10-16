@@ -857,6 +857,49 @@ it("a new successful turn replaces prior failure attention with work_settled", a
   }
 });
 
+it("a native failure recovers only its own thread, and the recovered manager runs its next turn normally", async () => {
+  // Seen on a real manager: its native failed holding input it may or may not have run. That failure
+  // belongs to the manager's thread. Its healthy workers keep running, and once the manager is
+  // recovered it can reach them again and its next finished turn puts the session in Needs you.
+  const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true;
+  const created = f.manager.onCreateRuntime;
+  f.manager.onCreateRuntime = async input => { await created?.(input); if (input.descriptor.agentId === f.sessionId) input.runtime.busy = true; };
+  const runOf = (threadId: string) => { const state = loadState(f.database); return state.runs[state.threads[threadId].activeRunId!]; };
+  const send = async (text: string) => {
+    const commandId = randomUUID();
+    await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text, artifactIds: [] } });
+    await f.core.effectWorker.drain();
+  };
+  await send("Review the week");
+  await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "streaming", 0);
+  const worker = await f.manager.spawnAgent(f.sessionId, { agentId: "review-worker" });
+  f.manager.runtimeByAgentId.get(worker.agentId)!.busy = true;
+  await f.manager.sendMessage(f.sessionId, worker.agentId, "Review batch 5");
+  await f.core.effectWorker.drain();
+  const workerRun = runOf(worker.agentId).runId;
+  await f.manager.handleRuntimeStatus(f.runtimeTokens.get(f.sessionId)!, f.sessionId, "error", 0);
+  f.core.controlService.record({ type: "attempt.unknown", commandId: randomUUID(), now: Date.now(), threadId: f.sessionId, attemptId: runOf(f.sessionId).activeAttemptId });
+  await f.core.effectWorker.drain();
+  const recovery = loadState(f.database).recovery!;
+  expect({ managers: recovery.interruptedManagers, workers: recovery.interruptedWorkers }).toEqual({ managers: [f.sessionId], workers: [] });
+  expect(loadState(f.database).runs[workerRun].state).toBe("running");
+
+  await createDetailFeatureRpc({ swarmManager: f.manager, control: f.core.controlService })
+    .execute(f.paired.principal, "recovery.decide", { commandId: randomUUID(), recoveryId: recovery.recoveryId, action: "dismiss" });
+  await f.core.effectWorker.drain();
+  const before = f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)?.attentionId;
+  await send("What would you tackle first?");
+  const token = f.runtimeTokens.get(f.sessionId)!;
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "streaming", 0);
+  await f.manager.sendMessage(f.sessionId, worker.agentId, "Stand down");
+  const run = runOf(f.sessionId); const binding = loadState(f.database).bindings[loadState(f.database).attempts[run.activeAttemptId].bindingId];
+  f.core.controlService.record({ type: "provider.observe", commandId: randomUUID(), now: Date.now(), observation: {
+    type: "terminal", scope: binding.scope, attemptId: run.activeAttemptId, sequence: 1, origin: { kind: "root", conversation: binding.conversation }, terminalAuthority: "root_attempt", outcome: "completed",
+  } });
+  await f.manager.handleRuntimeStatus(token, f.sessionId, "idle", 0);
+  await vi.waitFor(() => expect(f.manager.getSessionAttentionSnapshot().attentions.find(row => row.sessionAgentId === f.sessionId)).toMatchObject({ reason: "work_settled", attentionId: expect.not.stringMatching(before ?? "^$") }));
+});
+
 it("Stop's interrupted run is never failure attention", async () => {
   const f = await fixture(); f.manager.runtimeByAgentId.get(f.sessionId)!.busy = true; const commandId = randomUUID();
   await f.core.controlService.execute(f.paired.principal, "session.send", { commandId, sessionId: f.sessionId, message: { text: "Stop this", artifactIds: [] } });

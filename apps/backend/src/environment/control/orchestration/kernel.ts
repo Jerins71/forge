@@ -77,11 +77,13 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     emit({ type: "attempt.unknown", attempt: { ...attempt, state: "unknown", delivery: "unknown" } });
     emit({ type: "run.recovery", run: { ...run, state: "recovery" } });
   };
-  const recover = (recoveryId: string, bootId: string, reports: NonNullable<CoreState["recovery"]>["undeliveredReports"], processLost: boolean) => {
+  /** Without a failed thread the process was lost and every writer is recovered; an in-process failure recovers only its own thread. */
+  const recover = (recoveryId: string, bootId: string, reports: NonNullable<CoreState["recovery"]>["undeliveredReports"], failedThreadId?: string) => {
+    const processLost = failedThreadId === undefined;
     const pending = state.recovery && !state.recovery.resumedAt && !state.recovery.dismissedAt ? state.recovery : null;
     const managers = new Set(pending?.interruptedManagers); const workers = new Set(pending?.interruptedWorkers);
     for (const run of Object.values(state.runs)) {
-      if (!["running", "recovery"].includes(run.state)) continue;
+      if (!["running", "recovery"].includes(run.state) || (failedThreadId && run.threadId !== failedThreadId)) continue;
       const owner = thread(run.threadId); const attempt = state.attempts[run.activeAttemptId];
       // A stop the user already asked for needs no second decision: the lost process is its confirmed drain.
       if (processLost && owner.desired === "stopped" && owner.shutdown !== "clean" && owner.activeRunId === run.runId) { finish(run, "cancelled"); continue; }
@@ -164,7 +166,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
     // A provider that answers a user Stop's interrupt before the drain is recorded settles the run as that same stop.
     else if (observation.type === "terminal" && observation.terminalAuthority === "root_attempt") { finish(state.runs[run.runId], observation.outcome === "interrupted" && owner.desired === "stopped" ? "cancelled" : observation.outcome,true, observation.error?.message); advance(owner.threadId); }
     else if (observation.type === "error") {
-      if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
+      if (observation.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], owner.threadId); }
       else { finish(state.runs[run.runId], "failed",observation.delivery === "accepted", observation.message); advance(owner.threadId); }
     }
   };
@@ -233,7 +235,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       if (owner.activeRunId !== attempt.runId) finish(state.runs[attempt.runId], "completed", true);
       advance(owner.threadId); break;
     }
-    case "attempt.unknown": requireRecovery(command.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); break;
+    case "attempt.unknown": requireRecovery(command.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], command.threadId); break;
     case "provider.observe": observe(command.observation); break;
     case "thread.stop": {
       const owner = thread(command.threadId);
@@ -309,7 +311,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       emit({ type: command.succeeded ? "compaction.completed" : "compaction.failed", thread: { ...owner, compaction: undefined } }); advance(owner.threadId); break;
     }
     case "environment.recover":
-      recover(command.recoveryId, command.bootId, command.reports, true);
+      recover(command.recoveryId, command.bootId, command.reports);
       for (const owner of Object.values(state.threads)) advance(owner.threadId); break;
     case "recovery.resume": case "recovery.dismiss": {
       const snapshot = state.recovery;
@@ -363,7 +365,7 @@ export function decide(initial: CoreState, command: CoreCommand): Decision {
       } else if (command.attemptId && state.attempts[command.attemptId]) {
         const attempt = state.attempts[command.attemptId];
         if (attempt.state === "terminal" || attempt.state === "unknown" || state.runs[attempt.runId].activeAttemptId !== attempt.attemptId) break;
-        if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], false); }
+        if (command.delivery === "unknown") { requireRecovery(attempt.attemptId); recover(`recovery-${command.commandId}`, command.commandId, [], attempt.threadId); }
         else if (command.dispatchBusy && command.delivery === "not_dispatched" && ["provider.start", "provider.steer"].includes(command.kind) &&
           thread(command.threadId).desired === "running" && thread(command.threadId).shutdown === "clean") {
           // The existing delayed effect will try admission again. No input reached the provider.

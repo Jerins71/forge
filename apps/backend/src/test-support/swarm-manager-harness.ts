@@ -184,6 +184,7 @@ export class TestSwarmManager extends SwarmManager {
     | undefined
 
   override async acquireControlledProvider(scope:ProviderScope,conversation?:ProviderConversationRef,model?:Pick<AgentDescriptor["model"],"provider"|"modelId">) {
+    await this.setControlledProviderModel(scope.threadId,model);
     const runtime=await this.getFacadeServices().userMessages.acquireRuntime(scope.threadId,model) as FakeRuntime;
     return {adapter:runtime.providerAdapter,binding:runtime.bindProvider(scope,conversation)};
   }
