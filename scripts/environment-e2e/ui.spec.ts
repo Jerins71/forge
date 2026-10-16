@@ -256,6 +256,7 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
 test('9.2.2 A/B group by repository into one project row, manual split/merge works, C stays independent, sessions stay environment-qualified', async ({ page }) => {
   const { a, b, c } = fleet!
   await page.goto(fleet!.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const sidebar = page.getByRole('complementary')
   const projectList = sidebar.getByTestId('unified-project-list')
   const projectRows = projectList.locator('[data-logical-project]')
@@ -377,6 +378,8 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   const sessionId = (assertions.launch as { sessionId: string }).sessionId;
   await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
   await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId);
+  // Session rows with data-session-ref are in the project tree, on the Projects tab.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
   const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
@@ -407,11 +410,14 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   await shot(page, 'batch3-pins-fresh-bootstrap');
   // Set unread while the user is viewing Inbox, then opening detail sends an explicit native read.
   await page.goto(`${fleet!.uiUrl}/?view=inbox`);
+  // The sidebar remembers its tab; an earlier step left it on Projects.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click();
   await fixtureRpcOnce(b.baseUrl, principal, 'session.readState.set', { commandId: randomUUID(), sessionId, read: false });
   const inboxRow = page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true });
   await expect(inboxRow).toHaveCount(1);
   // The session was just in view, so its "work completed" attention is gone and the Inbox row carries no
-  // badge; the unread count itself shows on its project row.
+  // badge; the unread count itself shows on its row in the project tree.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
   await expect(row).toHaveText(/Batch 3 UI B\s*1/);
   await shot(page, 'batch3-unread-inbox');
   const start = proxy.metrics().commandAttempts.length;
@@ -436,6 +442,8 @@ test('Batch 8 renamed CLI session renders its new shell title after backend rest
   await cli.renameSession(sessionId, 'Renamed CLI after restart');
   await fleet!.stop(b); await fleet!.start(b);
   await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
+  // Session rows with data-session-ref are in the project tree, on the Projects tab.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
   const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
   await expect(row).toContainText('Renamed CLI after restart');
   await expect(row).not.toContainText('Original CLI title');
@@ -549,6 +557,8 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   expect(metrics.flatMap(value => value.subscriptions).filter(value => value.method === 'session.subscribe')).toHaveLength(3)
   await driveShellStatus(manifest, b.sessionId, 'streaming')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1 })
+  // Session rows with data-session-ref are in the project tree, on the Projects tab.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   await expect(page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"] [aria-label="running"]`)).toHaveCount(1)
   const freshness = await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())
   expect(freshness.every((environment: any) => environment.fresh && environment.complete)).toBe(true)
@@ -1023,6 +1033,7 @@ test('Needs You lists a remote session that was never opened, survives an offlin
 test('a launch link for a project that no longer exists does not crash the app', async ({ page }) => {
   await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent('no-such-project')}`)
   await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   await expect(page.getByRole('complementary').getByTestId('unified-project-list')).toBeVisible()
   expect(renderErrors).toEqual([])
   assertions.unknownLaunchKey = { crashed: false }
@@ -1154,8 +1165,10 @@ test('F7: the busy manager composer delivers a real steer, keeps the root and sh
 
 test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
   const { a } = fleet!
+  // The project key is read from the desktop sidebar; the narrow layout hides it.
+  const key = await logicalGroupKey(page, a)
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent(await logicalGroupKey(page, a))}`)
+  await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent(key)}`)
   await expect(page.getByTestId('run-on-picker')).toBeInViewport()
   await expect(page.getByTestId('workspace-picker')).toBeInViewport()
   await shot(page, 'narrow-launch-composer')
@@ -1170,6 +1183,7 @@ test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
 
 async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise<string> {
   await page.goto(fleet!.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   // A's project row carries its logical group key.
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
@@ -1188,6 +1202,7 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   const worker = await until<any>(async () => (await detail()).workers[0], Boolean)
   await until<any>(async () => (await detail()).choices.find((choice: any) => choice.agentId === worker.agentId && choice.status === 'pending'), Boolean)
   await page.goto(`${fleet!.uiUrl}/?agent=${a.sessionId}`)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const row = page.getByRole('complementary').locator('li button').filter({ hasText: 'Background worker QA', visible: true }).first()
   await expect(row).toBeVisible()
   const sessionLi = row.locator('xpath=ancestor::li[1]')

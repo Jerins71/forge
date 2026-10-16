@@ -91,6 +91,8 @@ async function launchModel(environment: UiEnvironment, sessionId: string): Promi
 }
 async function logicalGroupKey(page: Page): Promise<string> {
   await page.goto(fleet.uiUrl)
+  // The Inbox keeps its project list collapsed; the Projects tab always shows it.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
 }
@@ -190,6 +192,7 @@ test('a thread started from an open session takes the pane, and follow-up messag
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
 
   // In-app navigation, as a user does it: the previous session is still mounted when the launch lands.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
   await expect(page.getByTestId('launch-workspace')).toBeVisible()
   await page.getByRole('combobox', { name: 'Message agent...' }).fill('First message of the new thread')
@@ -211,6 +214,7 @@ test('a thread started from an open session takes the pane, and follow-up messag
   // The sent first message never comes back as the next new thread's draft, even after a reload.
   for (const reload of [false, true]) {
     if (reload) await page.reload()
+    await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
     await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
     await expect(page.getByTestId('launch-workspace')).toBeVisible()
     await expect(page.getByRole('combobox', { name: 'Message agent...' })).toHaveValue('')
@@ -550,7 +554,10 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   const directory = await mkdtemp(join(tmpdir(), 'forge-ux-project-'))
   await copyFile(join(fixture(fleet.a).checkout, '.fixture-environment.json'), join(directory, '.fixture-environment.json'))
   await page.goto(fleet.uiUrl)
-  await page.getByRole('complementary').getByTitle('Create project').filter({ visible: true }).first().click()
+  // A project is created from the new chat's project picker.
+  await page.getByTestId('sidebar-new-chat').click()
+  await page.getByTestId('new-chat-project-picker').click()
+  await page.getByRole('option', { name: 'New project' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create project' })
   // Empty submit names the field the dialog shows.
   await dialog.getByRole('button', { name: 'Create project' }).click()
@@ -589,6 +596,54 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   await expect(page.locator(`[data-inbox-section="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(1)
   await shot(page, 'new-project-clean')
   assertions.newProject = { sessionId, alerts: 0, needsYouBeforeSend: 0, needsYouAfterTurn: 1, providerTurnsBeforeSend: 0, firstReplyLiveAndReload: true, userTurnActivityRows: true }
+})
+
+test('New chat starts in the last project a chat was started in; the heading picks another, and Projects starts collapsed', async ({ page }) => {
+  const { a } = fleet
+  // The Inbox lists sessions; its Projects section opens on request and is closed again after a reload.
+  await page.goto(fleet.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  const projects = page.locator('[data-inbox-section="projects"]').filter({ visible: true })
+  const projectsToggle = projects.getByRole('button', { name: 'Projects', exact: true })
+  await expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(projects.locator('[data-logical-project]')).toHaveCount(0)
+  await shot(page, 'new-chat-inbox-projects-collapsed')
+  await projectsToggle.click()
+  await expect(projects.locator('[data-logical-project]').first()).toBeVisible()
+  await page.reload()
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  await expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
+
+  // New chat opens the new-chat screen; the project in its heading is a searchable picker.
+  await page.getByTestId('sidebar-new-chat').click()
+  await expect(page.getByTestId('launch-workspace')).toBeVisible()
+  const picker = page.getByTestId('new-chat-project-picker')
+  const before = (await picker.textContent())!.trim()
+  // What was typed goes with the chat to the project picked next.
+  await page.getByRole('combobox', { name: 'Message agent...' }).fill('Start this in UX Fresh')
+  await picker.click()
+  await expect(page.getByRole('option', { name: 'New project' })).toBeVisible()
+  await shot(page, 'new-chat-project-picker-open')
+  await page.getByRole('textbox', { name: 'Search projects' }).fill('fresh')
+  await expect(page.getByRole('listbox', { name: 'Projects' }).getByRole('option')).toHaveCount(1)
+  await expect(page.getByRole('listbox', { name: 'Projects' }).getByRole('option').first()).toHaveAccessibleName('UX Fresh')
+  await page.keyboard.press('Enter')
+  await expect(picker).toHaveText('UX Fresh')
+  await expect(page.getByRole('combobox', { name: 'Message agent...' })).toHaveValue('Start this in UX Fresh')
+  await shot(page, 'new-chat-project-picked')
+  const launched = await launchThread(page, a, 'Start this in UX Fresh')
+  expect((await shellSession(a, launched.sessionId))?.projectId).toMatch(/^project-/)
+
+  // The next New chat starts in the project the last chat was started in, listed first.
+  await page.goto(fleet.uiUrl)
+  await page.getByTestId('sidebar-new-chat').click()
+  await expect(picker).toHaveText('UX Fresh')
+  await picker.click()
+  await expect(page.getByRole('listbox', { name: 'Projects' }).getByRole('option').first()).toHaveAccessibleName('UX Fresh')
+  await page.keyboard.press('Escape')
+  await shot(page, 'new-chat-remembers-project')
+  assertions.newChat = { firstDefault: before, picked: 'UX Fresh', sessionId: launched.sessionId, remembered: 'UX Fresh' }
+  expect(renderErrors).toEqual([])
 })
 
 test('a running turn is stopped from the composer button and with Escape', async ({ page }) => {

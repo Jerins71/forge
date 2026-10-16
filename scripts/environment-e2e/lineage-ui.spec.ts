@@ -229,6 +229,8 @@ test('an idle completed worker continues into the receipt new conversation and a
   await sendMessage(page, '[fixture:spawn] Complete the lineage worker', 'worker spawned')
   const source = await until(() => detail(fleet.a.sessionId), snapshot => snapshot.workers.some(worker => worker.agentId === 'fixture-worker' && worker.status === 'idle'), 30_000)
   workerId = source.workers.find(worker => worker.agentId === 'fixture-worker')!.agentId
+  // Worker rows live in the project tree, which the Inbox keeps collapsed.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const worker = page.locator('[data-worker-row]').filter({ hasText: /Fixture Worker|fixture-worker/ }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await worker.click({ button: 'right' })

@@ -1,4 +1,5 @@
 import { Archive, SquarePen, X } from 'lucide-react'
+import { rankChatProjects } from '@/lib/new-chat-project'
 import { ChangeCwdDialog } from './ChangeCwdDialog'
 import { ForkSessionDialog } from './ForkSessionDialog'
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
@@ -463,6 +464,16 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     onMobileClose?.()
   }, [onOpenStats, onMobileClose])
 
+  const handleNewChat = useCallback(() => {
+    // A new chat starts in the project you last started one in; its heading switches projects.
+    const context = environmentContextRef.current
+    const onNewSession = environmentNavigationRef.current?.onNewSession
+    const project = context ? rankChatProjects(context.registry.logicalProjects.getSnapshot().values(), context.registry)[0] : undefined
+    if (project && onNewSession) onNewSession(project.key)
+    else onAddManager()
+    onMobileClose?.()
+  }, [environmentContextRef, environmentNavigationRef, onAddManager, onMobileClose])
+
   const handleRequestCreateSession = useCallback((profileId: string) => {
     // New threads start in the launch composer, which asks where to run; the name dialog remains
     // only for surfaces without the environment runtime.
@@ -860,12 +871,13 @@ export const AgentSidebar = React.memo(function AgentSidebar({
           </div>
           <button
             type="button"
-            onClick={onAddManager}
-            className="glass-inset inline-flex size-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-            title="Create project"
-            aria-label="Add project"
+            onClick={handleNewChat}
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[10px] bg-primary px-3 text-[12.5px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+            title="New chat in your most recent project"
+            data-testid="sidebar-new-chat"
           >
-            <SquarePen aria-hidden="true" className="size-[15px]" strokeWidth={1.75} />
+            <SquarePen aria-hidden="true" className="size-[14px]" strokeWidth={1.9} />
+            New chat
           </button>
           {onMobileClose ? (
             <button
@@ -882,13 +894,12 @@ export const AgentSidebar = React.memo(function AgentSidebar({
         <div className="flex shrink-0 items-center gap-2 border-b border-sidebar-border px-2 py-2">
           <button
             type="button"
-            onClick={onAddManager}
+            onClick={handleNewChat}
             className="flex min-h-[44px] flex-1 items-center gap-2 rounded-md p-2 text-sm transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
-            title="Create project"
-            aria-label="Add project"
+            title="New chat in your most recent project"
           >
             <SquarePen aria-hidden="true" className="h-4 w-4" />
-            <span>New Project</span>
+            <span>New chat</span>
           </button>
           <div className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium text-muted-foreground">
             <span

@@ -180,6 +180,8 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   const sessionId = await launch('Polish worker stop', '[fixture:spawn-hold] Start a long worker')
   await open(page, sessionId)
   await expect(transcript(page)).toContainText('hold worker spawned', { timeout: 30_000 })
+  // Worker rows live in the project tree, which the Inbox keeps collapsed.
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const worker = page.locator('[data-worker-row]').filter({ hasText: /hold/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await expect(worker).toBeVisible()
@@ -310,6 +312,7 @@ test('a sign-in change writes nothing into the transcript, and a model change is
 
 test('the new-thread model chip shows the model\'s name', async ({ page }) => {
   await page.goto(fleet.uiUrl)
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const groupKey = await page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first().getAttribute('data-logical-project')
   await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(groupKey!)}`)
   const chip = page.getByTestId('launch-workspace').getByRole('button', { name: /^Session model: / })
@@ -452,6 +455,7 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
   await expect(card).not.toContainText('settled without returning a final result')
   await shot(page, 'worker-failure-manager-card')
 
+  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
   const worker = page.locator('[data-worker-row]').filter({ hasText: /fail/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await worker.click()
@@ -476,6 +480,7 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
     await expect(page.locator('[aria-label="Agent status: failed"]')).toHaveCount(1)
     await expect(page.locator('[aria-label="Agent status: error"]')).toHaveCount(0)
     // A reload collapses the session's workers in the sidebar.
+    await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
     if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
     await expect(worker.locator('[aria-label="Failed"]')).toHaveCount(1)
   }

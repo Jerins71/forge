@@ -2302,7 +2302,7 @@ export function BuilderSurface({
                 onRestoreSession={session.handleRestoreSession}
               />
             ) : launchGroupKey ? (
-              <LaunchSessionWorkspace key={launchGroupKey} groupKey={launchGroupKey} onLaunched={handleSelectEnvironmentSession} />
+              <LaunchSessionWorkspace key={launchGroupKey} groupKey={launchGroupKey} onLaunched={handleSelectEnvironmentSession} onChangeProject={handleNewEnvironmentSession} onNewProject={handleOpenCreateManagerDialog} />
             ) : isUnknownEnvironment ? (
               <EnvironmentSessionView
                 onOpenEnvironmentSettings={() => navigateToRoute({ view: 'settings', settingsTab: 'environments' })}

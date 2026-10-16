@@ -56,6 +56,8 @@ export function RoomsInbox({
   const [recentExpanded, setRecentExpanded] = useState(false)
   const [needsYouExpanded, setNeedsYouExpanded] = useState(false)
   const { collapsedSections, toggleSectionCollapsed } = useCollapsedInboxSections()
+  // The Inbox is for sessions; the full project list opens on request and starts closed every time.
+  const [projectsOpen, setProjectsOpen] = useState(false)
   useEffect(() => {
     setRecentExpanded(false)
     setNeedsYouExpanded(false)
@@ -252,7 +254,7 @@ export function RoomsInbox({
       ) : null}
 
       {hasInlineProjects ? (
-        <InboxSection title="Projects" testId="projects">
+        <InboxSection title="Projects" testId="projects" collapsed={!filter && !projectsOpen} onToggleCollapsed={() => setProjectsOpen((open) => !open)}>
           <div className="sidebar-room-inbox-project-list">{projectTree}</div>
         </InboxSection>
       ) : null}

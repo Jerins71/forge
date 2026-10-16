@@ -2,6 +2,10 @@ The sidebar on the left is your main navigation for everything in Forge. The new
 
 Use the Archive view from the sidebar to review archived projects and directly archived sessions. Archive entries are sorted by last user-message activity and show the last-used date. Restore and reopen them when needed. The Archive view is separate from the active session list. Other system profiles remain hidden from the sidebar/profile lists.
 
+## New chat
+
+**New chat** at the top of the sidebar starts a chat in the project you last started one in. The project name in the heading is a picker: it lists your recent projects first, and you can type to find any other. Switching projects keeps what you've typed. **New project** at the bottom of that list creates a project. The **+** on a project's header still starts a chat in that project.
+
 ## Inbox
 
 Inbox is the default new project view. It lists:
@@ -9,7 +13,7 @@ Inbox is the default new project view. It lists:
 - **Needs you** — server-issued work-lifecycle attention. Unread badges and error dots do not create these items. An unanswered **Input requested** pending choice raises **Needs you** even while work still runs or follow-ups are queued; answering or cancelling retracts that item without marking the session complete, so remaining work can stay **Active**. The UI does not synthesize **Needs you** from local badges.
 - **Active** — currently working sessions, capped at five, with **N more** opening Projects.
 - **Recent** — idle sessions updated in the last 7 days, excluding **Needs you** and **Active**. Inbox initially shows five rows; **Show N more** expands the remaining matching rows inline, and **Show less** collapses back to five without switching to Projects.
-- **Projects** — the same project/session tree as Projects mode, shown inline after those sections. Drag project headers to reorder them the same way as in Projects.
+- **Projects** — the same project/session tree as Projects mode, shown inline after those sections. It starts collapsed each time Forge opens; click its heading to show it. Drag project headers to reorder them the same way as in Projects.
 
 **Done** and **Clear** dismiss the exact **Needs you** items they target. Muting a session only hides it from **Needs you** and the Inbox badge; it does not dismiss the attention. Right-click a **Needs you**, **Active**, or **Recent** session for the same session actions as Projects.
 

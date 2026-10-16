@@ -120,6 +120,16 @@ export function clearDraft(draftKey: string): void {
   removeDrafts((key) => key === draftKey)
 }
 
+/** An unsent draft follows its message to another composer, unless that one already holds a draft. */
+export function moveDraft(fromKey: string, toKey: string): void {
+  const text = sharedTextDrafts(); const attachments = sharedAttachmentDrafts()
+  if (!text[fromKey] && !attachments[fromKey]?.length) return
+  if (text[toKey] || attachments[toKey]?.length) return
+  if (text[fromKey]) text[toKey] = text[fromKey]
+  if (attachments[fromKey]?.length) attachments[toKey] = attachments[fromKey]
+  clearDraft(fromKey)
+}
+
 /** Draft keys qualified with `qualifiedKey(environmentId, …)` belong to that environment. */
 export function isEnvironmentDraftKey(key: string, environmentId: string): boolean {
   return key.startsWith(`${JSON.stringify([environmentId]).slice(0, -1)},`)

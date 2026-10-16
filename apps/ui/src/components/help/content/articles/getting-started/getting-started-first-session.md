@@ -2,7 +2,7 @@ Everything in Forge starts with a manager session. Here's how to get one running
 
 ## Create a manager
 
-Click the **+** button at the top of the sidebar to create a new project. You can either use an existing local folder or clone a repository first.
+Click **New chat** at the top of the sidebar, open the project name in the heading, and choose **New project**. You can either use an existing local folder or clone a repository first.
 
 ### Use local folder
 

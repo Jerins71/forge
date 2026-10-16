@@ -18,7 +18,9 @@ import { originRegistry, useOriginSlice } from '@/lib/origin-store'
 import type { ManagerWsState } from '@/lib/ws-state'
 import type { SettingsApiClient } from '@/components/settings/settings-api-client'
 import { SessionModelPicker } from '@/components/chat/message-input/SessionModelPicker'
-import { clearDraft } from '@/components/chat/message-input/draft-storage'
+import { clearDraft, moveDraft } from '@/components/chat/message-input/draft-storage'
+import { rememberChatProject } from '@/lib/new-chat-project'
+import { NewChatProjectPicker } from './NewChatProjectPicker'
 
 const LAST_MACHINE_KEY = (groupKey: string) => `forge.runOn.lastEnvironment.${groupKey}`
 const launchDraftKey = (groupKey: string) => `launch:${groupKey}`
@@ -32,9 +34,11 @@ const SETUP_PHASE_LABEL: Record<string, string> = {
  * runs directly, one without gets one-click setup. The draft is keyed by the logical project, so changing
  * machines (or setting one up) never loses what was typed.
  */
-export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
+export function LaunchSessionWorkspace({ groupKey, onLaunched, onChangeProject, onNewProject }: {
   groupKey: string
   onLaunched: (session: SessionRef) => void
+  onChangeProject: (groupKey: string) => void
+  onNewProject?: () => void
 }) {
   const groups = useLogicalProjects()
   const primaryEnvironmentId = usePrimaryEnvironmentId()
@@ -44,6 +48,7 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
   const [choice, setChoiceState] = useState<RunOnChoice | null>(() => initialChoice(group, primaryEnvironmentId, groupKey))
   const handleLaunched = useCallback((target: ProjectRef, receipt: CommandReceipt) => {
     try { window.localStorage.setItem(LAST_MACHINE_KEY(groupKey), target.environmentId) } catch { /* Preference only. */ }
+    rememberChatProject(groupKey)
     // The first message now lives in the session; the next new thread starts empty.
     if (receipt.sessionId) clearDraft(launchDraftKey(groupKey))
     if (receipt.sessionId) onLaunched({ environmentId: target.environmentId, sessionId: receipt.sessionId })
@@ -86,9 +91,20 @@ export function LaunchSessionWorkspace({ groupKey, onLaunched }: {
         <div className="@container/composer-pane content-gutter">
           <div className="content-column content-composer">
             <div className="pb-6 text-center">
-              <p className="eyebrow mb-2">New thread</p>
-              <h1 className="truncate text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">{targetTitle ?? group.title}</h1>
-              <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Start a new thread. Choose the machine below, then send your first message.</p>
+              <h1 className="text-[30px] font-medium leading-tight tracking-[-0.025em] text-foreground">
+                What should we build in{' '}
+                <NewChatProjectPicker
+                  title={targetTitle ?? group.title}
+                  groupKey={groupKey}
+                  onSelect={(next) => {
+                    // What was typed goes with the chat to its new project.
+                    moveDraft(launchDraftKey(groupKey), launchDraftKey(next))
+                    onChangeProject(next)
+                  }}
+                  onNewProject={onNewProject}
+                />?
+              </h1>
+              <p className="mx-auto mt-1.5 max-w-lg text-balance text-[13.5px] text-muted-foreground">Choose the machine below, then send your first message.</p>
             </div>
             {launch.error ? (
               <div role="alert" className="mb-2 rounded-xl border border-danger/25 bg-danger/10 px-3 py-2 text-xs text-danger">{launch.error}</div>
