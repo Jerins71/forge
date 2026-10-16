@@ -14,7 +14,7 @@ import { planPiResourceLoaderOptions, planRuntimeResourcePaths } from "../runtim
 import { registerFauxProvider } from "../pi/pi-ai-compat.js";
 import { createProviderBoundaryFixture } from "./provider-boundary-fixture.js";
 
-vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({ claudeRuntimeEnvironment: async () => ({}),
+vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({ claudeRuntimeEnvironment: async () => ({}), claudeContextWindowEnvironment: () => ({}),
   resolveClaudeExecutable: async () => "unused-synthetic-executable", assertClaudeSetup: async () => {} }));
 
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");

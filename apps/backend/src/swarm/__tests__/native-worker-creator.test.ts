@@ -8,7 +8,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({ assertClaudeSetup: vi.fn(), claudeRuntimeEnvironment: vi.fn(async () => ({})), resolveClaudeExecutable: vi.fn(async () => "claude") }));
+vi.mock("../runtime/claude/claude-runtime-environment.js", () => ({ assertClaudeSetup: vi.fn(), claudeRuntimeEnvironment: vi.fn(async () => ({})), claudeContextWindowEnvironment: vi.fn(() => ({})), resolveClaudeExecutable: vi.fn(async () => "claude") }));
 vi.mock("../runtime/codex/codex-runtime-auth.js", () => ({ CodexRuntimeAuth: class { initialize = vi.fn(); release = vi.fn(); } }));
 
 describe.each(["codex-native", "claude-native"])("%s roster worker creation", provider => {
