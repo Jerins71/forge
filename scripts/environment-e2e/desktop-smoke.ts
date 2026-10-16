@@ -25,7 +25,7 @@ try {
     application = await electron.launch({ args: [join(repositoryRoot, 'apps/electron/dist/main.js')], cwd: join(repositoryRoot, 'apps/electron'), env, timeout: 60000 });
     const page = await application.firstWindow({ timeout: 60000 });
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-    await expect(page.getByTestId('rooms-mode-switch').filter({ visible: true })).toBeVisible({ timeout: 60000 });
+    await expect(page.getByTestId('sidebar-new-chat').filter({ visible: true })).toBeVisible({ timeout: 60000 });
     await page.goto(`${ui.url}/?agent=${seeded.sessionId}`);
     await expect(page).toHaveURL(new RegExp(`agent=${seeded.sessionId}`));
     const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ });

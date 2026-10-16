@@ -13,10 +13,9 @@ const SIDEBAR_PREF_CHANGE_EVENT = 'forge-sidebar-pref-change'
 const COLLAPSED_PROFILES_KEY = 'forge-sidebar-collapsed-profiles'
 const SEARCH_QUERY_KEY = 'forge-sidebar-search-query'
 const SORT_PREFERENCE_KEY = 'forge-sidebar-sort-preference'
-const ROOMS_MODE_KEY = 'forge-sidebar-rooms-mode'
 
-export type SidebarSortPreference = 'manual' | 'created_at'
-export type SidebarRoomsMode = 'inbox' | 'projects'
+/** How the project list is ordered: your drag order, or most recent session activity first. */
+export type SidebarSortPreference = 'manual' | 'recent'
 
 interface UseSidebarPrefsReturn {
   collapsedProfileIds: Set<string>
@@ -29,8 +28,6 @@ interface UseSidebarPrefsReturn {
   hideCliSessions: boolean
   toggleHideCliSessions: () => void
   sidebarLayout: SidebarLayout
-  roomsMode: SidebarRoomsMode
-  setRoomsMode: (mode: SidebarRoomsMode) => void
   sortPreference: SidebarSortPreference
   setSortPreference: (value: SidebarSortPreference) => void
 }
@@ -56,17 +53,9 @@ function readStoredSearchQuery(): string {
 
 function readStoredSortPreference(): SidebarSortPreference {
   try {
-    return localStorage.getItem(SORT_PREFERENCE_KEY) === 'created_at' ? 'created_at' : 'manual'
+    return localStorage.getItem(SORT_PREFERENCE_KEY) === 'recent' ? 'recent' : 'manual'
   } catch {
     return 'manual'
-  }
-}
-
-function readStoredRoomsMode(): SidebarRoomsMode {
-  try {
-    return localStorage.getItem(ROOMS_MODE_KEY) === 'projects' ? 'projects' : 'inbox'
-  } catch {
-    return 'inbox'
   }
 }
 
@@ -77,7 +66,6 @@ export function useSidebarPrefs(): UseSidebarPrefsReturn {
   const [showProviderUsage, setShowProviderUsage] = useState(() => readSidebarProviderUsagePref())
   const [hideCliSessions, setHideCliSessions] = useState(() => readHideCliSessionsPref())
   const [sidebarLayout, setSidebarLayout] = useState<SidebarLayout>(() => readSidebarLayoutPref())
-  const [roomsMode, setRoomsMode] = useState<SidebarRoomsMode>(() => readStoredRoomsMode())
   const [sortPreference, setSortPreference] = useState<SidebarSortPreference>(() => readStoredSortPreference())
   const searchInputRef = useRef<HTMLInputElement>(null)
   const hideCliSessionsRef = useRef(hideCliSessions)
@@ -124,7 +112,6 @@ export function useSidebarPrefs(): UseSidebarPrefsReturn {
       setShowProviderUsage(readSidebarProviderUsagePref())
       setHideCliSessions(readHideCliSessionsPref())
       setSidebarLayout(readSidebarLayoutPref())
-      setRoomsMode(readStoredRoomsMode())
     }
 
     window.addEventListener(SIDEBAR_PREF_CHANGE_EVENT, update)
@@ -170,14 +157,6 @@ export function useSidebarPrefs(): UseSidebarPrefsReturn {
     }
   }, [sortPreference])
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(ROOMS_MODE_KEY, roomsMode)
-    } catch {
-      // Ignore localStorage write failures (quota, etc.)
-    }
-  }, [roomsMode])
-
   return {
     collapsedProfileIds,
     toggleProfileCollapsed,
@@ -189,8 +168,6 @@ export function useSidebarPrefs(): UseSidebarPrefsReturn {
     hideCliSessions,
     toggleHideCliSessions,
     sidebarLayout,
-    roomsMode,
-    setRoomsMode,
     sortPreference,
     setSortPreference,
   }

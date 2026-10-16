@@ -22,6 +22,7 @@ import { once } from 'node:events'
 import { join } from 'node:path'
 import { chromium, expect, type BrowserContext, type Page } from '@playwright/test'
 import { test as base, BROWSER_E2E_CHROME_PROFILE, BROWSER_E2E_BROWSER_CACHE } from './fixtures/test.js'
+import { openProjectsSection } from './fixtures/sidebar.js'
 import { controlEnvironment, readManifest, repositoryRoot, sanitizedEnvironment, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, until } from './fixtures/rpc-client.js'
@@ -156,8 +157,8 @@ test('the panel opens from the header, resizes, and keeps its width and open sta
   await expect(page.getByRole('combobox', { name: /^(Message |Send another message to )/ })).toBeVisible()
   // A new thread is not the thread the panel belongs to: starting one from the sidebar leaves no browser
   // beside its composer, and going back shows the thread's panel again.
-  // The Inbox keeps its project list collapsed; the Projects tab shows each project's + button.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  // Each project's + button is in the Projects section, which starts collapsed.
+  await openProjectsSection(page)
   await page.getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
   await expect(page.getByTestId('launch-workspace')).toBeVisible()
   await expect(panel(page)).toHaveCount(0)

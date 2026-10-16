@@ -103,7 +103,7 @@ try {
     expect(await application.evaluate(({ app }) => ({ home: app.getPath('home'), userData: app.getPath('userData') })))
       .toEqual({ home: join(fleet.manifest.root, 'desktop-home'), userData })
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.showInactive())
-    await expect(page.getByTestId('rooms-mode-switch').filter({ visible: true })).toBeVisible({ timeout: 60_000 })
+    await expect(page.getByTestId('sidebar-new-chat').filter({ visible: true })).toBeVisible({ timeout: 60_000 })
     return page
   }
   const composer = (page: Page) => page.getByRole('combobox', { name: /^(Message |Send another message to )/ })

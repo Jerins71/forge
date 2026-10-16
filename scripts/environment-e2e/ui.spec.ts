@@ -13,6 +13,7 @@ import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { expect, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { test as base } from './fixtures/test.js'
+import { openProjectsSection } from './fixtures/sidebar.js'
 import { readManifest, controlEnvironment, type FleetManifest } from './launch.js'
 import { startFaultProxy } from './fault-proxy.js'
 import { openFixtureRpc, until, fixtureRpcOnce } from './fixtures/rpc-client.js'
@@ -256,7 +257,7 @@ test('9.2.1 B pairs by link, C pairs by code, and consumed grants cannot be repl
 test('9.2.2 A/B group by repository into one project row, manual split/merge works, C stays independent, sessions stay environment-qualified', async ({ page }) => {
   const { a, b, c } = fleet!
   await page.goto(fleet!.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const sidebar = page.getByRole('complementary')
   const projectList = sidebar.getByTestId('unified-project-list')
   const projectRows = projectList.locator('[data-logical-project]')
@@ -378,8 +379,8 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   const sessionId = (assertions.launch as { sessionId: string }).sessionId;
   await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
   await expect(page.getByTestId('environment-session')).toHaveAttribute('data-environment-id', b.environmentId);
-  // Session rows with data-session-ref are in the project tree, on the Projects tab.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
+  // Session rows with data-session-ref are in the project tree, in the Projects section.
+  await openProjectsSection(page);
   const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
@@ -403,6 +404,7 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   await expect(page.getByRole('button', { name: 'Unpin message', exact: true }).first()).toBeVisible();
   await shot(page, 'batch3-pins-before-reload');
   await page.reload();
+  await openProjectsSection(page);
   await expect(row).toContainText('Batch 3 UI B');
   await expect(row.locator('[aria-label="Pinned"]')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Unpin message', exact: true }).first()).toBeVisible();
@@ -410,14 +412,12 @@ test('Batch 3 UI renders durable session and message pins, rename and foreground
   await shot(page, 'batch3-pins-fresh-bootstrap');
   // Set unread while the user is viewing Inbox, then opening detail sends an explicit native read.
   await page.goto(`${fleet!.uiUrl}/?view=inbox`);
-  // The sidebar remembers its tab; an earlier step left it on Projects.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click();
   await fixtureRpcOnce(b.baseUrl, principal, 'session.readState.set', { commandId: randomUUID(), sessionId, read: false });
   const inboxRow = page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true });
   await expect(inboxRow).toHaveCount(1);
   // The session was just in view, so its "work completed" attention is gone and the Inbox row carries no
   // badge; the unread count itself shows on its row in the project tree.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
+  await openProjectsSection(page);
   await expect(row).toHaveText(/Batch 3 UI B\s*1/);
   await shot(page, 'batch3-unread-inbox');
   const start = proxy.metrics().commandAttempts.length;
@@ -442,8 +442,8 @@ test('Batch 8 renamed CLI session renders its new shell title after backend rest
   await cli.renameSession(sessionId, 'Renamed CLI after restart');
   await fleet!.stop(b); await fleet!.start(b);
   await page.goto(`${fleet!.uiUrl}/?agent=${sessionId}&env=${b.environmentId}`);
-  // Session rows with data-session-ref are in the project tree, on the Projects tab.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click();
+  // Session rows with data-session-ref are in the project tree, in the Projects section.
+  await openProjectsSection(page);
   const row = page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).first();
   await expect(row).toContainText('Renamed CLI after restart');
   await expect(row).not.toContainText('Original CLI title');
@@ -457,6 +457,7 @@ test('Project Agent config and references use scoped native contracts and surviv
   const manifest = await readManifest(process.env.FORGE_E2E_MANIFEST!)
   await controlEnvironment(manifest, 'env-a', 'fixture', { operation: 'project-agent-recommendations', sessionId: a.sessionId })
   await page.goto(`${fleet!.uiUrl}/?agent=${encodeURIComponent(a.sessionId)}`)
+  await openProjectsSection(page)
   const row = page.getByRole('complementary').locator('button[draggable="true"]').filter({ hasText: a.projectTitle }).first()
   await expect(row).toBeVisible()
   await row.click({ button: 'right' })
@@ -488,6 +489,7 @@ test('Project Agent config and references use scoped native contracts and surviv
   await expect(settings.getByRole('button', { name: 'Save', exact: true }).first()).toBeDisabled()
   await shot(page, 'project-agent-reference')
   await page.reload()
+  await openProjectsSection(page)
   const freshRow = page.getByRole('complementary').locator('button[draggable="true"]').filter({ hasText: a.projectTitle }).first()
   await expect(freshRow.locator('[aria-label="Project Agent"]')).toBeVisible()
   await freshRow.click({ button: 'right' })
@@ -557,8 +559,8 @@ test('9.2.5/6 explicitly mounted three views share sockets, release streams, and
   expect(metrics.flatMap(value => value.subscriptions).filter(value => value.method === 'session.subscribe')).toHaveLength(3)
   await driveShellStatus(manifest, b.sessionId, 'streaming')
   await controlEnvironment(manifest, 'env-b', 'fixture', { operation: 'shell-burst', sessionId: b.sessionId, count: 1 })
-  // Session rows with data-session-ref are in the project tree, on the Projects tab.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  // Session rows with data-session-ref are in the project tree, in the Projects section.
+  await openProjectsSection(page)
   await expect(page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${b.sessionId}"] [aria-label="running"]`)).toHaveCount(1)
   const freshness = await page.evaluate(() => (window as any).__forgeE2ERuntime.snapshot())
   expect(freshness.every((environment: any) => environment.fresh && environment.complete)).toBe(true)
@@ -887,8 +889,7 @@ test('base URL: per-provider hint, path correction, and Test connection against 
 })
 
 async function openInbox(page: Page) {
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
-  await expect(page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByTestId('rooms-inbox').filter({ visible: true })).toBeVisible()
 }
 
 /** The sidebar is rendered for desktop and for the mobile drawer; only the visible copy counts. */
@@ -983,7 +984,6 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   const [first] = await attention('attention')
   expect(first).toBeTruthy()
   await expect(row).toHaveCount(1)
-  await expect(page.getByTestId('rooms-mode-switch').getByLabel(/sessions need you/).filter({ visible: true })).toHaveCount(1)
   await shot(page, 'needs-you-unmounted-remote')
 
   // The persisted shell alone restores it while C is unreachable, and it is still there after reconnect.
@@ -1033,7 +1033,7 @@ test('Needs You lists a remote session that was never opened, survives an offlin
 test('a launch link for a project that no longer exists does not crash the app', async ({ page }) => {
   await page.goto(`${fleet!.uiUrl}/?launch=${encodeURIComponent('no-such-project')}`)
   await page.waitForFunction(() => !!(window as any).__forgeE2ERuntime)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   await expect(page.getByRole('complementary').getByTestId('unified-project-list')).toBeVisible()
   expect(renderErrors).toEqual([])
   assertions.unknownLaunchKey = { crashed: false }
@@ -1183,7 +1183,7 @@ test('narrow layout keeps Run on and Workspace reachable', async ({ page }) => {
 
 async function logicalGroupKey(page: Page, _environment: UiEnvironment): Promise<string> {
   await page.goto(fleet!.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   // A's project row carries its logical group key.
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
@@ -1202,7 +1202,7 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   const worker = await until<any>(async () => (await detail()).workers[0], Boolean)
   await until<any>(async () => (await detail()).choices.find((choice: any) => choice.agentId === worker.agentId && choice.status === 'pending'), Boolean)
   await page.goto(`${fleet!.uiUrl}/?agent=${a.sessionId}`)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const row = page.getByRole('complementary').locator('li button').filter({ hasText: 'Background worker QA', visible: true }).first()
   await expect(row).toBeVisible()
   const sessionLi = row.locator('xpath=ancestor::li[1]')
@@ -1225,6 +1225,7 @@ test('F15/F16: a native choice reaches Needs You and a background worker can be 
   await until(detail, snapshot => !snapshot.workers.some((entry: any) => entry.agentId === worker.agentId))
   await expect(workerRow).toHaveCount(0)
   await page.reload()
+  await openProjectsSection(page)
   await expect(row).toBeVisible()
   if (await expand.count()) await expand.click()
   await expect(workerRow).toHaveCount(0)

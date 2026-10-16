@@ -19,12 +19,12 @@ export function RoomsInbox({
   sections,
   selected,
   onSelectSession,
-  onShowProjects,
   onNewProject,
   onAcknowledgeNeedsYou,
   onClearNeedsYou,
   dismissError,
   projectTree,
+  projectsAction,
   hasInlineProjectContent = false,
   mutedSessionIds,
   now,
@@ -34,13 +34,14 @@ export function RoomsInbox({
   sections: RoomsInboxSections
   selected?: Pick<RoomsInboxIdentity, 'originId' | 'sessionAgentId'> | null
   onSelectSession: (identity: RoomsInboxIdentity) => void
-  onShowProjects: () => void
   onNewProject: () => void
   onAcknowledgeNeedsYou: (session: RoomsInboxSessionViewModel) => void
   onClearNeedsYou: (sessions: readonly RoomsInboxSessionViewModel[]) => void
   dismissError?: string | null
-  /** The same Rooms v2 project tree rendered in the Projects tab. */
+  /** The full project tree; the section starts collapsed. */
   projectTree?: ReactNode
+  /** Header controls shown while the Projects section is open. */
+  projectsAction?: ReactNode
   /** Derived from the shared tree's rows and visible remote status cards. */
   hasInlineProjectContent?: boolean
   /** Presentation-only mute affordance; this does not participate in Inbox classification. */
@@ -71,7 +72,7 @@ export function RoomsInbox({
       .map((session) => `${session.identity.originId}::${session.identity.profileId}`),
   ).size <= 1
   const recentVisibility = visibleRecentSessions(sections.recent, recentExpanded, selected)
-  // The shared tree is the authoritative Projects-mode render model: it may
+  // The shared tree is the authoritative project render model: it may
   // contain a session/worker-only search match, an inactive Project Agent, or
   // a remote sign-in/retry card even when the Inbox shortcut count is zero.
   // The element itself is always supplied by production composition, so its
@@ -127,6 +128,8 @@ export function RoomsInbox({
       {sections.needsYou.length > 0 ? (
         <InboxSection
           title="Needs you"
+          // Collapsed, the count is the only sign that something is waiting.
+          detail={!filter && collapsedSections.has('needs-you') ? String(sections.needsYou.length) : undefined}
           testId="needs-you"
           {...collapsible('needs-you')}
           action={(
@@ -194,7 +197,7 @@ export function RoomsInbox({
           {sections.activeOverflowCount > 0 ? (
             <button
               type="button"
-              onClick={onShowProjects}
+              onClick={() => setProjectsOpen(true)}
               className="sidebar-room-inbox-more focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring/60"
             >
               {sections.activeOverflowCount} more
@@ -254,7 +257,13 @@ export function RoomsInbox({
       ) : null}
 
       {hasInlineProjects ? (
-        <InboxSection title="Projects" testId="projects" collapsed={!filter && !projectsOpen} onToggleCollapsed={() => setProjectsOpen((open) => !open)}>
+        <InboxSection
+          title="Projects"
+          testId="projects"
+          collapsed={!filter && !projectsOpen}
+          onToggleCollapsed={() => setProjectsOpen((open) => !open)}
+          action={filter || projectsOpen ? projectsAction : undefined}
+        >
           <div className="sidebar-room-inbox-project-list">{projectTree}</div>
         </InboxSection>
       ) : null}

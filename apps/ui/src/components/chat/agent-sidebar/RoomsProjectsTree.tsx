@@ -42,7 +42,7 @@ export function RoomsProjectsTree({
   roomsV2?: boolean
   activeView: boolean
   isSearchActive: boolean
-  /** When false, the tree stays a static list. Inbox and Projects share the same reorder path. */
+  /** When false, the tree stays a static list. */
   dndEnabled?: boolean
   onMoveBuilderProject?: (active: BuilderSidebarOrderRef, over: BuilderSidebarOrderRef) => void
   renderRow: (

@@ -1,4 +1,4 @@
-import type { EnvironmentRegistry, LogicalProjectGroup } from '@forge/client-runtime'
+import type { EnvironmentRegistry, LogicalProjectGroup, ShellState } from '@forge/client-runtime'
 
 const RECENT_PROJECTS_KEY = 'forge.newChat.recentProjects'
 const MAX_REMEMBERED = 20
@@ -19,17 +19,21 @@ export function rememberChatProject(groupKey: string): void {
 }
 
 /** Latest session activity across the project's checkouts on every paired machine. */
-function lastActivity(group: LogicalProjectGroup, registry: EnvironmentRegistry): string {
+export function projectLastActivity(group: LogicalProjectGroup, shellOf: (environmentId: string) => ShellState | undefined): string {
   let latest = ''
   for (const member of group.members) {
-    if (!registry.catalog.getSnapshot().has(member.environmentId)) continue
-    const shell = registry.get(member.environmentId).shell.getSnapshot()
+    const shell = shellOf(member.environmentId)
+    if (!shell) continue
     for (const sessionId of shell.sessionIdsByProject.get(member.projectId) ?? []) {
       const updatedAt = shell.sessions.get(sessionId)?.updatedAt ?? ''
       if (updatedAt > latest) latest = updatedAt
     }
   }
   return latest
+}
+
+export function pairedShell(registry: EnvironmentRegistry, environmentId: string): ShellState | undefined {
+  return registry.catalog.getSnapshot().has(environmentId) ? registry.get(environmentId).shell.getSnapshot() : undefined
 }
 
 /**
@@ -41,7 +45,7 @@ export function rankChatProjects(groups: Iterable<LogicalProjectGroup>, registry
   const rank = new Map(recent.map((key, index) => [key, index]))
   const activity = new Map<string, string>()
   const list = [...groups]
-  for (const group of list) activity.set(group.key, lastActivity(group, registry))
+  for (const group of list) activity.set(group.key, projectLastActivity(group, (id) => pairedShell(registry, id)))
   return list.sort((a, b) => {
     const ra = rank.get(a.key) ?? Infinity
     const rb = rank.get(b.key) ?? Infinity

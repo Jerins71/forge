@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { expect, type BrowserContext, type Page } from '@playwright/test'
 import type { SessionSummary, CommandReceipt } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
+import { openProjectsSection } from './fixtures/sidebar.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiEnvironment, type UiFleet } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js'
@@ -91,8 +92,7 @@ async function launchModel(environment: UiEnvironment, sessionId: string): Promi
 }
 async function logicalGroupKey(page: Page): Promise<string> {
   await page.goto(fleet.uiUrl)
-  // The Inbox keeps its project list collapsed; the Projects tab always shows it.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const projectRow = page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first()
   return (await projectRow.getAttribute('data-logical-project'))!
 }
@@ -192,7 +192,7 @@ test('a thread started from an open session takes the pane, and follow-up messag
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
 
   // In-app navigation, as a user does it: the previous session is still mounted when the launch lands.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
   await expect(page.getByTestId('launch-workspace')).toBeVisible()
   await page.getByRole('combobox', { name: 'Message agent...' }).fill('First message of the new thread')
@@ -214,7 +214,7 @@ test('a thread started from an open session takes the pane, and follow-up messag
   // The sent first message never comes back as the next new thread's draft, even after a reload.
   for (const reload of [false, true]) {
     if (reload) await page.reload()
-    await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+    await openProjectsSection(page)
     await page.getByRole('complementary').getByRole('button', { name: /^New session for / }).filter({ visible: true }).first().click()
     await expect(page.getByTestId('launch-workspace')).toBeVisible()
     await expect(page.getByRole('combobox', { name: 'Message agent...' })).toHaveValue('')
@@ -271,6 +271,7 @@ test('files a session on a paired machine made open in the artifact panel withou
   }
   const results: Record<string, unknown> = {}
   await page.goto(fleet.uiUrl)
+  await openProjectsSection(page)
   await page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true }).click()
   for (const phase of ['live', 'reloaded'] as const) {
     if (phase === 'reloaded') await page.reload()
@@ -313,6 +314,7 @@ test('a session on a paired machine is archived and deleted from its row, live a
   const row = (sessionId: string) => page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${sessionId}"]`).filter({ visible: true })
 
   await page.goto(fleet.uiUrl)
+  await openProjectsSection(page)
   await expect(row(archived)).toHaveCount(1)
   await expect(row(deleted)).toHaveCount(1)
 
@@ -332,6 +334,7 @@ test('a session on a paired machine is archived and deleted from its row, live a
   await expect(page.getByRole('complementary').getByRole('alert')).toHaveCount(0)
 
   await page.reload()
+  await openProjectsSection(page)
   await expect(row(b.sessionId)).toHaveCount(1)
   await expect(row(archived)).toHaveCount(0)
   await expect(row(deleted)).toHaveCount(0)
@@ -356,7 +359,6 @@ test('a paired machine\'s session has the full session menu in the Inbox list', 
   const row = () => page.locator(`[data-inbox-row="${b.environmentId}::${sessionId}"]`).filter({ visible: true })
 
   await page.goto(fleet.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(row()).toHaveCount(1)
   await row().click({ button: 'right' })
   // The same menu a local session has, limited to what the other machine supports.
@@ -380,7 +382,6 @@ test('a paired machine\'s session has the full session menu in the Inbox list', 
   await expect(row()).toHaveCount(0)
   await expect.poll(async () => (await shellSession(b, sessionId)) ?? null).toBeNull()
   await page.reload()
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(row()).toHaveCount(0)
   await expect(page.getByRole('complementary').getByRole('alert')).toHaveCount(0)
   assertions.remoteInboxMenu = { environmentId: b.environmentId, sessionId, renamed: true, pinned: true, deleted: true }
@@ -592,7 +593,6 @@ test('a new project opens clean: no settling error and nothing in Needs you', as
   await expect(transcript(page)).toContainText('assistant reply', { timeout: 30_000 })
   await expect(transcript(page)).toContainText(/Ran \d+ commands?/)
   // The finished turn the user sent waits in Needs you, even though its thread is open, until Done.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(page.locator(`[data-inbox-section="needs-you"] [data-inbox-row$="::${sessionId}"]`)).toHaveCount(1)
   await shot(page, 'new-project-clean')
   assertions.newProject = { sessionId, alerts: 0, needsYouBeforeSend: 0, needsYouAfterTurn: 1, providerTurnsBeforeSend: 0, firstReplyLiveAndReload: true, userTurnActivityRows: true }
@@ -602,7 +602,6 @@ test('New chat starts in the last project a chat was started in; the heading pic
   const { a } = fleet
   // The Inbox lists sessions; its Projects section opens on request and is closed again after a reload.
   await page.goto(fleet.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   const projects = page.locator('[data-inbox-section="projects"]').filter({ visible: true })
   const projectsToggle = projects.getByRole('button', { name: 'Projects', exact: true })
   await expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
@@ -611,7 +610,6 @@ test('New chat starts in the last project a chat was started in; the heading pic
   await projectsToggle.click()
   await expect(projects.locator('[data-logical-project]').first()).toBeVisible()
   await page.reload()
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(projectsToggle).toHaveAttribute('aria-expanded', 'false')
 
   // New chat opens the new-chat screen; the project in its heading is a searchable picker.
@@ -643,6 +641,48 @@ test('New chat starts in the last project a chat was started in; the heading pic
   await page.keyboard.press('Escape')
   await shot(page, 'new-chat-remembers-project')
   assertions.newChat = { firstDefault: before, picked: 'UX Fresh', sessionId: launched.sessionId, remembered: 'UX Fresh' }
+  expect(renderErrors).toEqual([])
+})
+
+test('the sidebar is one list whose Projects keep your drag order or sort by recent activity, remembered across reloads', async ({ page }) => {
+  const { a } = fleet
+  await page.goto(fleet.uiUrl)
+  await expect(page.getByTestId('rooms-inbox').filter({ visible: true })).toBeVisible()
+  await expect(page.getByTestId('rooms-mode-switch')).toHaveCount(0)
+  await openProjectsSection(page)
+  const projects = page.locator('[data-inbox-section="projects"]').filter({ visible: true })
+  const manual = projects.getByTestId('project-sort').getByRole('button', { name: 'Manual', exact: true })
+  const recent = projects.getByRole('button', { name: 'Recent', exact: true })
+  const order = () => projects.locator('[data-logical-project]').evaluateAll(rows => rows.map(row => row.getAttribute('data-logical-project')))
+  const local = projects.locator('[data-logical-project]:not([data-testid="remote-project-group"])')
+  await expect(manual).toHaveAttribute('aria-pressed', 'true')
+  await expect(projects.getByRole('button', { name: /or drag project/ }).first()).toBeVisible()
+  const manualOrder = await order()
+  expect(manualOrder.length).toBeGreaterThan(1)
+  await shot(page, 'projects-manual-order')
+
+  // A chat in the project last in your order puts it first under Recent, which is a static list.
+  const last = (await local.last().getAttribute('data-logical-project'))!
+  await local.last().getByRole('button', { name: /^New session for / }).click()
+  await launchThread(page, a, 'Recent activity in the last project')
+  await openProjectsSection(page)
+  await recent.click()
+  await expect(recent).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(async () => (await order())[0]).toBe(last)
+  await expect(projects.getByRole('button', { name: /or drag project/ })).toHaveCount(0)
+  await shot(page, 'projects-recent-order')
+
+  // The choice survives a reload; the section itself starts collapsed again.
+  await page.reload()
+  await openProjectsSection(page)
+  await expect(recent).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(async () => (await order())[0]).toBe(last)
+
+  // Recent never rewrote your order: Manual brings it back exactly.
+  await manual.click()
+  await expect.poll(order).toEqual(manualOrder)
+  await expect(projects.getByRole('button', { name: /or drag project/ }).first()).toBeVisible()
+  assertions.projectSort = { manualOrder, recentFirst: last, rememberedAcrossReload: true, manualRestored: true }
   expect(renderErrors).toEqual([])
 })
 
@@ -691,7 +731,6 @@ test('the session in view stays read, and stays in Needs you until Done', async 
   // Reading the thread never clears Needs you.
   await page.waitForTimeout(2_000)
   expect(await state()).toEqual({ status: 'idle', unread: 0, attention: 'work_settled' })
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   const done = page.locator('[data-inbox-section="needs-you"]').getByRole('button', { name: new RegExp(`^Mark .* done .*\\(${viewedSession()}\\)$`) })
   await expect(done).toHaveCount(1)
   await shot(page, 'viewed-session-needs-you')
@@ -711,7 +750,7 @@ test('the sidebar keeps its dragged width, and Recent its collapsed state, acros
     const path = join(sidebarShots, `${name}.png`)
     await page.screenshot({ path }); assertions[`screenshot:${name}`] = path
   }
-  const showInbox = () => page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
+  const showInbox = () => expect(page.getByTestId('rooms-inbox').filter({ visible: true })).toBeVisible()
   const aside = page.locator('aside[data-tour="sidebar"]')
   const width = async () => Math.round((await aside.boundingBox())!.width)
   const handle = page.getByTestId('sidebar-resize-handle')
@@ -829,7 +868,7 @@ test('Archive all sessions archives every session but each checkout\'s own, here
   expect(open(before.b, b).length).toBeGreaterThan(0)
 
   await page.goto(fleet.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
+  await openProjectsSection(page)
   await page.getByRole('complementary').getByRole('button', { name: `Project actions for ${a.projectTitle}` }).filter({ visible: true }).first().click()
   await page.getByRole('menuitem', { name: 'Archive all sessions…', exact: true }).click()
   const dialog = page.getByTestId('archive-all-sessions')
@@ -849,6 +888,7 @@ test('Archive all sessions archives every session but each checkout\'s own, here
     expect(after.filter(session => !session.archived).map(session => session.sessionId)).toEqual([environment.sessionId])
   }
   await page.reload()
+  await openProjectsSection(page)
   await expect(page.getByRole('complementary').locator('[data-session-ref]').filter({ visible: true })).toHaveCount(1)
   // Nothing left to do: the dialog says so instead of offering an empty action.
   await page.getByRole('complementary').getByRole('button', { name: `Project actions for ${a.projectTitle}` }).filter({ visible: true }).first().click()
@@ -876,6 +916,7 @@ test('a new thread is named after its first message, here and on a paired machin
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/agent=v2-/)
   const local = new URL(page.url()).searchParams.get('agent')!
+  await openProjectsSection(page)
   await expect(localRow(placeholder)).toHaveCount(1)
   await expect(header()).toContainText(placeholder)
   await shot(page, 'auto-title-before')
@@ -884,6 +925,7 @@ test('a new thread is named after its first message, here and on a paired machin
   await expect(header()).toContainText(generated)
   await shot(page, 'auto-title-after')
   await page.reload()
+  await openProjectsSection(page)
   await expect(localRow(generated)).toHaveCount(1)
   await expect(header()).toContainText(generated)
 
@@ -910,6 +952,7 @@ test('a new thread is named after its first message, here and on a paired machin
   // Well past the fixture's title delay, both keep their titles.
   await page.waitForTimeout(5_000)
   await page.reload()
+  await openProjectsSection(page)
   await expect(localRow('My own name')).toHaveCount(1)
   await expect(localRow(failedText)).toHaveCount(1)
   assertions.autoTitles = { local, remote, renamed, failed, generated }
@@ -937,6 +980,7 @@ test('Regenerate title names a thread again from its latest messages, live and a
     await expect(runOn).toBeFocused()
   }
   const { sessionId: local } = await launchThread(page, a, first)
+  await openProjectsSection(page)
   await expect(localRow(first)).toHaveCount(1)
 
   // The item sits directly under Rename. A failed generation says why and keeps the title.
@@ -961,6 +1005,7 @@ test('Regenerate title names a thread again from its latest messages, live and a
   await expect(header()).toContainText(regenerated)
   await shot(page, 'regenerate-title-after')
   await page.reload()
+  await openProjectsSection(page)
   await expect(localRow(regenerated)).toHaveCount(1)
   await expect(header()).toContainText(regenerated)
   await expect.poll(async () => (await shellSession(a, local))?.title).toBe(regenerated)
@@ -975,12 +1020,14 @@ test('Regenerate title names a thread again from its latest messages, live and a
   await until(async () => (await shellSession(b, remote))?.status, status => status === 'idle', 30_000)
   const remoteRow = () => page.getByRole('complementary').locator(`[data-session-ref="${b.environmentId}:${remote}"]`).filter({ visible: true })
   await page.goto(fleet.uiUrl)
+  await openProjectsSection(page)
   await expect(remoteRow()).toContainText('Remote regenerate start')
   await remoteRow().click({ button: 'right' })
   await page.getByRole('menuitem', { name: 'Regenerate title', exact: true }).click()
   await expect.poll(async () => (await shellSession(b, remote))?.title, { timeout: 30_000 }).toBe(regenerated)
   await expect(remoteRow()).toContainText(regenerated)
   await page.reload()
+  await openProjectsSection(page)
   await expect(remoteRow()).toContainText(regenerated)
   assertions.regenerateTitle = { local, remote, title: regenerated }
   expect(renderErrors).toEqual([])
@@ -1008,6 +1055,7 @@ test('Change Default Model sets the project\'s default on every machine; a new t
 
   const openDialog = async () => {
     // The project row's context menu, as the user opened it.
+    await openProjectsSection(page)
     await page.getByRole('complementary').getByRole('button', { name: new RegExp(`^(Expand|Collapse)( or drag)? project ${a.projectTitle}$`) }).filter({ visible: true }).first().click({ button: 'right' })
     await page.getByRole('menuitem', { name: 'Change Default Model', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Change Default Model' })
@@ -1021,7 +1069,7 @@ test('Change Default Model sets the project\'s default on every machine; a new t
   }
 
   await page.goto(fleet.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
+  await openProjectsSection(page)
   let dialog = await openDialog()
   await choose(dialog, 'Model', 'GPT-6 Luna')
   await choose(dialog, 'Reasoning Level', 'Medium')

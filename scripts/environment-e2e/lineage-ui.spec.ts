@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { expect, type BrowserContext, type Page } from '@playwright/test'
 import type { CommandReceipt, DetailStreamItem, SessionLineageSnapshot } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
+import { openProjectsSection } from './fixtures/sidebar.js'
 import { controlEnvironment, readManifest, repositoryRoot, type FleetManifest } from './launch.js'
 import { openFixtureRpc, until } from './fixtures/rpc-client.js'
 import { openUiFleet, readLaunchEvidence, type UiFleet } from './fixtures/ui-fleet.js'
@@ -230,7 +231,7 @@ test('an idle completed worker continues into the receipt new conversation and a
   const source = await until(() => detail(fleet.a.sessionId), snapshot => snapshot.workers.some(worker => worker.agentId === 'fixture-worker' && worker.status === 'idle'), 30_000)
   workerId = source.workers.find(worker => worker.agentId === 'fixture-worker')!.agentId
   // Worker rows live in the project tree, which the Inbox keeps collapsed.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const worker = page.locator('[data-worker-row]').filter({ hasText: /Fixture Worker|fixture-worker/ }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await worker.click({ button: 'right' })

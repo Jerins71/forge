@@ -19,6 +19,7 @@ import { join } from 'node:path'
 import { expect, type BrowserContext, type Locator, type Page, type WebSocket } from '@playwright/test'
 import type { CommandReceipt, DetailStreamItem, SessionSummary } from '@forge/protocol/environment-v2'
 import { test as base } from './fixtures/test.js'
+import { openProjectsSection } from './fixtures/sidebar.js'
 import { controlEnvironment, readManifest, repositoryRoot, type BootstrapSession, type FleetManifest } from './launch.js'
 import { openUiFleet, type UiFleet } from './fixtures/ui-fleet.js'
 import { fixtureRpcOnce, openFixtureRpc, until } from './fixtures/rpc-client.js'
@@ -181,17 +182,16 @@ test('a worker the user stopped is a neutral marker, not a blocked result, and i
   await open(page, sessionId)
   await expect(transcript(page)).toContainText('hold worker spawned', { timeout: 30_000 })
   // Worker rows live in the project tree, which the Inbox keeps collapsed.
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const worker = page.locator('[data-worker-row]').filter({ hasText: /hold/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await expect(worker).toBeVisible()
   // The sidebar counts the worker that is running, and the timeline is the only activity display.
   await expect.poll(async () => (await shellSession(sessionId))?.activeWorkerCount, { timeout: 15_000 }).toBe(1)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Inbox/ }).click()
   await expect(page.locator('[data-inbox-section="active"]')).toContainText('1 worker')
   await expect(page.getByTestId('manager-tool-activity')).toHaveCount(0)
   await shot(page, 'worker-running-sidebar-count')
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: /^Projects/ }).click()
+  await openProjectsSection(page)
   await worker.click({ button: 'right' })
   await shot(page, 'worker-running-menu')
   await page.getByRole('menuitem', { name: 'Stop', exact: true }).click()
@@ -312,7 +312,7 @@ test('a sign-in change writes nothing into the transcript, and a model change is
 
 test('the new-thread model chip shows the model\'s name', async ({ page }) => {
   await page.goto(fleet.uiUrl)
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const groupKey = await page.getByRole('complementary').locator('[data-logical-project]:not([data-testid="remote-project-group"])').first().getAttribute('data-logical-project')
   await page.goto(`${fleet.uiUrl}/?launch=${encodeURIComponent(groupKey!)}`)
   const chip = page.getByTestId('launch-workspace').getByRole('button', { name: /^Session model: / })
@@ -455,7 +455,7 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
   await expect(card).not.toContainText('settled without returning a final result')
   await shot(page, 'worker-failure-manager-card')
 
-  await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+  await openProjectsSection(page)
   const worker = page.locator('[data-worker-row]').filter({ hasText: /fail/i }).first()
   if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
   await worker.click()
@@ -480,7 +480,7 @@ test('a worker\'s provider failure is one failed row in the worker view, and the
     await expect(page.locator('[aria-label="Agent status: failed"]')).toHaveCount(1)
     await expect(page.locator('[aria-label="Agent status: error"]')).toHaveCount(0)
     // A reload collapses the session's workers in the sidebar.
-    await page.getByTestId('rooms-mode-switch').getByRole('button', { name: 'Projects', exact: true }).click()
+    await openProjectsSection(page)
     if (!(await worker.isVisible())) await page.getByRole('button', { name: 'Expand session workers' }).first().click()
     await expect(worker.locator('[aria-label="Failed"]')).toHaveCount(1)
   }

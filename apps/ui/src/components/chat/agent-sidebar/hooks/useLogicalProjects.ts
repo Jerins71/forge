@@ -3,6 +3,7 @@ import type { ProjectRef, SessionRef } from '@forge/protocol/environment-v2'
 import type { LogicalProjectGroup, SelectorStore, ShellState } from '@forge/client-runtime'
 import { useSelectorStore } from '@/hooks/use-environment-selector'
 import { useOptionalEnvironmentContext } from '@/lib/origin-store/environment-provider'
+import { pairedShell, projectLastActivity } from '@/lib/new-chat-project'
 
 /** A session of this project on another machine, with pinned sessions ordered before recent ones. */
 export interface RemoteSessionEntry {
@@ -17,6 +18,7 @@ const EMPTY_GROUPS: Groups = new Map()
 const NO_GROUPS: SelectorStore<Groups> = { getSnapshot: () => EMPTY_GROUPS, subscribe: () => () => {} }
 const EMPTY_ENTRIES: readonly RemoteSessionEntry[] = []
 const EMPTY_KEYS: readonly string[] = []
+const EMPTY_ACTIVITY: ReadonlyMap<string, string> = new Map()
 
 /**
  * The logical project a local project row stands for. When several local projects share one repository
@@ -88,6 +90,51 @@ export function useRemoteSessions(members: readonly ProjectRef[] | undefined, se
     cache.current = { remote, term, shells, value }
     return value
   }, [registry, remote, term])
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+const selectGroups = (groups: Groups) => groups
+
+/**
+ * Latest session activity of each logical project across every paired machine, keyed by the group key and by
+ * each member as `environmentId/projectId`. Only tracked while `enabled`; it backs the Recent project order.
+ */
+export function useProjectActivity(enabled: boolean): ReadonlyMap<string, string> {
+  const registry = useOptionalEnvironmentContext()?.registry
+  const groups = useSelectorStore(enabled ? registry?.logicalProjects ?? NO_GROUPS : NO_GROUPS, selectGroups)
+  const environmentIds = useMemo(
+    () => [...new Set([...groups.values()].flatMap((group) => group.members.map((member) => member.environmentId)))],
+    [groups],
+  )
+  const cache = useRef<{ groups: Groups; shells: (ShellState | undefined)[]; value: ReadonlyMap<string, string> } | null>(null)
+  const subscribe = useCallback((listener: () => void) => {
+    if (!registry) return () => {}
+    const unsubscribes = environmentIds
+      .filter((environmentId) => registry.catalog.getSnapshot().has(environmentId))
+      .map((environmentId) => registry.get(environmentId).shell.subscribe(selectSessions, listener, Object.is, SESSIONS_KEYS))
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe())
+  }, [environmentIds, registry])
+  const getSnapshot = useCallback(() => {
+    if (!registry || groups.size === 0) return EMPTY_ACTIVITY
+    const shells = environmentIds.map((environmentId) => pairedShell(registry, environmentId))
+    const previous = cache.current
+    if (previous && previous.groups === groups && previous.shells.length === shells.length && previous.shells.every((shell, index) => shell === shells[index])) {
+      return previous.value
+    }
+    const shellById = new Map(environmentIds.map((environmentId, index) => [environmentId, shells[index]]))
+    const next = new Map<string, string>()
+    for (const group of groups.values()) {
+      const latest = projectLastActivity(group, (environmentId) => shellById.get(environmentId))
+      next.set(group.key, latest)
+      for (const member of group.members) {
+        const memberKey = `${member.environmentId}/${member.projectId}`
+        if (latest > (next.get(memberKey) ?? '')) next.set(memberKey, latest)
+      }
+    }
+    const value = previous && previous.value.size === next.size && [...next].every(([key, at]) => previous.value.get(key) === at) ? previous.value : next
+    cache.current = { groups, shells, value }
+    return value
+  }, [environmentIds, groups, registry])
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 

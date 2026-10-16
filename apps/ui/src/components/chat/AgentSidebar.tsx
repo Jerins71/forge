@@ -34,8 +34,9 @@ import { SidebarFooter } from './agent-sidebar/SidebarFooter'
 import { SidebarResizeHandle } from './agent-sidebar/SidebarResizeHandle'
 import { ProfileGroup } from './agent-sidebar/ProfileGroup'
 import { RemoteProjectGroup } from './agent-sidebar/LogicalProjectGroup'
-import { useRemoteOnlyProjectKeys } from './agent-sidebar/hooks/useLogicalProjects'
+import { useProjectActivity, useRemoteOnlyProjectKeys } from './agent-sidebar/hooks/useLogicalProjects'
 import { RoomsInboxLive } from './agent-sidebar/RoomsInboxLive'
+import { ProjectSortToggle } from './agent-sidebar/ProjectSortToggle'
 import { RoomsProjectsTree, type RoomsProjectTreeRow } from './agent-sidebar/RoomsProjectsTree'
 import type { RoomsInboxOriginInput } from './agent-sidebar/rooms-inbox-selectors'
 import {
@@ -142,8 +143,8 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     hideCliSessions,
     toggleHideCliSessions,
     sidebarLayout,
-    roomsMode,
-    setRoomsMode,
+    sortPreference,
+    setSortPreference,
   } = useSidebarPrefs()
   const roomsV2 = sidebarLayout === 'rooms-v2'
   const isDesktopViewport = useIsDesktopViewport()
@@ -163,7 +164,6 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   const handleSelectRemoteInboxSession = useCallback((environmentId: string, sessionId: string) => {
     environmentNavigationRef.current?.onSelectSession({ environmentId, sessionId })
   }, [environmentNavigationRef])
-  const showProjectsBody = !roomsV2 || roomsMode === 'projects'
   const inboxFallbackOrigins = useMemo<RoomsInboxOriginInput[]>(() => {
     const toOriginInput = (
       originId: string,
@@ -230,6 +230,11 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     saveView,
     deleteView,
   } = useProjectViews()
+  // Rooms shows the project list inside the Inbox. A project view replaces the Inbox with just its
+  // projects, because a view is a screen-share boundary and the Inbox spans every project.
+  const showProjectsBody = !roomsV2 || Boolean(activeView)
+  // Recent order only exists in Rooms, where its control lives; it turns off drag reordering.
+  const sortRecent = roomsV2 && sortPreference === 'recent'
   const viewFilteredTreeRows = useMemo(() => {
     if (!activeProjectKeys) return treeRows
     return treeRows.filter((row) => activeProjectKeys.has(builderSidebarOrderKey({
@@ -434,7 +439,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
   // before the user continues. With no available session, Settings is the safest
   // existing neutral surface exposed by the stable sidebar contract.
   useEffect(() => {
-    if (!activeView || (roomsV2 && roomsMode !== 'projects')) return
+    if (!activeView) return
     const currentSelectionIsVisible = Boolean(selectedAgentId) && viewNavigationRows.some((treeRow) => (
       treeRow.sessions.some((session) => (
         session.sessionAgent.agentId === selectedAgentId
@@ -457,7 +462,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     } else if (!isSettingsActive) {
       handleOpenSettings()
     }
-  }, [activeView, handleOpenSettings, handleSelectAgent, isArchiveActive, isSettingsActive, isStatsActive, roomsMode, roomsV2, selectedAgentId, viewNavigationRows])
+  }, [activeView, handleOpenSettings, handleSelectAgent, isArchiveActive, isSettingsActive, isStatsActive, selectedAgentId, viewNavigationRows])
 
   const handleOpenStats = useCallback(() => {
     onOpenStats?.()
@@ -795,7 +800,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     const registry = environmentContext?.registry
     return remoteOnlyProjectKeys
       .filter((key) => !isSearchActive || Boolean(registry?.logicalProjects.getSnapshot().get(key)?.title.toLowerCase().includes(term)))
-      .map((key) => (
+      .map((key) => ({ key, node: (
         <li key={`logical:${key}`}>
           <RemoteProjectGroup
             groupKey={key}
@@ -809,19 +814,35 @@ export const AgentSidebar = React.memo(function AgentSidebar({
             navigation={environmentNavigation}
           />
         </li>
-      ))
+      ) }))
   }, [
     activeView, collapsedProfileIds, environmentContext, environmentNavigation, getVisibleSessionLimit, isSearchActive,
     parsedSearch.term, remoteOnlyProjectKeys, roomsV2, showLessSessions, showMoreSessions, toggleProfileCollapsed,
   ])
 
-  // Inbox and Projects use the same reorder path. The two modes stay mutually
-  // exclusive inside one sidebar; desktop and mobile each keep their own tree.
+  // Recent order puts every project, on this machine or another, in one list by its latest session
+  // activity anywhere. It is a static list: dragging only sets the manual order.
+  const projectActivity = useProjectActivity(sortRecent)
+  const recentProjectRows = useMemo(() => {
+    if (!sortRecent) return null
+    const latestLocal = (row: MixedProjectRow) => row.treeRow.sessions.reduce((latest, session) => (
+      session.sessionAgent.updatedAt > latest ? session.sessionAgent.updatedAt : latest
+    ), projectActivity.get(`${row.ref.originId}/${row.ref.profileId}`) ?? '')
+    return [
+      ...mixedProjectRows.map((row) => ({
+        at: latestLocal(row),
+        node: <li key={builderSidebarOrderKey(row.ref)}>{mixedProjectContent(row)}</li>,
+      })),
+      ...remoteProjectRows.map(({ key, node }) => ({ at: projectActivity.get(key) ?? '', node })),
+    ].sort((a, b) => b.at.localeCompare(a.at)).map(({ node }) => node)
+  }, [mixedProjectContent, mixedProjectRows, projectActivity, remoteProjectRows, sortRecent])
+
+  // Desktop and mobile each keep their own tree.
   const hasProjectRows = mixedProjectRows.length > 0 || remoteProjectRows.length > 0
   const renderProjectTree = () => (
     <RoomsProjectsTree
-      rows={mixedProjectRows}
-      trailingRows={remoteProjectRows}
+      rows={recentProjectRows ? [] : mixedProjectRows}
+      trailingRows={recentProjectRows ?? remoteProjectRows.map(({ node }) => node)}
       roomsV2={roomsV2}
       activeView={Boolean(activeView)}
       isSearchActive={isSearchActive}
@@ -843,7 +864,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
     />
   )
   const projectTree = showProjectsBody ? renderProjectTree() : null
-  const roomsInboxProjectTree = roomsV2 ? renderProjectTree() : null
+  const roomsInboxProjectTree = roomsV2 && !activeView ? renderProjectTree() : null
 
   const sidebarContent = (
     <aside
@@ -932,11 +953,10 @@ export const AgentSidebar = React.memo(function AgentSidebar({
         }}
       >
 
-        {/* Rooms owns one mode-aware command row. Classic retains its established rows. */}
+        {/* Rooms keeps its search row inside the Inbox surface. Classic retains its established rows. */}
         {roomsV2 ? (
           <RoomsInboxLive
-            mode={roomsMode}
-            onModeChange={setRoomsMode}
+            showInbox={!activeView}
             selected={inboxSelected}
             searchQuery={deferredSearchQuery}
             hideCliSessions={hideCliSessions}
@@ -944,6 +964,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
             onSelectRemote={handleSelectRemoteInboxSession}
             onNewProject={onAddManager}
             projectTree={roomsInboxProjectTree}
+            projectsAction={<ProjectSortToggle value={sortPreference} onChange={setSortPreference} />}
             hasInlineProjectContent={hasProjectRows}
             mutedSessionIds={mutedAgentsState}
             fallbackOrigins={inboxFallbackOrigins}
@@ -976,7 +997,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
                 onSearchChange={setSearchQuery}
                 searchInputRef={searchInputRef}
                 roomsV2
-                commandAction={roomsMode === 'projects' ? (
+                commandAction={(
                   <ProjectViewSwitcher
                     options={projectViewOptions}
                     views={projectViews}
@@ -986,7 +1007,7 @@ export const AgentSidebar = React.memo(function AgentSidebar({
                     onDeleteView={deleteView}
                     compact
                   />
-                ) : undefined}
+                )}
               />
             )}
           />

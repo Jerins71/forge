@@ -7,7 +7,6 @@ import { isSideChatAgent, type ProfileTreeRow } from '@/lib/agent-hierarchy'
 import type { AgentDescriptor, ManagerProfile } from '@forge/protocol'
 import type { ManagerWsState } from '@/lib/ws-state'
 import { RoomsInbox } from './RoomsInbox'
-import { RoomsModeSwitch, type RoomsMode } from './RoomsModeSwitch'
 import { buildSessionContextMenuActions } from './utils'
 import type { SessionContextMenuActionSource } from './types'
 import {
@@ -139,8 +138,7 @@ function originInput(originId: string, value: InboxOriginSnapshot): RoomsInboxOr
 }
 
 export function RoomsInboxLive({
-  mode,
-  onModeChange,
+  showInbox,
   selected,
   searchQuery,
   hideCliSessions,
@@ -149,24 +147,27 @@ export function RoomsInboxLive({
   onNewProject,
   commandRow,
   projectTree,
+  projectsAction,
   hasInlineProjectContent = false,
   mutedSessionIds,
   fallbackOrigins = [],
   localTreeRows = [],
   sessionMenuActions,
 }: {
-  mode: RoomsMode
-  onModeChange: (mode: RoomsMode) => void
+  /** False inside a project view: only that view's projects are shown, below the command row. */
+  showInbox: boolean
   selected?: Pick<RoomsInboxIdentity, 'originId' | 'sessionAgentId'> | null
   searchQuery: string
   hideCliSessions: boolean
   onSelectLocal: (agentId: string) => void
   onSelectRemote?: (originId: string, agentId: string) => void
   onNewProject: () => void
-  /** Kept inside the live surface so the mode switch, one search input, and Inbox body stay ordered. */
+  /** Kept inside the live surface so the search input and Inbox body stay ordered. */
   commandRow?: React.ReactNode
-  /** Same Rooms v2 project subtree used in the Projects tab; never a shortcut list. */
+  /** The full project tree, shown in the Inbox's collapsible Projects section. */
   projectTree?: React.ReactNode
+  /** Controls in the Projects section header, such as its sort order. */
+  projectsAction?: React.ReactNode
   /** Whether the shared tree currently renders rows or remote status content. */
   hasInlineProjectContent?: boolean
   /** Local mute preference: hides Needs You rows and the Inbox badge for those rooms. */
@@ -196,16 +197,6 @@ export function RoomsInboxLive({
     mutedSessionIds,
     primaryOriginId,
   }), [hideCliSessions, mutedSessionIds, origins, primaryOriginId, searchQuery, selected])
-
-  // The Inbox badge is a global attention claim, so it must ignore the search
-  // filter. Filtering it would let an unrelated query report that nothing needs
-  // the user while eager global Needs You sessions still exist.
-  const needsYouTotal = useMemo(() => searchQuery.trim() ? selectRoomsInboxSections(origins, {
-    selected,
-    hideCliSessions,
-    mutedSessionIds,
-    primaryOriginId,
-  }).needsYou.length : sections.needsYou.length, [hideCliSessions, mutedSessionIds, origins, primaryOriginId, searchQuery, sections, selected])
 
   const handleSelectSession = (identity: RoomsInboxIdentity) => {
     if (identity.originId === primaryOriginId) {
@@ -275,19 +266,18 @@ export function RoomsInboxLive({
 
   return (
     <>
-      <RoomsModeSwitch mode={mode} needsYouCount={needsYouTotal} onChange={onModeChange} />
       {commandRow}
-      {mode === 'inbox' ? (
+      {showInbox ? (
         <RoomsInbox
           sections={sections}
           selected={selected}
           onSelectSession={handleSelectSession}
-          onShowProjects={() => onModeChange('projects')}
           onNewProject={onNewProject}
           onAcknowledgeNeedsYou={(session) => dismissNeedsYou([session])}
           onClearNeedsYou={dismissNeedsYou}
           dismissError={dismissError}
           projectTree={projectTree}
+          projectsAction={projectsAction}
           hasInlineProjectContent={hasInlineProjectContent}
           mutedSessionIds={mutedSessionIds}
           searchQuery={searchQuery}

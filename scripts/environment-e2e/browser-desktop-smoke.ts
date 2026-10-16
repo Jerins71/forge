@@ -137,7 +137,7 @@ try {
   step('wait for the app shell')
   const panel = page.locator('[data-browser-panel]')
   const composer = page.getByRole('combobox', { name: /^(Message |Send another message to )/ })
-  await expect(page.getByTestId('rooms-mode-switch').filter({ visible: true })).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByTestId('sidebar-new-chat').filter({ visible: true })).toBeVisible({ timeout: 60_000 })
   step('open session'); await page.goto(`${ui.url}/?agent=${seeded.sessionId}`)
   await expect(composer).toBeEnabled({ timeout: 60_000 })
 
