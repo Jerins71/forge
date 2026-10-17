@@ -136,7 +136,7 @@ await manager.hydrateArchivedLastUsed();
 await mirror.reconcileBeforeReady();
 const deps = { database, recovery: () => wireModule.recoveryProjection(manager),
   subscribeCommitted: core.eventSink.subscribe, withReadBarrier: <T>(fn: () => T) => core.eventSink.readBarrier(fn).value,
-  getDescriptor: () => identity.descriptor(), ensureDetailInitialized: mirror.ensureDetailInitialized,
+  getDescriptor: () => identity.descriptor(), ensureDetailInitialized: mirror.ensureDetailInitialized, readDetailWindow: mirror.readDetailWindow,
   readHistory: mirror.readHistory, readContent: mirror.readContent,
 };
 const shellStream = shellModule.createShellStream(deps);

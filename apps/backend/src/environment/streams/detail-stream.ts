@@ -25,7 +25,7 @@ export function createDetailStream(deps: StreamDependencies) {
 
   async function* detail(_principal: Principal, request: RpcInput<"session.subscribe">, signal: AbortSignal): AsyncGenerator<DetailStreamItem> {
     const input = ownedBySession(request);
-    const initialized = await deps.ensureDetailInitialized?.(input.sessionId);
+    const initialized = await deps.ensureDetailInitialized?.(input.sessionId, Boolean(input.cursor));
     if (signal.aborted) return;
     const queue = new StreamQueue<DetailStreamItem>();
     let unsubscribe: (() => void) | undefined;

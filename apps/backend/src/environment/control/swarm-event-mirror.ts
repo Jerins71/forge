@@ -40,7 +40,8 @@ export interface MirrorWireProjection {
 export interface SwarmEventMirror {
   attach(): void;
   reconcileBeforeReady(): Promise<void>;
-  ensureDetailInitialized(sessionId: string): Promise<{ historyCursor: string | null }>;
+  /** A resuming reader replays from its cursor, so an initialized session skips the history window. */
+  ensureDetailInitialized(sessionId: string, resuming?: boolean): Promise<{ historyCursor: string | null }>;
   /** Read the final canonical head and its cursor inside the detail snapshot barrier. */
   readDetailWindow(sessionId: string): DetailHistoryWindow;
   /** Settles once an acknowledged launch has its swarm session, or at once when none is pending. */
@@ -395,7 +396,9 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
     const snapshot = type === "plan.upsert" ? decodeEnvironmentValue(PlanSnapshotV2Schema, raw) : decodeEnvironmentValue(GoalSnapshotV2Schema, raw);
     if (!snapshot) throw new Error("Invalid typed detail snapshot");
     const prior = database.prepare("SELECT payload_json FROM events WHERE session_id=? AND event_type=? ORDER BY sequence DESC LIMIT 1").get(sessionId, type) as { payload_json: string } | undefined;
-    if (prior && JSON.stringify(JSON.parse(prior.payload_json).snapshot) === JSON.stringify(snapshot)) return;
+    // A goal snapshot is re-measured on every read; only a change other than the measurement time is news.
+    const unmeasured = (value: object) => JSON.stringify({ ...value, measuredAt: undefined });
+    if (prior && unmeasured(JSON.parse(prior.payload_json).snapshot) === unmeasured(snapshot)) return;
     eventSink.transaction(tx => eventSink.append(tx, { topic: "detail", sessionId, event: type === "plan.upsert"
       ? { type, snapshot: snapshot as import("@forge/protocol").SessionPlanSnapshot }
       : { type, snapshot: snapshot as import("@forge/protocol").SessionGoalSnapshot } }));
@@ -469,7 +472,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
       errors.clear();
     },
     launchMaterialized,
-    ensureDetailInitialized(sessionId) {
+    ensureDetailInitialized(sessionId, resuming = false) {
       const existing = initializing.get(sessionId); if (existing) return existing;
       const work = (async () => {
         await launchMaterialized(sessionId);
@@ -477,6 +480,7 @@ export function createSwarmEventMirror({ swarmManager, database, eventSink, wire
         if (swarmManager.getSessionPlanSnapshot) detailFeature(sessionId, "plan.upsert", await swarmManager.getSessionPlanSnapshot(sessionId));
         if (swarmManager.getSessionGoalSnapshot) detailFeature(sessionId, "goal.upsert", await swarmManager.getSessionGoalSnapshot(sessionId));
         if (checkpoint(`detail:${sessionId}`)) for (const actor of sources) tail(actor);
+        if (resuming && initialized.has(sessionId) && checkpoint(`detail:${sessionId}`)?.byte_offset === 1) return { historyCursor: null };
         const recent = historyWindow(sessionId, 20);
         await wireProjection.prepareArtifacts?.(sessionId, recent.rows.map(row => row.entry));
         if (!initialized.has(sessionId) || checkpoint(`detail:${sessionId}`)?.byte_offset !== 1) {
