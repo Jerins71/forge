@@ -184,11 +184,19 @@ export function RoomsInboxLive({
   })
   const dismissalAttemptRef = useRef(0)
   const [dismissError, setDismissError] = useState<string | null>(null)
-  const origins = useMemo<RoomsInboxOriginInput[]>(() => {
+  // Done hides an item at once, before its environment confirms; it returns if the dismissal fails.
+  // Occurrence IDs are never reused, so a confirmed ID can stay in the set.
+  const [dismissing, setDismissing] = useState<ReadonlySet<string>>(() => new Set())
+  const reported = useMemo<RoomsInboxOriginInput[]>(() => {
     const liveOrigins = originSnapshots.map(({ originId, value }) => originInput(originId, value))
     const liveOriginIds = new Set(liveOrigins.map((origin) => origin.originId))
     return [...liveOrigins, ...fallbackOrigins.filter((origin) => !liveOriginIds.has(origin.originId))]
   }, [fallbackOrigins, originSnapshots])
+  const origins = useMemo(() => dismissing.size
+    ? reported.map((origin) => origin.attentions?.some((attention) => dismissing.has(attention.attentionId))
+      ? { ...origin, attentions: origin.attentions.filter((attention) => !dismissing.has(attention.attentionId)) }
+      : origin)
+    : reported, [dismissing, reported])
   const primaryOriginId = useOptionalEnvironmentContext()?.primaryEnvironmentId
   const sections = useMemo(() => selectRoomsInboxSections(origins, {
     selected,
@@ -252,10 +260,16 @@ export function RoomsInboxLive({
       }
       return originBatches
     })
+    setDismissing((current) => new Set([...current, ...batches.flatMap((batch) => batch.attentionIds)]))
     void Promise.allSettled(batches.map(async ({ originId, attentionIds }) => {
       const store = originRegistry.getOrigin(originId)
-      if (!store) throw new Error(`Origin ${originId} is unavailable.`)
-      return store.getClient().dismissSessionAttention(attentionIds)
+      try {
+        if (!store) throw new Error(`Origin ${originId} is unavailable.`)
+        return await store.getClient().dismissSessionAttention(attentionIds)
+      } catch (error) {
+        setDismissing((current) => new Set([...current].filter((id) => !attentionIds.includes(id))))
+        throw error
+      }
     })).then((results) => {
       if (attempt !== dismissalAttemptRef.current) return
       if (results.some((result) => result.status === 'rejected')) {

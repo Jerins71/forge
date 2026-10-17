@@ -743,6 +743,47 @@ test('the session in view stays read, and stays in Needs you until Done', async 
   expect(renderErrors).toEqual([])
 })
 
+test('Done hides a Needs you item before its environment confirms, and brings it back if that fails', async ({ page }) => {
+  const { a } = fleet
+  // The first dismissal is held at the socket, so the environment still reports the item.
+  let held: string | undefined
+  let toPage: ((message: string) => void) | undefined
+  await page.routeWebSocket('**/api/v2/rpc', route => {
+    const server = route.connectToServer()
+    route.onMessage(message => {
+      const frame = JSON.parse(String(message))
+      // Each environment has its own socket; the failure is answered on the one that sent the request.
+      if (frame.type === 'request' && frame.method === 'session.attention.dismiss' && !held) { held = frame.requestId; toPage = reply => route.send(reply); return }
+      server.send(message)
+    })
+    server.onMessage(message => route.send(message))
+  })
+  await page.goto(`${fleet.uiUrl}/?agent=${encodeURIComponent(viewedSession())}`)
+  await expect(transcript(page)).toBeVisible()
+  const attention = async () => (await shellSession(a, viewedSession()))?.attentionOccurrence?.reason ?? null
+  await send(page, 'Needs you again')
+  await expect.poll(attention, { timeout: 30_000 }).toBe('work_settled')
+  const done = page.locator('[data-inbox-section="needs-you"]').getByRole('button', { name: new RegExp(`^Mark .* done .*\\(${viewedSession()}\\)$`) })
+  await expect(done).toHaveCount(1)
+  await done.locator('..').hover()
+  await done.click()
+  await expect(done).toHaveCount(0, { timeout: 1_000 })
+  await until(() => held, Boolean)
+  expect(await attention()).toBe('work_settled')
+  await shot(page, 'done-hidden-before-confirmation')
+  toPage!(JSON.stringify({ type: 'error', requestId: held, error: { code: 'INTERNAL', message: 'Simulated dismissal failure', retryable: false } }))
+  await expect(done).toHaveCount(1)
+  await expect(page.getByText('Some Needs You items could not be cleared. Try again.')).toBeVisible()
+  await shot(page, 'done-failure-restores-item')
+  await done.locator('..').hover()
+  await done.click()
+  await expect(done).toHaveCount(0, { timeout: 1_000 })
+  await expect.poll(attention, { timeout: 15_000 }).toBe(null)
+  await expect(done).toHaveCount(0)
+  assertions.optimisticDone = { hiddenBeforeConfirmation: true, restoredOnFailure: true, confirmed: true }
+  expect(renderErrors).toEqual([])
+})
+
 test('the sidebar keeps its dragged width, and Recent its collapsed state, across reloads', async ({ page }) => {
   const sidebarShots = join(repositoryRoot, '.internal/sidebar')
   await mkdir(sidebarShots, { recursive: true })
