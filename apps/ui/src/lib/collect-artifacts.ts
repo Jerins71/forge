@@ -71,7 +71,9 @@ function collectArtifactReferencesFromText(
   provenance: ArtifactProvenance,
   seen: Map<string, ArtifactReference>,
 ): void {
-  const codeRanges = findMarkdownCodeRanges(artifactText)
+  // Parsing finds code spans to skip; most texts have no candidate and are never parsed.
+  let parsedRanges: TextRange[] | undefined
+  const codeRanges = () => (parsedRanges ??= findMarkdownCodeRanges(artifactText))
 
   // Extract from [artifact:path] shortcodes
   for (const match of artifactText.matchAll(ARTIFACT_SHORTCODE_PATTERN)) {
@@ -182,7 +184,12 @@ interface MarkdownAstNode {
   }
 }
 
+// Reopening a conversation scans the same messages again; their code spans are kept by text.
+const codeRangesByText = new Map<string, TextRange[]>()
+
 function findMarkdownCodeRanges(text: string): TextRange[] {
+  const cached = codeRangesByText.get(text)
+  if (cached) return cached
   const ranges: TextRange[] = []
   const root = fromMarkdown(text) as MarkdownAstNode
 
@@ -200,6 +207,8 @@ function findMarkdownCodeRanges(text: string): TextRange[] {
   }
 
   visit(root)
+  if (codeRangesByText.size >= 2_000) codeRangesByText.delete(codeRangesByText.keys().next().value!)
+  codeRangesByText.set(text, ranges)
   return ranges
 }
 
@@ -211,9 +220,9 @@ function isEscapedMarkdownSyntax(text: string, start: number): boolean {
   return backslashCount % 2 === 1
 }
 
-function isMatchInCodeRange(match: RegExpMatchArray, ranges: TextRange[]): boolean {
+function isMatchInCodeRange(match: RegExpMatchArray, ranges: () => TextRange[]): boolean {
   const start = match.index ?? 0
-  return ranges.some((range) => start >= range.start && start < range.end)
+  return ranges().some((range) => start >= range.start && start < range.end)
 }
 
 function getArtifactCandidateTexts(message: ConversationEntry): string[] {

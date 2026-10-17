@@ -154,7 +154,21 @@ export function projectItems(
     .filter((i) => i.kind === 'worker_result'
       ? agentId === sessionId && isDeliveredWorkerResult(i)
       : (i.kind === 'user' || i.kind === 'assistant') && i.actorId === agentId && !(isInternalInput(i) && agentId === sessionId))
-    .map((i) => ({
+    .map((i) => {
+      // The detail store keeps an unchanged item's identity, so its message does too and its row
+      // does not render again when another item streams.
+      const cached = messageByItem.get(i)
+      if (cached?.agentId === agentId) return cached.message
+      const message = projectItem(i, agentId)
+      messageByItem.set(i, { agentId, message })
+      return message
+    })
+}
+
+const messageByItem = new WeakMap<DetailItem, { agentId: string; message: ConversationMessageEvent }>()
+
+function projectItem(i: DetailItem, agentId: string): ConversationMessageEvent {
+  return ({
       type: 'conversation_message',
       id: i.itemId,
       agentId,
@@ -178,7 +192,7 @@ export function projectItems(
       pinned: i.pinned ?? false,
       ...(i.commandId && !isInternalInput(i) ? { clientRequestId: i.commandId } : {}),
       ...(i.artifacts.length ? { attachments: i.artifacts.map(artifactAttachment) } : {}),
-    })) as ConversationMessageEvent[]
+    }) as ConversationMessageEvent
 }
 
 /**

@@ -1,6 +1,6 @@
 import { createElement, isValidElement, memo, useCallback, useMemo, useState, type ReactNode } from 'react'
 import { Check, ChevronRight, ClipboardCopy, Copy, FileCode2, FileText, FileType, WrapText, ZoomIn } from 'lucide-react'
-import ReactMarkdown, { defaultUrlTransform } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Options as MarkdownOptions } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { copyTextToClipboard } from '@/lib/clipboard'
 import { cn } from '@/lib/utils'
 import { highlightCode } from '@/lib/syntax-highlight'
+import { remarkCachedParse } from '@/lib/markdown-parse-cache'
 import '@/styles/syntax-highlight.css'
 import { MermaidBlock } from './message-list/MermaidBlock'
 import { ContentZoomDialog } from './ContentZoomDialog'
@@ -25,6 +26,8 @@ function urlTransform(url: string): string {
   if (EXTRA_ALLOWED_PROTOCOLS.test(url)) return url
   return defaultUrlTransform(url)
 }
+
+const REMARK_PLUGINS: NonNullable<MarkdownOptions['remarkPlugins']> = [remarkGfm, remarkCachedParse as NonNullable<MarkdownOptions['remarkPlugins']>[number]]
 
 interface MarkdownMessageProps {
   content: string
@@ -113,7 +116,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({
     <>
       <div className={cn('min-w-0 overflow-hidden', isDocument ? 'text-[15px] leading-[1.8]' : 'text-[14.5px] leading-[1.65] text-foreground/90')}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={REMARK_PLUGINS}
           urlTransform={urlTransform}
           components={{
             p({ children }) {

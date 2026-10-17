@@ -2,12 +2,16 @@
 import { cn } from '@/lib/utils'
 import type { MessageSourceContext } from '@forge/protocol'
 
+// toLocale*String builds a formatter per call; every row of a reopened transcript formats a time.
+let dateTimeFormat: Intl.DateTimeFormat | undefined
+let timeFormat: Intl.DateTimeFormat | undefined
+
 export function formatTimestamp(iso: string, options?: { includeDate?: boolean }): string {
   try {
     const date = new Date(iso)
     if (Number.isNaN(date.getTime())) return ''
     if (options?.includeDate) {
-      return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+      return (dateTimeFormat ??= new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })).format(date)
     }
 
     const now = new Date()
@@ -17,10 +21,7 @@ export function formatTimestamp(iso: string, options?: { includeDate?: boolean }
       date.getDate() === now.getDate()
     const isSameYear = date.getFullYear() === now.getFullYear()
 
-    const time = date.toLocaleTimeString([], {
-      hour: 'numeric',
-      minute: '2-digit',
-    })
+    const time = (timeFormat ??= new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' })).format(date)
 
     if (isToday) return time
 
