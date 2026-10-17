@@ -71,6 +71,8 @@ export interface EventSink {
   close(): void;
 }
 
+const JOURNAL_MAX_EVENTS = 100_000;
+const JOURNAL_MAX_BYTES = 268_435_456;
 const shellValidator = TypeCompiler.Compile(ShellEventSchema);
 const detailValidator = TypeCompiler.Compile(DetailEventSchema);
 export function createEventSink(database: Database, clock: () => number, random: () => string): EventSink {
@@ -89,22 +91,31 @@ export function createEventSink(database: Database, clock: () => number, random:
   let journalCount = totals.count;
   let journalBytes = totals.bytes;
   let nextPruneAt = 0;
-  const pruneJournal = (): { count: number; bytes: number } => {
+  // A journal over a cap is cut to 90% of it, so the next prune is thousands of commits away
+  // rather than on every commit at the cap. Each step reads only the rows it removes.
+  const pruneJournal = (over: { count: boolean; bytes: boolean } = { count: false, bytes: false }): { count: number; bytes: number } => {
     const cutoff = clock() - 7 * 86_400_000;
-    const expired = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events WHERE created_at < ?").get(cutoff) as {
-      sequence: number;
-    };
-    const countBoundary = database.prepare("SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1 OFFSET 99999").get() as
+    // Sequence order is commit order, so the first unexpired row bounds every expired one.
+    const firstKept = database.prepare("SELECT sequence FROM events WHERE created_at >= ? ORDER BY sequence LIMIT 1").get(cutoff) as
       { sequence: number } | undefined;
-    const byteBoundary = database
-      .prepare(
-        `SELECT MIN(sequence) AS sequence FROM (
+    const expired = firstKept
+      ? firstKept.sequence - 1
+      : (database.prepare("SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events").get() as { sequence: number }).sequence;
+    const countBoundary = over.count
+      ? database.prepare(`SELECT sequence FROM events ORDER BY sequence DESC LIMIT 1 OFFSET ${JOURNAL_MAX_EVENTS * 0.9 - 1}`).get() as
+        { sequence: number } | undefined
+      : undefined;
+    const byteBoundary = over.bytes
+      ? database
+        .prepare(
+          `SELECT MIN(sequence) AS sequence FROM (
       SELECT sequence, SUM(payload_bytes) OVER (ORDER BY sequence DESC) AS bytes FROM events
-    ) WHERE bytes <= 268435456`,
-      )
-      .get() as { sequence: number | null };
+    ) WHERE bytes <= ${Math.floor(JOURNAL_MAX_BYTES * 0.9)}`,
+        )
+        .get() as { sequence: number | null }
+      : { sequence: null };
     const prefix = Math.max(
-      expired.sequence,
+      expired,
       countBoundary ? countBoundary.sequence - 1 : 0,
       byteBoundary.sequence ? byteBoundary.sequence - 1 : 0,
     );
@@ -198,8 +209,9 @@ export function createEventSink(database: Database, clock: () => number, random:
             const value = write(tx);
             if (value && typeof value === "object" && "then" in value) throw new Error("Control transactions must be synchronous");
             const bytes = pending.reduce((sum, event) => sum + event.payloadBytes, 0);
-            if (pending.length && (journalCount + pending.length > 100_000 || journalBytes + bytes > 268435456 || clock() >= nextPruneAt)) {
-              pruned = pruneJournal();
+            const over = { count: journalCount + pending.length > JOURNAL_MAX_EVENTS, bytes: journalBytes + bytes > JOURNAL_MAX_BYTES };
+            if (pending.length && (over.count || over.bytes || clock() >= nextPruneAt)) {
+              pruned = pruneJournal(over);
             }
             return value;
           })
@@ -378,7 +390,7 @@ export function createEventSink(database: Database, clock: () => number, random:
     prune() {
       let totals!: { count: number; bytes: number };
       sink.transaction(() => {
-        totals = pruneJournal();
+        totals = pruneJournal({ count: journalCount > JOURNAL_MAX_EVENTS, bytes: journalBytes > JOURNAL_MAX_BYTES });
       });
       journalCount = totals.count;
       journalBytes = totals.bytes;
