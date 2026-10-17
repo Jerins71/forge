@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { createConnection } from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseEnv } from 'node:util'
 import { isStreamDeckSetupEnabled } from './stream-deck-setup.mjs'
 import { createRequire } from 'node:module'
 import {
@@ -22,6 +24,21 @@ const uiRequire = createRequire(path.join(uiDir, 'package.json'))
 const UI_PORT = 47_188
 const BACKEND_PORT = 47_287
 const UI_START_TIMEOUT_MS = 45_000
+
+/**
+ * FORGE_UI_BUILD=true (shell or repository-root .env) serves a production UI build instead of the Vite
+ * development server: React's development mode costs ~100 ms of main-thread work per navigation.
+ * UI changes then apply on the next start.
+ */
+export function isUiBuildEnabled(environment = process.env) {
+  let value = environment.FORGE_UI_BUILD
+  if (value === undefined) {
+    try {
+      value = parseEnv(readFileSync(path.join(repoRoot, '.env'), 'utf8')).FORGE_UI_BUILD
+    } catch {}
+  }
+  return ['1', 'true', 'yes', 'on'].includes(value?.trim().toLowerCase() ?? '')
+}
 
 function resolveViteCliPath() {
   const vitePackagePath = uiRequire.resolve('vite/package.json')
@@ -142,6 +159,7 @@ export function createElectronDevelopmentSetupCommands({
     nodeScript('Electron runtime verification', ['apps', 'electron', 'scripts', 'verify-electron-runtime.mjs']),
     nodeScript('Electron native preparation', ['apps', 'electron', 'scripts', 'prepare-dev-native.mjs']),
     nodeScript('Electron main-process build', ['apps', 'electron', 'esbuild.config.mjs']),
+    ...(isUiBuildEnabled(environment) ? [pnpmCommand('UI production build', ['--filter', '@forge/ui', 'build'])] : []),
   ]
 }
 
@@ -309,10 +327,13 @@ export async function runElectronDevelopmentWorkspace({
 
     if (interrupted) return await startupInterrupt
 
-    logger.log(`[dev:electron] Starting UI on http://127.0.0.1:${UI_PORT}...`)
-    const viteCliPath = resolveViteCliPath()
+    const uiBuild = isUiBuildEnabled(workspaceEnvironment)
+    logger.log(`[dev:electron] Starting ${uiBuild ? 'production UI build' : 'UI'} on http://127.0.0.1:${UI_PORT}...`)
     let uiSpawnError = null
-    uiChild = spawnProcess(process.execPath, [viteCliPath, 'dev', '--port', String(UI_PORT), '--strictPort'], {
+    const uiArgs = uiBuild
+      ? [path.join(repoRoot, 'scripts', 'serve-built-ui.mjs'), String(UI_PORT)]
+      : [resolveViteCliPath(), 'dev', '--port', String(UI_PORT), '--strictPort']
+    uiChild = spawnProcess(process.execPath, uiArgs, {
       cwd: uiDir,
       env: workspaceEnvironment,
       stdio: 'inherit',
