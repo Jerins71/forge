@@ -1005,7 +1005,8 @@ test('Needs You lists a remote session that was never opened, survives an offlin
 
   await needsYou.getByRole('button', { name: new RegExp(`^Mark .* on ${c.environmentId} \\(${c.sessionId}\\)$`) }).click()
   await expect(row).toHaveCount(0)
-  expect(await attention('attention-state')).toEqual([])
+  // Done hides the row before the environment confirms; the dismissal then lands there.
+  await expect.poll(() => attention('attention-state')).toEqual([])
   await expect(needsYou.getByRole('alert')).toHaveCount(0)
 
   // Dismissal is durable in the backend and browser cache, including after both restart.
@@ -1025,7 +1026,7 @@ test('Needs You lists a remote session that was never opened, survives an offlin
   await expect(row).toHaveCount(1)
   await row.locator('xpath=..').getByRole('button', { name: /^Mark / }).click()
   await expect(row).toHaveCount(0)
-  expect(await attention('attention-state')).toEqual([])
+  await expect.poll(() => attention('attention-state')).toEqual([])
   expect(renderErrors).toEqual([])
   assertions.needsYou = { environmentId: c.environmentId, sessionId: c.sessionId, neverMounted: true, restoredOffline: true, dismissalSurvivesRestart: true, dismissedOccurrences: [first.attentionId, second.attentionId] }
 })
